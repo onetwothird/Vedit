@@ -1,0 +1,14 @@
+{
+  "font": "Montserrat",
+  "caption_style": "pop",
+  "caption_color": "#FFFFFF",
+  "highlight": "#00E5FF",
+  "logo": {"path": "assets/logo.png", "position": "top-right", "scale": 0.12, "opacity": 0.85},
+  "intro": {"path": "assets/intro.mp4", "fade_out": 0.3},
+  "outro": "assets/outro.mp4",
+  "music": {"path": "assets/bgm.mp3", "volume": 0.12},
+  "color": {"contrast": 1.05, "saturation": 1.1},
+  "lut": "assets/my-look.cube",
+  "target_lufs": -14,
+  "replace": {"vedit": "vedit", "claude code": "Claude Code"}
+}
