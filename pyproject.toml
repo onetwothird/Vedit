@@ -1,0 +1,50 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "vedit-ai"
+version = "0.2.0"
+description = "AI video editor for creators: raw footage to finished videos, shorts, captions and voiced skits. Built for Claude Code, works as a standalone CLI."
+readme = "README.md"
+license = {text = "MIT"}
+authors = [{name = "Angelito P. Decatoria III"}]
+requires-python = ">=3.9"
+keywords = ["video-editing", "ffmpeg", "whisper", "captions", "shorts", "tiktok", "claude-code", "ai", "tts"]
+classifiers = [
+  "Programming Language :: Python :: 3",
+  "License :: OSI Approved :: MIT License",
+  "Operating System :: OS Independent",
+  "Topic :: Multimedia :: Video :: Non-Linear Editor",
+  "Environment :: Console",
+]
+dependencies = ["numpy", "pillow"]
+
+[project.optional-dependencies]
+transcribe = ["faster-whisper>=1.0"]
+voices = ["edge-tts>=7.0"]
+face = ["opencv-python"]
+all = ["faster-whisper>=1.0", "edge-tts>=7.0", "opencv-python"]
+dev = ["pytest>=7", "ruff>=0.5"]
+
+[project.scripts]
+vedit = "vedit.vedit:main"
+
+[project.urls]
+Homepage = "https://github.com/onetwothird/vedit"
+Issues = "https://github.com/onetwothird/vedit/issues"
+
+[tool.setuptools]
+packages = ["vedit"]
+package-dir = {vedit = "scripts"}
+
+[tool.ruff]
+line-length = 120
+target-version = "py39"
+
+[tool.ruff.lint]
+select = ["E", "F", "W"]
+ignore = ["E402", "E501"]  # ASS subtitle headers are long by nature
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
