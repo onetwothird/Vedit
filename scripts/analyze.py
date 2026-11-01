@@ -22,14 +22,19 @@ from common import ffprobe, need, run, save_json, ts, workdir_for  # noqa: E402
 
 
 def loudness(video: str) -> dict:
-    res = run(["ffmpeg", "-hide_banner", "-nostats", "-i", video, "-vn", "-af", "ebur128=framelog=quiet",
+    # loudnorm's measurement mode works on FFmpeg 4.x through 7.x (ebur128 options differ between versions)
+    res = run(["ffmpeg", "-hide_banner", "-nostats", "-i", video, "-vn", "-af", "loudnorm=print_format=json",
                "-f", "null", "-"], capture=True)
-    tail = res.stderr[res.stderr.rfind("Summary:"):]
     out = {}
-    for key, pat in [("integrated_lufs", r"I:\s+(-?[\d.]+) LUFS"), ("lra", r"LRA:\s+([\d.]+) LU")]:
-        m = re.search(pat, tail)
-        if m:
-            out[key] = float(m.group(1))
+    m = re.search(r"\{[^{}]*\"input_i\"[^{}]*\}", res.stderr)
+    if m:
+        import json
+        d = json.loads(m.group(0))
+        for key, src in (("integrated_lufs", "input_i"), ("lra", "input_lra"), ("true_peak_db", "input_tp")):
+            try:
+                out[key] = float(d[src])
+            except (KeyError, ValueError):
+                pass
     res = run(["ffmpeg", "-hide_banner", "-nostats", "-i", video, "-vn", "-af", "volumedetect", "-f", "null", "-"],
               capture=True)
     for key in ("mean_volume", "max_volume"):
