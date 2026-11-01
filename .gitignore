@@ -1,0 +1,16 @@
+__pycache__/
+*.pyc
+*.edit/
+*.build/
+.render_cache/
+*.mp4
+*.wav
+*.mp3
+!examples/**
+.pytest_cache/
+.ruff_cache/
+*.egg-info/
+build/
+dist/
+.venv/
+venv/
