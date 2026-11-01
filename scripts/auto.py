@@ -45,7 +45,7 @@ def process(video: Path, a) -> dict:
             cmd += ["--no-transcribe"]
         step(cmd)
     else:
-        print("[auto] using cached analysis (--reanalyze to redo)")
+        print("[auto] using cached analysis (--reanalyze to redo)", flush=True)
     aspect = a.aspect or p.get("aspect")
     edl, st = make_edl(wd, "main", None, max_gap=p["max_gap"], keep_fillers=p.get("keep_fillers", False),
                        punchin=p["punchin"], aspect=aspect, captions=a.captions or p["captions"], lufs=p["lufs"],
@@ -54,7 +54,7 @@ def process(video: Path, a) -> dict:
     ep = wd / f"edl.{a.preset}.json"
     save_json(edl, ep)
     print(f"[auto] {st['clips']} clips, {ts(st['original'])} -> ~{ts(st['kept'])} "
-          f"({100 * (1 - st['kept'] / max(st['original'], 1)):.0f}% cut)  edl: {ep}")
+          f"({100 * (1 - st['kept'] / max(st['original'], 1)):.0f}% cut)  edl: {ep}", flush=True)
     cmd = [str(HERE / "render.py"), str(ep)]
     if a.preview:
         cmd.append("--preview")
