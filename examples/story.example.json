@@ -1,0 +1,22 @@
+{
+  "title": "The Lost Wallet",
+  "output": {"path": "lost_wallet.mp4", "aspect": "9:16"},
+  "voices": {
+    "narrator": {"engine": "edge", "voice": "en-US-AndrewNeural", "color": "#FFD400"},
+    "maria": {"engine": "edge", "voice": "en-US-AvaNeural", "color": "#FF6FB5"},
+    "jose": {"engine": "edge", "voice": "en-US-BrianNeural", "color": "#5EC8FF"}
+  },
+  "music": {"path": "music/bgm.mp3", "volume": 0.12},
+  "captions": {"style": "pop"},
+  "scenes": [
+    {"image": "photos/street.jpg", "title": "Monday, 8:02 AM",
+     "lines": [
+       {"speaker": "narrator", "text": "Maria was already late for work."},
+       {"speaker": "maria", "text": "Jose, where is my wallet?", "focus": [0.3, 0.38], "shot": "close", "sfx": "sfx/whoosh.wav"},
+       {"speaker": "jose", "text": "Did you check your other bag?", "focus": [0.7, 0.38], "shot": "close"}
+     ], "hold_after": 0.4},
+    {"image": "photos/cafe.jpg", "transition": "fade", "motion": "left",
+     "lines": [{"speaker": "narrator", "text": "It was in her hand the whole time."}],
+     "texts": [{"text": "THE END", "at": 1.0, "duration": 1.5, "position": "center"}]}
+  ]
+}
