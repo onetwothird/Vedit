@@ -1,5 +1,16 @@
 # Changelog
 
+## Unreleased
+- Story mode: **continuous narration** (`defaults.narration: "continuous"`): whole script voiced in one take,
+  long TTS pauses tightened (`max_pause`), cut only between scenes on frame boundaries
+- Story mode: `say` pronunciation spelling per line; subtitles keep the real text, aligned word-for-word to the voice
+- Story mode: motion-graphics card animation (`animate`, new `scripts/animate_card.py`), `motion_strength`,
+  shared series settings via `extends`, TTS silence trimming in per-line mode
+- Captions: numeric `position`, `outline_color`, `outline`, `shadow`, `active_scale`; speaker color no longer hides the highlight
+- Bundled Poppins font (SIL OFL) in `fonts/`
+- Example series `juan_fact_a_day/`: Filipino fact Reels with card/cover generators and one folder per video
+- Tests: read script output as UTF-8 (fixes failures on Windows)
+
 ## 0.2.0
 - `vedit auto`: one command from raw video to finished video, with platform presets
   (youtube, shorts, tiktok, reels, square, podcast, tutorial, clean) and batch processing
