@@ -44,17 +44,30 @@
 | `title`, `texts[]` | on-screen text (`texts`: text, at, duration, position top/center/lower-third) |
 | `sfx[]` | `{path, at, volume, duration}` relative to scene start |
 | `fit` | `crop` / `blur` / `pad` (use blur for portrait photos in 16:9 or vice-versa) |
+| `animate` | `true` = motion-graphics animation of a flat card (needs `defaults.background`, the same card template without content) |
+| `motion_strength` | scale of the Ken Burns zoom (1.0 = 18%; 0.4 = gentle, keeps card edges) |
 
 ## Line
 | key | meaning |
 |---|---|
 | `speaker` | key in `voices` |
-| `text` | what is said. Punctuation drives delivery: `!`, `?`, `...`, commas |
+| `text` | what is said **and** shown in the subtitles. Punctuation drives delivery: `!`, `?`, `...`, commas |
+| `say` | optional pronunciation spelling for the voice, e.g. text `7,641` / say `seven thousand six hundred forty-one`. Subtitles keep showing `text`, timed to the matching spoken words |
 | `focus` | `[x, y]` 0–1 point on the photo (face of the speaker); read it from `vedit story grid` |
 | `shot` | `wide` 1.0×, `medium` 1.35×, `close` 1.8×, `extreme` 2.4× (slow push-in during the line) |
 | `pause_after` | seconds of silence after the line (default 0.25) |
 | `sfx` | path or `{path, at, volume}` played at the line start |
 | voice overrides | `voice`, `rate`, `pitch`, `volume` (edge), `style` (openai acting direction), `engine` |
+
+## Top-level extras
+| key | meaning |
+|---|---|
+| `extends` | path to a shared JSON (voices, captions, defaults…) merged under this story, e.g. `"../../channel.json"` for a series |
+| `defaults.narration` | `"continuous"` = voice the whole script in ONE take (natural flow), cut only between scenes on frame boundaries |
+| `defaults.max_pause` | continuous mode: longest silence kept between words (default 0.32 s; TTS engines leave ~0.9 s after sentences) |
+| `defaults.trim_silence`, `defaults.tail_keep` | per-line mode: trim the TTS padding around each line (default on, 0.2 s tail) |
+| `captions.position` | `bottom` / `lower` / `middle`, or a number = baseline distance from the bottom as a fraction of height |
+| `captions.outline_color`, `outline`, `shadow`, `active_scale` | caption look (active_scale 100 = the spoken word does not jump in size) |
 
 ## Voice engines
 | engine | cost | quality | notes |
