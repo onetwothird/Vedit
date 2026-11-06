@@ -1,0 +1,227 @@
+{
+ "extends": "../../channel.json",
+ "title": "Saan Galing ang Jeepney",
+ "output": {
+  "path": "003_jeepney.mp4",
+  "aspect": "9:16"
+ },
+ "scenes": [
+  {
+   "image": "cards/1.jpg",
+   "sfx": [
+    {
+     "path": "../../assets/sfx/ding.wav",
+     "at": 0,
+     "volume": 0.25
+    }
+   ],
+   "lines": [
+    {
+     "speaker": "narrator",
+     "text": "Alam mo ba kung saan talaga galing ang jeepney, ang Hari ng Kalsada?"
+    }
+   ]
+  },
+  {
+   "image": "cards/2.jpg",
+   "sfx": [
+    {
+     "path": "../../assets/sfx/whoosh.wav",
+     "at": 0,
+     "volume": 0.15
+    }
+   ],
+   "lines": [
+    {
+     "speaker": "narrator",
+     "text": "Pagkatapos ng World War II, napakaraming military jeep ang naiwan ng mga Amerikano sa Pilipinas.",
+     "say": "Pagkatapos ng World War Two, napakaraming military jeep ang naiwan ng mga Amerikano sa Pilipinas."
+    }
+   ]
+  },
+  {
+   "image": "cards/3.jpg",
+   "sfx": [
+    {
+     "path": "../../assets/sfx/whoosh.wav",
+     "at": 0,
+     "volume": 0.15
+    }
+   ],
+   "lines": [
+    {
+     "speaker": "narrator",
+     "text": "Hindi ito sinayang ng mga Pinoy. Pinahaba nila ang katawan, nilagyan ng bubong at upuan, at kinulayan, para gawing pampasaherong sasakyan."
+    }
+   ]
+  },
+  {
+   "image": "cards/05_pangalan.jpg",
+   "card": {
+    "badge": "SAAN GALING ANG PANGALAN?",
+    "headline": "*JEEP* + *JITNEY*",
+    "headline_size": 110,
+    "sub": "Jitney: murang pampasaherong sasakyan sa Amerika",
+    "art": "jeepney",
+    "art_scale": 0.9
+   },
+   "sfx": [
+    {
+     "path": "../../assets/sfx/whoosh.wav",
+     "at": 0,
+     "volume": 0.15
+    }
+   ],
+   "lines": [
+    {
+     "speaker": "narrator",
+     "text": "Kaya nga jeepney ang tawag dito: pinagsamang jeep at jitney, salitang Amerikano para sa murang pampasaherong sasakyan."
+    }
+   ]
+  },
+  {
+   "image": "cards/06_sarao.jpg",
+   "card": {
+    "badge": "AT ALAM MO RIN BA?",
+    "headline": "Si *Leonardo Sarao*",
+    "sub": "Dating kutsero na nagsimula sa 700 pisong inutang",
+    "art": "military_jeep",
+    "art_scale": 0.9
+   },
+   "sfx": [
+    {
+     "path": "../../assets/sfx/whoosh.wav",
+     "at": 0,
+     "volume": 0.15
+    }
+   ],
+   "lines": [
+    {
+     "speaker": "narrator",
+     "text": "At alam mo rin ba? Isang dating kutsero, si Leonardo Sarao, ang nagsimula ng Sarao Motors gamit ang pitong daang pisong inutang lang!",
+     "say": "At alam mo rin ba? Isang dating kutsero, si Leonardo Sarao, ang nagsimula ng Sarao Motors gamit ang pitong daang pisong inutang lang!"
+    }
+   ]
+  },
+  {
+   "image": "cards/07_sarao_motors.jpg",
+   "card": {
+    "badge": "SARAO MOTORS",
+    "headline": "Ang trademark: *kabayo* sa hood!",
+    "sub": "Dinoble pa ang kayang isakay na pasahero",
+    "art": "jeepney_long",
+    "art_scale": 0.85,
+    "mascot": true
+   },
+   "sfx": [
+    {
+     "path": "../../assets/sfx/whoosh.wav",
+     "at": 0,
+     "volume": 0.15
+    }
+   ],
+   "lines": [
+    {
+     "speaker": "narrator",
+     "text": "Pinahaba pa niya ang jeep para dumoble ang pasahero. At ang trademark nila? Ang kabayong palamuti sa harap!"
+    }
+   ]
+  },
+  {
+   "image": "cards/11_francisco.jpg",
+   "card": {
+    "badge": "ISA PANG ALAMAT",
+    "headline": "Si *Anastacio Francisco*",
+    "sub": "Dating pintor ng kalesa na nagtayo ng Francisco Motors",
+    "art": "jeepney_long",
+    "art_scale": 0.85
+   },
+   "sfx": [
+    {
+     "path": "../../assets/sfx/whoosh.wav",
+     "at": 0,
+     "volume": 0.15
+    }
+   ],
+   "lines": [
+    {
+     "speaker": "narrator",
+     "text": "Isa pa si Anastacio Francisco, dating pintor ng kalesa na nagtrabaho kay Sarao, bago itinayo ang sarili niyang Francisco Motors."
+    }
+   ]
+  },
+  {
+   "image": "cards/09_para_po.jpg",
+   "card": {
+    "badge": "ALAM MO RIN BA?",
+    "big": "\"PARA PO!\"",
+    "headline": "Galing sa Espanyol na *parar*",
+    "sub": "Ibig sabihin: huminto"
+   },
+   "sfx": [
+    {
+     "path": "../../assets/sfx/whoosh.wav",
+     "at": 0,
+     "volume": 0.15
+    }
+   ],
+   "lines": [
+    {
+     "speaker": "narrator",
+     "text": "Pero alam mo rin ba kung saan galing ang \"Para po\"? Sa salitang Espanyol na parar, na ang ibig sabihin ay huminto.",
+     "say": "Pero alam mo rin ba kung saan galing ang, para po? Sa salitang Espanyol na parar, na ang ibig sabihin ay huminto."
+    }
+   ]
+  },
+  {
+   "image": "cards/10_bayad_po.jpg",
+   "card": {
+    "badge": "KULTURANG JEEPNEY",
+    "big": "\"BAYAD PO!\"",
+    "headline": "Pasa-pasa ang *bayad*",
+    "sub": "Tiwala at bayanihan sa loob ng jeep",
+    "mascot": true
+   },
+   "sfx": [
+    {
+     "path": "../../assets/sfx/whoosh.wav",
+     "at": 0,
+     "volume": 0.15
+    }
+   ],
+   "lines": [
+    {
+     "speaker": "narrator",
+     "text": "At ang \"Bayad po\", ipinapasa mula sa likod hanggang sa driver. Ganyan katibay ang tiwala ng Pinoy!",
+     "say": "At ang, bayad po, ipinapasa mula sa likod hanggang sa driver. Ganyan katibay ang tiwala ng Pinoy!"
+    }
+   ]
+  },
+  {
+   "image": "cards/4.jpg",
+   "sfx": [
+    {
+     "path": "../../assets/sfx/whoosh.wav",
+     "at": 0,
+     "volume": 0.15
+    }
+   ],
+   "lines": [
+    {
+     "speaker": "narrator",
+     "text": "Simbolo talaga ng kulturang Pinoy! Ikaw, saan ka madalas sumakay ng jeep? I-comment mo, at i-follow ang Juan Fact a Day!",
+     "say": "Simbolo talaga ng kulturang Pinoy! Ikaw, saan ka madalas sumakay ng jeep? I-comment mo, at i-follow ang Hu-wan Fact a Day!"
+    }
+   ],
+   "hold_after": 0.8
+  }
+ ],
+ "thumbnail": {
+  "badge": "ALAM MO BA?",
+  "headline": "Saan talaga galing ang *JEEPNEY?*",
+  "headline_size": 118,
+  "sticker": "MULA SA WWII!",
+  "art": "jeepney",
+  "art_scale": 1.0
+ }
+}
