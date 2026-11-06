@@ -1,6 +1,6 @@
 <div align="center">
 
-# vedit
+# Vedit
 
 **An open-source AI video editor for content creators. Raw footage in, finished video out.**
 
