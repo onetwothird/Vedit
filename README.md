@@ -72,6 +72,9 @@ Every edit is stored as a plain JSON file (`edl.json`, an *edit decision list*).
 - Turn **photos plus a script** into a voiced, captioned video or skit
 - A different AI voice per character: free [edge-tts](https://github.com/rany2/edge-tts) voices, or OpenAI, ElevenLabs or Piper
 - Automatic close-ups on whoever is speaking, scene transitions, titles and sound effects
+- **Continuous narration**: the whole script is voiced in one take and long TTS pauses are tightened, so it flows like a real narrator
+- **Pronunciation fixes** (`say`): the voice reads a phonetic spelling while the subtitle shows the real one, kept word-for-word in sync
+- **Motion-graphics cards**: flat fact cards are split into elements that pop in, pulse on each line and snap out
 
 ## Requirements
 
@@ -216,6 +219,8 @@ vedit story build story.json    # render the final video
 
 Start from [`examples/story.example.json`](examples/story.example.json). The full schema is in [`references/story.md`](references/story.md).
 
+For a complete real-world series, see [`juan_fact_a_day/`](juan_fact_a_day/): 60-second Filipino "Alam mo ba?" fact Reels with shared channel settings, a card and cover generator, and one folder per video.
+
 ## Command reference
 
 | Command | Description |
@@ -273,9 +278,12 @@ vedit/
 │   ├── reframe.py         face-aware cropping
 │   ├── frames.py          contact sheets
 │   ├── tts.py             text-to-speech engines
-│   └── story.py           photo-and-script videos
+│   ├── story.py           photo-and-script videos
+│   └── animate_card.py    motion-graphics animation for fact cards
 ├── references/            edl.json and story.json schemas
 ├── examples/              sample brand kit and story
+├── juan_fact_a_day/       example series: Filipino fact Reels (see its README)
+├── fonts/                 Poppins (SIL Open Font License, see fonts/OFL.txt)
 ├── docs/                  usage guide
 └── tests/                 pytest suite (no models or network required)
 ```
@@ -318,4 +326,7 @@ Built on [FFmpeg](https://ffmpeg.org/), [libass](https://github.com/libass/libas
 
 ## License
 
-Released under the [MIT License](LICENSE). © 2026 Angelito P. Decatoria III
+The code is released under the [MIT License](LICENSE). © 2026 Angelito P. Decatoria III
+
+- Fonts in `fonts/` are Poppins, under the [SIL Open Font License 1.1](fonts/OFL.txt).
+- The **Juan Fact a Day** name, mascot, logo and artwork in `juan_fact_a_day/` are **not** covered by the MIT License; see [`juan_fact_a_day/LICENSE.md`](juan_fact_a_day/LICENSE.md).
