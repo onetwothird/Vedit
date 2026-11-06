@@ -11,9 +11,9 @@ def dur(p):
 
 
 def test_analyze_finds_silences(talking):
-    a = json.loads((talking / "raw.edit" / "analysis.main.json").read_text())
+    a = json.loads((talking / "raw.edit" / "analysis.main.json").read_text(encoding="utf-8"))
     assert len(a["silences"]) >= 4
-    assert (talking / "raw.edit" / "transcript.main.txt").read_text().count("{Um,}") == 1
+    assert (talking / "raw.edit" / "transcript.main.txt").read_text(encoding="utf-8").count("{Um,}") == 1
 
 
 def test_autocut_drops_filler_and_flubbed_take(talking):
