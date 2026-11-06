@@ -1,0 +1,6 @@
+# finished videos + caches stay local (download/upload them yourself)
+*.mp4
+*.srt
+story.build/
+# old files kept only for reference
+_old/
