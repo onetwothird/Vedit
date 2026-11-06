@@ -86,10 +86,15 @@ def build(tl: Timeline):
         size = cfg.get("size") or round((W * 0.085) if vertical else (H * 0.075))
         max_words, max_chars = cfg.get("max_words", 3), cfg.get("max_chars", 16 if vertical else 24)
     pos = cfg.get("position") or ("lower" if style != "clean" else "bottom")
-    margin_v = {"bottom": 0.07, "lower": 0.24 if vertical else 0.14, "middle": 0.45}.get(pos, 0.14)
+    # position: preset name, or a number = distance of the caption baseline from the bottom (fraction of height)
+    margin_v = pos if isinstance(pos, (int, float)) else \
+        {"bottom": 0.07, "lower": 0.24 if vertical else 0.14, "middle": 0.45}.get(pos, 0.14)
     font = cfg.get("font", "Arial")
     col, hi = hex_to_ass(cfg.get("color", "#FFFFFF")), hex_to_ass(cfg.get("highlight", "#FFD400"))
-    outline = max(2, round(size * (0.07 if style != "clean" else 0.06)))
+    outline = cfg.get("outline") or max(2, round(size * (0.07 if style != "clean" else 0.06)))
+    oc = hex_to_ass(cfg["outline_color"]) if cfg.get("outline_color") else "&H00000000"
+    shadow = cfg.get("shadow", 1 if style != "box" else 0)
+    act = int(cfg.get("active_scale", 108))  # % size of the word being spoken (100 = no jump)
     border_style, back = (3, "&H70000000") if style == "box" else (1, "&H80000000")
 
     head = f"""[Script Info]
@@ -101,7 +106,7 @@ ScaledBorderAndShadow: yes
 
 [V4+ Styles]
 Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding
-Style: Cap,{font},{size},{col},{hi},&H00000000,{back},-1,0,0,0,100,100,0,0,{border_style},{outline},{1 if style != 'box' else 0},2,{round(W * 0.06)},{round(W * 0.06)},{round(H * margin_v)},1
+Style: Cap,{font},{size},{col},{hi},{oc},{back},-1,0,0,0,100,100,0,0,{border_style},{outline},{shadow},2,{round(W * 0.06)},{round(W * 0.06)},{round(H * margin_v)},1
 Style: Title,{font},{round(size * 1.15)},&H00FFFFFF,&H00FFFFFF,&H00000000,&H90000000,-1,0,0,0,100,100,0,0,1,{outline},2,8,{round(W * 0.05)},{round(W * 0.05)},{round(H * 0.08)},1
 Style: Lower,{font},{round(size * 0.75)},&H00FFFFFF,&H00FFFFFF,&H00000000,&H90000000,-1,0,0,0,100,100,0,0,3,{round(outline * 1.5)},0,1,{round(W * 0.05)},{round(W * 0.05)},{round(H * 0.12)},1
 
@@ -135,7 +140,7 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
                 for j, t in enumerate(texts):
                     if j == k:
                         h = spk_colors.get(w.get("speaker"), hi)
-                        parts.append(r"{\c" + h + r"\fscx108\fscy108}" + t + r"{\c" + col + r"\fscx100\fscy100}")
+                        parts.append(r"{\c" + h + rf"\fscx{act}\fscy{act}}}" + t + r"{\c" + col + r"\fscx100\fscy100}")
                     else:
                         parts.append(t)
                 pop = r"{\fad(0,0)}" if k else r"{\fscx90\fscy90\t(0,80,\fscx100\fscy100)}"
