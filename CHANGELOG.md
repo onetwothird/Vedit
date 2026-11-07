@@ -1,6 +1,15 @@
 # Changelog
 
 ## Unreleased
+- **Fact Reels starter kit** (`templates/fact_reels/`, `vedit reels new|story|build|demo`): make fact Reels in the
+  Juan Fact a Day format with your own brand and raw footage; step-by-step guide in the kit's README
+- Story mode: raw **video scenes with cards**: the card is composited over the footage (dimmed while visible,
+  `card_hold` to hide it); clips shorter than the narration loop
+- Story mode: **talking clips** (`"video"` + `"keep_audio": true`, no `lines`): real voice kept, auto-transcribed
+  for word-by-word subtitles (`defaults.transcribe`); stories without any AI narration work
+- New shared modules `scripts/brand.py`, `scripts/cards.py`, `scripts/sfx.py` (moved from `juan_fact_a_day/tools`,
+  driven by `brand.json`); Juan Fact a Day output is pixel-identical
+- Transcription: pass samples to faster-whisper directly (fixes `metadata_errors` crash with some PyAV versions)
 - Story mode: **continuous narration** (`defaults.narration: "continuous"`): whole script voiced in one take,
   long TTS pauses tightened (`max_pause`), cut only between scenes on frame boundaries
 - Story mode: `say` pronunciation spelling per line; subtitles keep the real text, aligned word-for-word to the voice

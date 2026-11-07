@@ -27,7 +27,13 @@ story.json (paths relative to the file):
     {"image": "photos/cafe.jpg", "duration": 2.5, "texts": [{"text": "Meanwhile...", "at": 0.3}]}
   ]
 }
-Scene keys: image | video (+ "in"), motion in|out|left|right|up|down|none|auto, lines[], duration (no lines),
+Video scenes (raw footage, nothing on it; the tool adds everything):
+  {"video": "clips/beach.mp4", "in": 2, "lines": [...], "card": {...}}       silent B-roll + AI narration; the
+       clip loops if it is shorter than the narration; "card" pops in over the footage
+  {"video": "clips/me.mp4", "in": 0, "out": 9.5, "keep_audio": true, "card": {...}, "card_hold": 3.5}
+       talking clip: keeps the real voice, auto-transcribes it (faster-whisper) for word-by-word subtitles
+  defaults.transcribe = {"model": "small", "language": "en"}  (talking clips)
+Scene keys: image | video (+ "in", "out"), card, card_image, card_hold, keep_audio, motion in|out|left|right|up|down|none|auto, lines[], duration (no lines),
             hold_before, hold_after, transition cut|fade, title, texts[], sfx[]
 Defaults:   narration "continuous" (whole script voiced in ONE take, cut only between scenes -> natural flow),
             animate (true = motion-graphics card animation, needs background = card template w/o content),
@@ -226,6 +232,8 @@ def synth_continuous(story: dict, root: Path, build: Path):
     d = story.get("defaults") or {}
     fps = int((story.get("output") or {}).get("fps", 30))
     items = [(si, ln) for si, sc in enumerate(story["scenes"]) for ln in (sc.get("lines") or [])]
+    if not items:  # e.g. only talking clips: nothing to voice
+        return []
     spk = items[0][1].get("speaker", "narrator")
     cfg = dict(voices.get(spk) or {})
     spoken = [ln.get("say") or ln["text"] for _, ln in items]
@@ -339,7 +347,89 @@ def animate_scene(story: dict, sc: dict, root: Path, build: Path, si: int, parts
     out = build / f"anim{si}_{key}.mp4"
     if not out.exists():
         print(f"[story] animating scene {si} ({T:.1f}s)")
-        animate(card, bgp, out, T, beats[1:], t0)
+        animate(card, bgp, out, T, beats[1:], t0, keep_top=_header_bottom(root))
+    return out
+
+
+def _card_file(sc: dict, si: int, root: Path) -> Path | None:
+    """The drawn card for a video scene (written by cards.py), or None when the scene has no card."""
+    if not (sc.get("card") or sc.get("card_image")):
+        return None
+    from cards import card_path
+    p = root / card_path(sc, si)
+    if not p.exists():
+        die(f"scene {si}: card image not found: {p}  (run: vedit reels build, or python cards.py cards story.json)")
+    return p
+
+
+def _plate_for(story: dict, sc: dict, root: Path) -> Path:
+    """The empty card background the card was drawn on (to cut the card's text/art out of it)."""
+    bg = sc.get("background") or (story.get("defaults") or {}).get("background")
+    if bg:
+        return root / bg
+    import brand as brandkit
+    return brandkit.ensure_background(brandkit.load(brandkit.find_brand(root)))
+
+
+def _header_bottom(root: Path) -> int:
+    """Rows of the card that belong to the static brand header (from brand.json; 200 without one)."""
+    import brand as brandkit
+    bp = brandkit.find_brand(root)
+    return brandkit.load(bp)["header_bottom"] if bp else 200
+
+
+def transcribe_window(video: Path, start: float, dur: float, build: Path, cfg: dict) -> list[dict]:
+    """Word timings (0 = `start`) of the speech in video[start:start+dur]; cached."""
+    import hashlib
+    key = hashlib.md5(json.dumps([str(video), video.stat().st_mtime, round(start, 3), round(dur, 3),
+                                  cfg.get("model", "small"), cfg.get("language")]).encode()).hexdigest()[:10]
+    cache = build / f"talk_{video.stem}_{key}.json"
+    if cache.exists():
+        return load_json(cache)["words"]
+    from transcribe import build as tbuild
+    from transcribe import transcribe_words
+    wav = build / f"talk_{key}.wav"
+    run(["ffmpeg", "-y", "-v", "error", "-ss", f"{start:.3f}", "-t", f"{dur:.3f}", "-i", str(video), "-vn",
+         "-ac", "1", "-ar", "16000", "-c:a", "pcm_s16le", str(wav)])
+    print(f"[story] transcribing {video.name} ({dur:.1f}s)")
+    words, lang = transcribe_words(str(wav), cfg.get("model", "small"), cfg.get("language"), False)
+    wav.unlink(missing_ok=True)
+    data = tbuild(str(video), words, lang, "talk", dur)
+    save_json(data, cache)
+    return data["words"]
+
+
+def prepare_video(story, sc, si, root, build, video: Path, vin: float, T: float, beats, card) -> Path:
+    """Scene-length clip made from raw footage: looped if short, card composited on top, own audio kept
+    for talking clips. Cached by content + timing."""
+    import hashlib
+    hold = sc.get("card_hold", 3.5 if sc.get("keep_audio") else None)
+    plate = _plate_for(story, sc, root) if card else None
+    stamp = [str(video), video.stat().st_mtime, round(vin, 3), round(T, 3), bool(sc.get("keep_audio")), hold,
+             _header_bottom(root),
+             [round(b, 3) for b in beats]]
+    if card:
+        stamp += [str(card), card.stat().st_mtime, str(plate), plate.stat().st_mtime]
+    key = hashlib.md5(json.dumps(stamp).encode()).hexdigest()[:10]
+    out = build / f"scene{si}_{key}.mp4"
+    if out.exists():
+        return out
+    silent = build / f"scene{si}_{key}_v.mp4"
+    if card:
+        from animate_card import render as animate
+        print(f"[story] card over video, scene {si} ({T:.1f}s)")
+        animate(card, plate, silent, T, beats[1:], video=video, video_in=vin, card_hold=hold,
+                fps=int((story.get("output") or {}).get("fps", 30)), keep_top=_header_bottom(root))
+    else:
+        run(["ffmpeg", "-y", "-v", "error", "-stream_loop", "-1", "-ss", f"{vin:.3f}", "-i", str(video),
+             "-t", f"{T:.3f}", "-an", "-c:v", "libx264", "-preset", "veryfast", "-crf", "17", "-pix_fmt", "yuv420p",
+             str(silent)])
+    if sc.get("keep_audio"):
+        run(["ffmpeg", "-y", "-v", "error", "-i", str(silent), "-ss", f"{vin:.3f}", "-t", f"{T:.3f}", "-i", str(video),
+             "-map", "0:v", "-map", "1:a:0?", "-c:v", "copy", "-c:a", "aac", "-b:a", "192k", str(out)])
+        silent.unlink(missing_ok=True)
+    else:
+        silent.replace(out)
     return out
 
 
@@ -360,7 +450,10 @@ def build_edl(story: dict, root: Path, build: Path) -> dict:
             vin = 0.0
         elif sc.get("video"):
             alias = f"vid{si}"
-            sources[alias] = str((root / sc["video"]).resolve())
+            vp = root / sc["video"]
+            if not vp.exists():
+                die(f"scene {si}: video not found: {vp}")
+            sources[alias] = str(vp.resolve())
             vin = float(sc.get("in", 0))
         else:
             die(f"scene {si}: needs 'image' or 'video'")
@@ -372,13 +465,41 @@ def build_edl(story: dict, root: Path, build: Path) -> dict:
         for li, ln in enumerate(lines):
             parts.append(("line", li, ln["_dur"] + float(ln.get("pause_after", gap))))
         if not lines:
-            parts.append(("beat", None, float(sc.get("duration", 3.0))))
+            if sc.get("video") and "duration" not in sc:  # talking / B-roll clip: its own length
+                from common import ffprobe
+                end = float(sc["out"]) if "out" in sc else ffprobe(str(root / sc["video"]))["duration"]
+                if end - vin <= 0.05:
+                    die(f"scene {si}: 'out'/clip end ({end}) must be after 'in' ({vin})")
+                parts.append(("beat", None, round(end - vin, 3)))
+            else:
+                parts.append(("beat", None, float(sc.get("duration", 3.0))))
         if sc.get("hold_after"):
             parts.append(("beat", None, float(sc["hold_after"])))
         T = sum(p[2] for p in parts)
         if alias.startswith("vid") and sc.get("image"):
             sources[alias] = str(animate_scene(story, sc, root, build, si, parts, T, scene_t0).resolve())
             sc = {**sc, "motion": "none"}
+        elif sc.get("video"):
+            vp = root / sc["video"]
+            card = _card_file(sc, si, root)
+            from common import ffprobe
+            short = not sc.get("keep_audio") and ffprobe(str(vp))["duration"] - vin < T - 0.05
+            beats, tb = [], 0.0
+            for kind, _li, d in parts:
+                if kind == "line":
+                    beats.append(round(tb, 3))
+                tb += d
+            beats = sc.get("_beats") or beats
+            words = transcribe_window(vp, vin, T, build, defaults.get("transcribe") or {}) \
+                if sc.get("keep_audio") and not lines else None
+            if card or short:
+                vp, vin = prepare_video(story, sc, si, root, build, vp, vin, T, beats, card), 0.0
+            sources[alias] = str(vp.resolve())
+            if words is not None:  # captions come from the clip's own speech
+                tp = build / f"transcript.{alias}.json"
+                save_json({"words": [{**w, "start": round(w["start"] + vin, 3), "end": round(w["end"] + vin, 3)}
+                                     for w in words]}, tp)
+                sources[alias] = {"path": str(vp.resolve()), "transcript": str(tp)}
         scene_t0 += T
         motion = sc.get("motion", defaults.get("motion", "auto"))
         if motion == "auto":

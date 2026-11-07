@@ -23,6 +23,7 @@ Run `vedit doctor` once per machine. If something required is missing, install i
 | A long video and wants Shorts/Reels/TikToks | **A**, then **B. Shorts** |
 | Podcast / interview with 2+ cameras or mics | **C. Multicam**, then A |
 | Photos (or clips) + an idea for a skit/story/explainer and wants voices | **D. Story mode** |
+| A fact-Reel channel (folder with `brand.json` + `stories/`), or wants Reels like Juan Fact a Day from their own photos/clips | **E. Fact Reels kit** |
 
 Ask at most one or two questions if critical info is missing (target platform/aspect, tone). Otherwise make good choices and tell the user what you chose.
 
@@ -67,6 +68,19 @@ After analyzing, read the whole transcript and pick 3–5 **self-contained** mom
 5. `vedit story build story.json --preview`, then check frames, then run `vedit story build story.json`.
 
 Voices: `edge` is free and natural, with no API key needed. Pick voices with `vedit tts --list-voices --lang en` (Filipino: `--lang fil`). Use `openai` (acting directions via `"style"`) or `elevenlabs` only when the user has a key and asks for premium voices. Never invent a real person's voice or impersonate real people.
+
+---
+
+## E. Fact Reels kit (raw photos/clips -> branded fact Reels)
+
+Guide: `templates/fact_reels/README.md`. New channel: `vedit reels new DIR`; new video: `vedit reels story DIR NAME`.
+1. Look at the user's raw files (`vedit frames clip.mp4` for clips) and pick scene types: `image` + `card` with
+   narration, `video` + `lines` (B-roll, narrated, muted), or `video` + `keep_audio: true` with no `lines` (the user
+   talking: real voice, auto-captions). Choose `in`/`out` from the frames/transcript.
+2. Write `story.json`: hook → fact → "And did you know?" → fact → ... → comment/share/follow, ~185 words ≈ 60 s,
+   one flowing narration. Use `say` for numbers, years and names the voice may misread. Card text: `*stars*` = accent.
+3. `vedit reels build STORY_DIR --only cards` and **Read** the cards and `thumbnail.jpg`. Fix text that overflows.
+4. `vedit reels build STORY_DIR --preview`, check frames, then build at full quality. Verify every fact; put sources in `caption.txt`.
 
 ---
 

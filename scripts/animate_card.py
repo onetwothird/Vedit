@@ -9,7 +9,11 @@ between scenes look like one continuous piece.
 
   python animate_card.py CARD BG OUT.mp4 --duration 6.2 [--beats 0,2.1,4.0] [--t0 0] [--fps 30]
 
-Used automatically by story.py for scenes with "animate": true.
+  python animate_card.py CARD BG OUT.mp4 --duration 6 --video raw.mp4 [--video-in 3] [--card-hold 4]
+      -> the card's text/art pops in OVER the video footage (darkened while the card is up), then snaps out
+         after --card-hold seconds so the footage plays clean. Video shorter than --duration loops.
+
+Used automatically by story.py for scenes with "animate": true, and for video scenes that have a "card".
 """
 from __future__ import annotations
 
@@ -120,14 +124,43 @@ def bg_frame(bg: np.ndarray, tg: float, punch: float, center=(540, 565)) -> np.n
     return np.asarray(Image.fromarray(bg).resize((round(W * z), round(H * z))))[:H, :W].copy()
 
 
+class VideoFrames:
+    """Frames of a video, scaled+cropped to W x H, streamed from ffmpeg (loops when the clip is short)."""
+
+    def __init__(self, path, W: int, H: int, fps: int, start: float, duration: float, ffmpeg: str = "ffmpeg"):
+        self.W, self.H, self.last = W, H, None
+        vf = f"scale={W}:{H}:force_original_aspect_ratio=increase,crop={W}:{H},fps={fps},format=rgb24"
+        cmd = [ffmpeg, "-v", "error", "-stream_loop", "-1", "-ss", f"{start:.3f}", "-i", str(path),
+               "-t", f"{duration + 1:.3f}", "-vf", vf, "-an", "-f", "rawvideo", "-pix_fmt", "rgb24", "-"]
+        self.proc = subprocess.Popen(cmd, stdout=subprocess.PIPE)
+
+    def next(self) -> np.ndarray:
+        n = self.W * self.H * 3
+        buf = self.proc.stdout.read(n)
+        if len(buf) == n:
+            self.last = np.frombuffer(buf, np.uint8).reshape(self.H, self.W, 3).copy()
+        elif self.last is None:
+            raise RuntimeError("could not read frames from the background video")
+        return self.last.copy()
+
+    def close(self):
+        self.proc.stdout.close()
+        self.proc.kill()
+        self.proc.wait()
+
+
 def render(card_path, bg_path, out, duration: float, beats=(), t0: float = 0.0, fps: int = 30,
-           stagger: float = 0.13, outro: float = 0.16, crf: int = 17, ffmpeg: str = "ffmpeg"):
+           stagger: float = 0.13, outro: float = 0.16, crf: int = 17, ffmpeg: str = "ffmpeg",
+           video=None, video_in: float = 0.0, card_hold: float | None = None, dim: float = 0.45,
+           keep_top: int = 200):
+    """video: footage to play behind the card instead of the static background (bg_path is then only used to
+    find the card's elements). card_hold: seconds the card stays up (default: the whole clip)."""
     card = np.asarray(Image.open(card_path).convert("RGB"))
     bg = np.asarray(Image.open(bg_path).convert("RGB"))
     if bg.shape != card.shape:
         bg = np.asarray(Image.fromarray(bg).resize((card.shape[1], card.shape[0]), Image.BICUBIC))
     H, W = card.shape[:2]
-    els = extract_elements(card, bg)
+    els = extract_elements(card, bg, keep_top=keep_top)
     beats = sorted(b for b in beats if 0.15 < b < duration - 0.3)
     order = 0
     for e in els:  # entrance times: badge -> headline -> art (staggered); mascot peeks in a bit later
@@ -137,15 +170,23 @@ def render(card_path, bg_path, out, duration: float, beats=(), t0: float = 0.0, 
             e["t_in"] = 0.04 + stagger * order
             order += 1
     n = max(1, round(duration * fps))
+    hide = min(duration, card_hold) if card_hold else duration  # when the card has fully snapped out
+    frames = VideoFrames(video, W, H, fps, video_in, duration, ffmpeg) if video else None
     cmd = [ffmpeg, "-y", "-v", "error", "-f", "rawvideo", "-pix_fmt", "rgb24", "-s", f"{W}x{H}", "-r", str(fps),
            "-i", "-", "-c:v", "libx264", "-preset", "medium", "-crf", str(crf), "-pix_fmt", "yuv420p",
            "-movflags", "+faststart", str(out)]
     proc = subprocess.Popen(cmd, stdin=subprocess.PIPE)
     for f in range(n):
         t = f / fps
-        punch = 0.035 * (1 - ease_out_cubic(t / 0.35))
-        frame = bg_frame(bg, t0 + t, punch)
-        out_p = ease_in_cubic((t - (duration - outro)) / outro) if outro else 0.0
+        out_p = ease_in_cubic((t - (hide - outro)) / outro) if outro else 0.0
+        if frames is not None:  # footage, darkened while the card is up so the text stays readable
+            frame = frames.next()
+            vis = min(1.0, t / 0.25) * (1 - out_p) if t < hide else 0.0
+            if vis > 0 and els:
+                frame = (frame.astype(np.float32) * (1 - dim * vis)).astype(np.uint8)
+        else:
+            punch = 0.035 * (1 - ease_out_cubic(t / 0.35))
+            frame = bg_frame(bg, t0 + t, punch)
         for i, e in enumerate(els):
             p = (t - e["t_in"]) / 0.42
             if p <= 0:
@@ -169,7 +210,7 @@ def render(card_path, bg_path, out, duration: float, beats=(), t0: float = 0.0, 
                         s *= 1 + (0.055 if e["kind"] == "headline" else 0.04) * math.sin(math.pi * u)
             s *= 1 + 0.08 * out_p
             alpha = rot_alpha * (1 - out_p)
-            if alpha <= 0.01:
+            if alpha <= 0.01 or t >= hide:
                 continue
             w, h = max(1, round(e["w"] * s)), max(1, round(e["h"] * s))
             img = e["rgba"] if (w, h) == (e["w"], e["h"]) else _resize(e["rgba"], w, h)
@@ -177,6 +218,8 @@ def render(card_path, bg_path, out, duration: float, beats=(), t0: float = 0.0, 
             blend(frame, img, round(cx - w / 2), round(cy - h / 2), alpha)
         proc.stdin.write(frame.tobytes())
     proc.stdin.close()
+    if frames is not None:
+        frames.close()
     if proc.wait() != 0:
         raise RuntimeError(f"ffmpeg failed while animating {card_path}")
     return [{k: e[k] for k in ("kind", "x", "y", "w", "h", "t_in")} for e in els]
@@ -191,9 +234,13 @@ def main():
     ap.add_argument("--beats", default="")
     ap.add_argument("--t0", type=float, default=0.0)
     ap.add_argument("--fps", type=int, default=30)
+    ap.add_argument("--video", default=None, help="footage to play behind the card")
+    ap.add_argument("--video-in", type=float, default=0.0)
+    ap.add_argument("--card-hold", type=float, default=None)
     a = ap.parse_args()
     beats = [float(b) for b in a.beats.split(",") if b.strip()]
-    for e in render(a.card, a.bg, a.out, a.duration, beats, a.t0, a.fps):
+    for e in render(a.card, a.bg, a.out, a.duration, beats, a.t0, a.fps, video=a.video, video_in=a.video_in,
+                    card_hold=a.card_hold):
         print(e)
 
 

@@ -46,6 +46,11 @@
 | `fit` | `crop` / `blur` / `pad` (use blur for portrait photos in 16:9 or vice-versa) |
 | `animate` | `true` = motion-graphics animation of a flat card (needs `defaults.background`, the same card template without content) |
 | `motion_strength` | scale of the Ken Burns zoom (1.0 = 18%; 0.4 = gentle, keeps card edges) |
+| `out` | video scenes: where to stop in the clip (default: the clip's end, or the narration length) |
+| `card` | fact card (see `scripts/cards.py`). On an image scene it is drawn into `image`; on a video scene into `card_image` and composited over the footage |
+| `card_image` | video scenes: where the card is drawn (default `cards/sceneNN.jpg`) |
+| `card_hold` | video scenes: seconds the card stays over the footage (default: whole scene; 3.5 for talking clips) |
+| `keep_audio` | video scenes: keep the clip's own sound. With no `lines` it is a **talking clip**: its speech is transcribed (`defaults.transcribe` = `{model, language}`) and captioned word by word |
 
 ## Line
 | key | meaning |

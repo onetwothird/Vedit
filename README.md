@@ -13,6 +13,7 @@
 [Features](#features) ·
 [Installation](#installation) ·
 [Quick start](#quick-start) ·
+[Fact Reels kit](#make-fact-reels-from-your-own-footage) ·
 [Commands](#command-reference) ·
 [How it works](#how-it-works) ·
 [Contributing](#contributing)
@@ -75,6 +76,14 @@ Every edit is stored as a plain JSON file (`edl.json`, an *edit decision list*).
 - **Continuous narration**: the whole script is voiced in one take and long TTS pauses are tightened, so it flows like a real narrator
 - **Pronunciation fixes** (`say`): the voice reads a phonetic spelling while the subtitle shows the real one, kept word-for-word in sync
 - **Motion-graphics cards**: flat fact cards are split into elements that pop in, pulse on each line and snap out
+
+### Fact Reels kit
+- **Make fact Reels like [Juan Fact a Day](juan_fact_a_day/) from your own raw photos and clips.** You bring
+  plain footage and the tool adds the animated cards, narration, word-by-word subtitles, sound effects and music
+- Three scene types: card/photo + AI narration, raw B-roll + AI narration, and **you talking on camera**
+  (your real voice, auto-transcribed into subtitles)
+- Your own name and colors from one `brand.json`; a card background is generated for you
+- [Step-by-step guide](templates/fact_reels/README.md)
 
 ## Requirements
 
@@ -221,6 +230,29 @@ Start from [`examples/story.example.json`](examples/story.example.json). The ful
 
 For a complete real-world series, see [`juan_fact_a_day/`](juan_fact_a_day/): 60-second Filipino "Alam mo ba?" fact Reels with shared channel settings, a card and cover generator, and one folder per video.
 
+## Make fact Reels from your own footage
+
+The [Fact Reels starter kit](templates/fact_reels/) packages the Juan Fact a Day format so anyone can make the
+same kind of video with their own brand. You supply raw photos and clips with nothing on them, and write one
+`story.json` per video. The tool does all the editing.
+
+```bash
+vedit reels new my_channel                  # copy the kit
+vedit reels build my_channel                # builds the example video (makes its own sample footage)
+vedit reels story my_channel 002_my_topic   # start your own video: put files in photos/ and clips/
+vedit reels build my_channel/stories/002_my_topic
+```
+
+Each scene in `story.json` is one of:
+
+| Scene | You provide | The tool adds |
+|---|---|---|
+| `"image"` + `"card"` | text for the card (optionally your photo) | animated card, AI narration, subtitles, sfx |
+| `"video"` + `"lines"` | a raw clip (sound not needed) | AI narration over it, card over the footage, subtitles; short clips loop |
+| `"video"` + `"keep_audio": true` | a raw clip of you talking | your real voice, auto-transcribed word-by-word subtitles, card for the first seconds |
+
+**Read the [step-by-step guide](templates/fact_reels/README.md)** for installation, branding, every option and troubleshooting.
+
 ## Command reference
 
 | Command | Description |
@@ -237,6 +269,7 @@ For a complete real-world series, see [`juan_fact_a_day/`](juan_fact_a_day/): 60
 | `vedit reframe VIDEO` | Subject position for vertical crops |
 | `vedit tts "TEXT"` | Text-to-speech with word timings |
 | `vedit story grid\|voices\|build` | Photo-and-script video creation |
+| `vedit reels new\|story\|build\|demo` | Fact Reels kit: your photos and clips → branded fact Reels |
 
 Run `vedit <command> -h` for all options.
 
@@ -279,9 +312,14 @@ vedit/
 │   ├── frames.py          contact sheets
 │   ├── tts.py             text-to-speech engines
 │   ├── story.py           photo-and-script videos
-│   └── animate_card.py    motion-graphics animation for fact cards
+│   ├── animate_card.py    motion-graphics animation for fact cards (over images or video)
+│   ├── reels.py           Fact Reels kit: new / story / build / demo
+│   ├── cards.py           fact cards + thumbnails from brand.json
+│   ├── brand.py           brand.json loader + generated card background
+│   └── sfx.py             royalty-free whoosh / ding / pop generator
 ├── references/            edl.json and story.json schemas
 ├── examples/              sample brand kit and story
+├── templates/fact_reels/  starter kit to make fact Reels with your own brand and footage
 ├── juan_fact_a_day/       example series: Filipino fact Reels (see its README)
 ├── fonts/                 Poppins (SIL Open Font License, see fonts/OFL.txt)
 ├── docs/                  usage guide
