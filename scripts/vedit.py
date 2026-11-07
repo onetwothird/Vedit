@@ -13,6 +13,7 @@
   vedit reframe VIDEO --start --end    find subject x-position for vertical crops
   vedit tts "text" [opts]              text-to-speech with word timings
   vedit story grid|voices|build STORY  photo + script -> voiced, captioned skit
+  vedit reels new|story|build|demo   Fact Reels kit: your photos/clips -> branded fact Reels
 Run `vedit <command> -h` for options.
 """
 from __future__ import annotations
@@ -30,6 +31,7 @@ CMDS = {
     "auto": "auto.py", "thumbs": "thumbs.py", "analyze": "analyze.py", "autocut": "autocut.py",
     "render": "render.py", "frames": "frames.py", "captions": "captions.py", "multicam": "multicam.py",
     "reframe": "reframe.py", "tts": "tts.py", "story": "story.py", "transcribe": "transcribe.py",
+    "reels": "reels.py",
 }
 
 

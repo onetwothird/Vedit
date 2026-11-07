@@ -6,6 +6,7 @@
 juan_fact_a_day/
 ├── BUILD.bat                  ← double-click: builds every story (drag a story folder onto it = just that one)
 ├── channel.json               ← shared look & voice: narrator voice, subtitle style, pacing, animation
+├── brand.json                 ← card colors, background, art + mascot paths (read by the shared ../scripts/cards.py)
 ├── POST_KIT.md                ← page setup + posting tips
 ├── brand/                     ← profile/cover/mascot + card_background.png (the empty card template)
 ├── assets/
@@ -56,6 +57,10 @@ A scene without `card` uses its image as-is (any 1080×1920 picture works).
 - The voice is Microsoft Edge's free Filipino voice (`fil-PH-AngeloNeural`), so building needs internet.
 
 Double-check every fact before posting. Sources go in `caption.txt`.
+
+## Make your own channel like this
+Want the same format with your own name, colors and footage (raw videos too, including you talking on camera)?
+Use the starter kit: [templates/fact_reels](../templates/fact_reels/README.md).
 
 ## License
 The code here is MIT (open source). The Juan Fact a Day name, mascot, artwork and video scripts are all rights reserved; see [LICENSE.md](LICENSE.md).

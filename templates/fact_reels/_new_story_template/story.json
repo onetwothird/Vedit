@@ -1,0 +1,36 @@
+{
+ "extends": "../../channel.json",
+ "title": "Your fact title",
+ "output": {"path": "000_name.mp4", "aspect": "9:16"},
+ "scenes": [
+  {
+   "image": "cards/01.jpg",
+   "card": {"badge": "DID YOU KNOW?", "big": "123", "headline": "Words in *stars* turn yellow"},
+   "sfx": [{"path": "../../assets/sfx/ding.wav", "at": 0, "volume": 0.3}],
+   "lines": [
+    {"speaker": "narrator", "text": "Did you know?", "pause_after": 0.18},
+    {"speaker": "narrator", "text": "The caption shows 123.", "say": "The caption shows one hundred twenty-three."}
+   ]
+  },
+  {
+   "video": "clips/my_broll.mp4",
+   "in": 0,
+   "card_image": "cards/02.jpg",
+   "card": {"badge": "AND DID YOU KNOW?", "headline": "Second *fact* over your video"},
+   "sfx": [{"path": "../../assets/sfx/whoosh.wav", "at": 0, "volume": 0.25}],
+   "lines": [
+    {"speaker": "narrator", "text": "And did you know?", "pause_after": 0.15},
+    {"speaker": "narrator", "text": "Your second fact goes here."}
+   ]
+  },
+  {
+   "video": "clips/me_talking.mp4",
+   "in": 0,
+   "keep_audio": true,
+   "card_image": "cards/03.jpg",
+   "card": {"badge": "YOUR TURN", "headline": "Comment *below!*"},
+   "card_hold": 3
+  }
+ ],
+ "thumbnail": {"badge": "DID YOU KNOW?", "big": "123", "headline": "Your *hook* question?", "sticker": "SHORT HOOK!", "art": "stars3"}
+}

@@ -27,6 +27,19 @@ def extract_audio(video: str, wav: str):
     run(["ffmpeg", "-y", "-v", "error", "-i", video, "-vn", "-ac", "1", "-ar", "16000", "-c:a", "pcm_s16le", wav])
 
 
+def _load_wav16k(path: str):
+    """16 kHz mono 16-bit WAV (what extract_audio writes) -> float32 numpy array, else None."""
+    import wave
+    try:
+        import numpy as np
+        with wave.open(path, "rb") as w:
+            if w.getframerate() != 16000 or w.getnchannels() != 1 or w.getsampwidth() != 2:
+                return None
+            return np.frombuffer(w.readframes(w.getnframes()), np.int16).astype(np.float32) / 32768.0
+    except Exception:
+        return None
+
+
 def transcribe_words(wav: str, model_name: str, language: str | None, keep_fillers: bool):
     prompt = FILLER_PROMPT if keep_fillers else None
     try:
@@ -40,7 +53,8 @@ def transcribe_words(wav: str, model_name: str, language: str | None, keep_fille
             pass
         print(f"[transcribe] faster-whisper model={model_name} device={device}", file=sys.stderr)
         model = WhisperModel(model_name, device=device, compute_type=compute)
-        segs, info = model.transcribe(wav, language=language, word_timestamps=True, initial_prompt=prompt,
+        audio = _load_wav16k(wav)  # hand over samples: avoids PyAV decoding (breaks on some av versions)
+        segs, info = model.transcribe(audio if audio is not None else wav, language=language, word_timestamps=True, initial_prompt=prompt,
                                       vad_filter=False, condition_on_previous_text=False, beam_size=5)
         words = []
         for s in segs:

@@ -1,0 +1,22 @@
+{
+ "name": "My Fact Channel",
+ "tagline": "A new fact every day",
+ "background": "brand/card_background.png",
+ "colors": {
+  "accent": "#FFC72C",
+  "accent_dark": "#C9961A",
+  "badge_text": "#0F1A3C",
+  "shadow": "#0B1A50",
+  "text": "#FFFFFF",
+  "soft": "#DCE6FF",
+  "sticker": "#D7263D",
+  "bg_top": "#16307A",
+  "bg_bottom": "#0A1640"
+ },
+ "art_dir": "assets/art",
+ "mascot_peek": "assets/art/mascot_peek.png",
+ "mascot": "brand/mascot.png",
+ "sfx_dir": "assets/sfx",
+ "content_top": 395,
+ "header_bottom": 360
+}

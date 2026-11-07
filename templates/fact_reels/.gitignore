@@ -1,0 +1,11 @@
+# finished videos + build caches stay on your computer
+*.mp4
+*.srt
+*.build/
+# generated on first build (from brand.json); delete this line if you use your own background file
+brand/card_background.png
+assets/sfx/
+stories/000_example/photos/
+stories/000_example/clips/
+stories/000_example/cards/
+stories/000_example/thumbnail.jpg

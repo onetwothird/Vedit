@@ -1,0 +1,46 @@
+{
+ "extends": "../../channel.json",
+ "title": "Example: three facts",
+ "demo_media": true,
+ "output": {"path": "000_example.mp4", "aspect": "9:16"},
+ "scenes": [
+  {
+   "image": "cards/01_hook.jpg",
+   "card": {"badge": "DID YOU KNOW?", "big": "8 MIN", "headline": "for *sunlight* to reach Earth"},
+   "sfx": [{"path": "../../assets/sfx/ding.wav", "at": 0, "volume": 0.3}],
+   "lines": [
+    {"speaker": "narrator", "text": "Did you know?", "pause_after": 0.18},
+    {"speaker": "narrator", "text": "The sunlight you see left the Sun about 8 minutes ago.", "say": "The sunlight you see left the Sun about eight minutes ago."}
+   ]
+  },
+  {
+   "video": "clips/broll.mp4",
+   "card_image": "cards/02_video.jpg",
+   "card": {"badge": "AND DID YOU KNOW?", "headline": "A day on *Venus* is longer than its *year*"},
+   "sfx": [{"path": "../../assets/sfx/whoosh.wav", "at": 0, "volume": 0.25}],
+   "lines": [
+    {"speaker": "narrator", "text": "And did you know?", "pause_after": 0.15},
+    {"speaker": "narrator", "text": "Venus spins so slowly that one day there lasts longer than its whole year."}
+   ]
+  },
+  {
+   "image": "cards/03_photo.jpg",
+   "background": "cards/_plate_03_photo.jpg",
+   "card": {"badge": "AND ONE MORE!", "headline": "An octopus has *three* hearts",
+            "photo": "photos/sample.jpg", "photo_mode": "frame", "photo_w": 900, "credit": "Photo: your own"},
+   "sfx": [{"path": "../../assets/sfx/pop.wav", "at": 0, "volume": 0.3}],
+   "lines": [
+    {"speaker": "narrator", "text": "And one more!", "pause_after": 0.15},
+    {"speaker": "narrator", "text": "An octopus has three hearts and blue blood."}
+   ]
+  },
+  {
+   "video": "clips/talking.mp4",
+   "keep_audio": true,
+   "card_image": "cards/04_talk.jpg",
+   "card": {"badge": "YOUR TURN", "headline": "Comment *below!*"},
+   "card_hold": 2.5
+  }
+ ],
+ "thumbnail": {"badge": "DID YOU KNOW?", "big": "3 FACTS", "headline": "you'll want to *share*", "sticker": "60 SECONDS!", "art": "stars3"}
+}
