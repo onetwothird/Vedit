@@ -1,0 +1,997 @@
+{
+ "extends": "../../channel.json",
+ "title": "Ang Yuba County Five",
+ "output": {
+  "path": "003_yuba_county_five.mp4",
+  "aspect": "9:16"
+ },
+ "voices": {
+  "narrator": {
+   "engine": "edge",
+   "voice": "fil-PH-AngeloNeural",
+   "rate": "+5%",
+   "pitch": "-2Hz"
+  }
+ },
+ "defaults": {
+  "max_pause": 0.35
+ },
+ "music": {
+  "path": "audio/drone.wav",
+  "volume": 0.11
+ },
+ "scenes": [
+  {
+   "image": "cards/01_hook.jpg",
+   "background": "cards/_plate_01_hook.jpg",
+   "card": {
+    "photo": "photos/plumas_snow_tracks.jpg",
+    "photo_mode": "frame",
+    "credit": "Plumas National Forest · USFS photo (public domain)",
+    "photo_w": 960,
+    "badge": "HINDI PA NALULUTAS",
+    "headline": "Ang *Yuba County Five*",
+    "headline_size": 100,
+    "sub": "California, 1978"
+   },
+   "sfx": [
+    {
+     "path": "audio/boom.wav",
+     "at": 0,
+     "volume": 0.2
+    }
+   ],
+   "lines": [
+    {
+     "speaker": "narrator",
+     "text": "Nanood lang sila ng basketball."
+    },
+    {
+     "speaker": "narrator",
+     "text": "Pero imbes na umuwi, napadpad ang limang lalaking ito sa nagyeyelong bundok."
+    }
+   ]
+  },
+  {
+   "image": "cards/01b_lima.jpg",
+   "background": "cards/_plate_01b_lima.jpg",
+   "card": {
+    "badge": "HINDI PA NALULUTAS",
+    "big": "5 UMALIS",
+    "big_size": 200,
+    "headline": "*4* patay. *1* nawawala.",
+    "headline_size": 96,
+    "lineup": [
+     {
+      "photo": "photos/censored/jack_madruga.jpg",
+      "label": "PATAY",
+      "dim": true
+     },
+     {
+      "photo": "photos/censored/bill_sterling.jpg",
+      "label": "PATAY",
+      "dim": true
+     },
+     {
+      "photo": "photos/censored/jackie_huett.jpg",
+      "label": "PATAY",
+      "dim": true
+     },
+     {
+      "photo": "photos/censored/ted_weiher.jpg",
+      "label": "PATAY",
+      "dim": true
+     },
+     {
+      "photo": "photos/censored/gary_mathias.jpg",
+      "label": "NAWAWALA",
+      "dim": false
+     }
+    ],
+    "credit": "Photos: families / Yuba County Sheriff's Office, via dyatlovpass.com"
+   },
+   "sfx": [
+    {
+     "path": "audio/boom.wav",
+     "at": 0,
+     "volume": 0.14
+    }
+   ],
+   "lines": [
+    {
+     "speaker": "narrator",
+     "text": "Apat ang natagpuang patay. Ang isa, hanggang ngayon, nawawala."
+    }
+   ],
+   "transition": "fade"
+  },
+  {
+   "image": "cards/02_lima.jpg",
+   "card": {
+    "badge": "YUBA COUNTY, CALIFORNIA",
+    "big": "5",
+    "headline": "magkakaibigan",
+    "sub": "Kilalanin natin sila"
+   },
+   "sfx": [],
+   "lines": [
+    {
+     "speaker": "narrator",
+     "text": "Kilalanin natin sila."
+    }
+   ],
+   "transition": "fade"
+  },
+  {
+   "image": "cards/02a_jack_madruga.jpg",
+   "background": "cards/_plate_02a_jack_madruga.jpg",
+   "card": {
+    "photo": "photos/jack_madruga.jpg",
+    "photo_mode": "frame",
+    "credit": "Photo: Valerie Atiyeh, via dyatlovpass.com",
+    "photo_w": 700,
+    "badge": "ANG LIMA · 1/5",
+    "headline": "*Jack Madruga*",
+    "headline_size": 96,
+    "sub": "30 taong gulang"
+   },
+   "sfx": [
+    {
+     "path": "../../assets/sfx/pop.wav",
+     "at": 0,
+     "volume": 0.06
+    }
+   ],
+   "lines": [
+    {
+     "speaker": "narrator",
+     "text": "Si Jack Madruga, trenta anyos."
+    }
+   ]
+  },
+  {
+   "image": "cards/02b_bill_sterling.jpg",
+   "background": "cards/_plate_02b_bill_sterling.jpg",
+   "card": {
+    "photo": "photos/bill_sterling.jpg",
+    "photo_mode": "frame",
+    "credit": "Photo via dyatlovpass.com",
+    "photo_w": 700,
+    "badge": "ANG LIMA · 2/5",
+    "headline": "*Bill Sterling*",
+    "headline_size": 96,
+    "sub": "29 taong gulang"
+   },
+   "sfx": [
+    {
+     "path": "../../assets/sfx/pop.wav",
+     "at": 0,
+     "volume": 0.06
+    }
+   ],
+   "lines": [
+    {
+     "speaker": "narrator",
+     "text": "Si Bill Sterling, bente-nuwebe."
+    }
+   ]
+  },
+  {
+   "image": "cards/02c_jackie_huett.jpg",
+   "background": "cards/_plate_02c_jackie_huett.jpg",
+   "card": {
+    "photo": "photos/jackie_huett.jpg",
+    "photo_mode": "frame",
+    "credit": "Photo: courtesy of Tom & Claudia Huett, via dyatlovpass.com",
+    "photo_w": 700,
+    "badge": "ANG LIMA · 3/5",
+    "headline": "*Jackie Huett*",
+    "headline_size": 96,
+    "sub": "24 taong gulang"
+   },
+   "sfx": [
+    {
+     "path": "../../assets/sfx/pop.wav",
+     "at": 0,
+     "volume": 0.06
+    }
+   ],
+   "lines": [
+    {
+     "speaker": "narrator",
+     "text": "Si Jackie Huett, bente-kuwatro."
+    }
+   ]
+  },
+  {
+   "image": "cards/02d_ted_weiher.jpg",
+   "background": "cards/_plate_02d_ted_weiher.jpg",
+   "card": {
+    "photo": "photos/ted_weiher.jpg",
+    "photo_mode": "frame",
+    "credit": "Photo: Yuba County Sheriff's Office, via dyatlovpass.com",
+    "photo_w": 700,
+    "badge": "ANG LIMA · 4/5",
+    "headline": "*Ted Weiher*",
+    "headline_size": 96,
+    "sub": "32 taong gulang"
+   },
+   "sfx": [
+    {
+     "path": "../../assets/sfx/pop.wav",
+     "at": 0,
+     "volume": 0.06
+    }
+   ],
+   "lines": [
+    {
+     "speaker": "narrator",
+     "text": "Si Ted Weiher, trenta'y dos."
+    }
+   ]
+  },
+  {
+   "image": "cards/02e_gary_mathias.jpg",
+   "background": "cards/_plate_02e_gary_mathias.jpg",
+   "card": {
+    "photo": "photos/gary_mathias.jpg",
+    "photo_mode": "frame",
+    "credit": "Gary Mathias, 1978 · archival photo",
+    "photo_w": 700,
+    "badge": "ANG LIMA · 5/5",
+    "headline": "*Gary Mathias*",
+    "headline_size": 96,
+    "sub": "25 taong gulang"
+   },
+   "sfx": [
+    {
+     "path": "../../assets/sfx/pop.wav",
+     "at": 0,
+     "volume": 0.06
+    }
+   ],
+   "lines": [
+    {
+     "speaker": "narrator",
+     "text": "At si Gary Mathias, bente-singko."
+    }
+   ]
+  },
+  {
+   "image": "cards/02f_gators.jpg",
+   "card": {
+    "badge": "GATEWAY GATORS",
+    "headline": "Magkakasama sa isang *basketball team*",
+    "sub": "Suportado ng isang programa para sa mga taong may kapansanan"
+   },
+   "sfx": [],
+   "lines": [
+    {
+     "speaker": "narrator",
+     "text": "Lahat sila, may intellectual disability o mental illness."
+    },
+    {
+     "speaker": "narrator",
+     "text": "Magkakasama sila sa isang basketball team, ang Gateway Gators."
+    }
+   ]
+  },
+  {
+   "image": "cards/02g_gary.jpg",
+   "background": "cards/_plate_02g_gary.jpg",
+   "card": {
+    "photo": "photos/gary_mathias.jpg",
+    "photo_mode": "frame",
+    "credit": "Gary Mathias, 1978 · archival photo",
+    "photo_w": 520,
+    "badge": "SI GARY",
+    "headline": "Army veteran na may *schizophrenia*",
+    "sub": "Nagpapagamot noong 1978",
+    "headline_size": 80
+   },
+   "sfx": [],
+   "lines": [
+    {
+     "speaker": "narrator",
+     "text": "Si Gary, dating sundalo na na-diagnose ng schizophrenia, at nagpapagamot noon."
+    }
+   ]
+  },
+  {
+   "image": "cards/03_chico.jpg",
+   "background": "cards/_plate_03_chico.jpg",
+   "card": {
+    "photo": "photos/chico_state_kendall_hall.jpg",
+    "photo_mode": "frame",
+    "credit": "Kendall Hall, Chico State · Photo: Frank Schulenburg, CC BY-SA 4.0",
+    "badge": "FEBRUARY 24, 1978",
+    "headline": "*UC Davis* vs *Chico State*",
+    "sub": "Nanood ang lima sa Chico"
+   },
+   "sfx": [
+    {
+     "path": "../../assets/sfx/whoosh.wav",
+     "at": 0,
+     "volume": 0.05
+    }
+   ],
+   "lines": [
+    {
+     "speaker": "narrator",
+     "text": "February 24, 1978. Nagmaneho sila papuntang Chico, para manood ng laro ng UC Davis laban sa Chico State.",
+     "say": "February twenty-four, nineteen seventy-eight. Nagmaneho sila papuntang Chico, para manood ng laro ng UC Davis laban sa Chico State."
+    },
+    {
+     "speaker": "narrator",
+     "text": "Panalo ang Davis."
+    }
+   ],
+   "transition": "fade"
+  },
+  {
+   "image": "cards/02h_sulat.jpg",
+   "background": "cards/_plate_02h_sulat.jpg",
+   "card": {
+    "photo": "photos/ted_weiher_note.jpg",
+    "photo_mode": "frame",
+    "credit": "Huling sulat sa notebook ni Ted Weiher · LA Times, 1978, via dyatlovpass.com",
+    "photo_w": 560,
+    "badge": "FEBRUARY 25, 1978",
+    "headline": "Kinabukasan, may *laro* sila",
+    "sub": "Special Olympics tournament, Sacramento",
+    "headline_size": 80
+   },
+   "sfx": [],
+   "lines": [
+    {
+     "speaker": "narrator",
+     "text": "At kinabukasan, sila naman ang may laro: ang unang laro nila sa isang Special Olympics tournament. Inihanda na ng ilan sa kanila ang uniporme nila."
+    },
+    {
+     "speaker": "narrator",
+     "text": "Ito ang huling isinulat ni Ted sa notebook niya."
+    }
+   ]
+  },
+  {
+   "image": "cards/03b_tindahan.jpg",
+   "card": {
+    "badge": "BEHR'S MARKET, CHICO",
+    "headline": "Huling nakita bandang *10 PM*",
+    "sub": "Bumili ng snacks, soda at gatas"
+   },
+   "sfx": [],
+   "lines": [
+    {
+     "speaker": "narrator",
+     "text": "Bandang alas-diyes ng gabi, bumili sila ng snacks, soda, at gatas sa isang tindahan."
+    },
+    {
+     "speaker": "narrator",
+     "text": "Natandaan sila ng tindera, dahil naantala nila ang pagsasara."
+    },
+    {
+     "speaker": "narrator",
+     "text": "Iyon na ang huling kumpirmadong pagkakita sa kanila."
+    }
+   ]
+  },
+  {
+   "image": "cards/03c_nawawala.jpg",
+   "background": "cards/_plate_03c_nawawala.jpg",
+   "card": {
+    "photo": "photos/missing_poster.jpg",
+    "photo_mode": "frame",
+    "credit": "Yuba County Sheriff's Department missing persons flyer · via dyatlovpass.com",
+    "photo_w": 900,
+    "badge": "KINAUMAGAHAN",
+    "headline": "*Hindi* sila nakauwi"
+   },
+   "sfx": [],
+   "lines": [
+    {
+     "speaker": "narrator",
+     "text": "Hindi sila nakauwi. Kinaumagahan, nag-report na sa pulis ang mga pamilya."
+    }
+   ]
+  },
+  {
+   "image": "cards/04_mapa.jpg",
+   "background": "cards/_plate_04_mapa.jpg",
+   "card": {
+    "photo": "photos/map.png",
+    "photo_mode": "frame",
+    "credit": "Map data © OpenStreetMap contributors",
+    "photo_w": 960,
+    "badge": "PLUMAS NATIONAL FOREST",
+    "headline": "Natagpuan ang kotse sa *bundok*",
+    "headline_size": 80
+   },
+   "sfx": [
+    {
+     "path": "../../assets/sfx/whoosh.wav",
+     "at": 0,
+     "volume": 0.05
+    }
+   ],
+   "lines": [
+    {
+     "speaker": "narrator",
+     "text": "Makalipas ang ilang araw, isang forest ranger ang nagsabing nakita niya ang kotse nila noong February 25, sa bundok ng Plumas National Forest."
+    },
+    {
+     "speaker": "narrator",
+     "text": "Mga 70 milya ito mula sa Chico, at malayo sa daan pauwi.",
+     "say": "Mga pitumpung milya ito mula sa Chico, at malayo sa daan pauwi."
+    }
+   ],
+   "transition": "fade"
+  },
+  {
+   "image": "cards/04b_jack.jpg",
+   "background": "cards/_plate_04b_jack.jpg",
+   "card": {
+    "photo": "photos/jack_madruga.jpg",
+    "photo_mode": "frame",
+    "credit": "Jack Madruga · Photo: Valerie Atiyeh, via dyatlovpass.com",
+    "photo_w": 520,
+    "badge": "AYON SA PAMILYA",
+    "headline": "Ayaw ni Jack sa *lamig*",
+    "sub": "Hindi pa siya nakaakyat sa bundok",
+    "headline_size": 80
+   },
+   "sfx": [],
+   "lines": [
+    {
+     "speaker": "narrator",
+     "text": "Ayon sa pamilya ni Jack, ayaw niya sa lamig, at hindi pa siya nakakaakyat sa bundok."
+    }
+   ]
+  },
+  {
+   "image": "cards/05_kotse.jpg",
+   "background": "cards/_plate_05_kotse.jpg",
+   "card": {
+    "photo": "photos/montego_1969.jpg",
+    "photo_mode": "frame",
+    "credit": "Kaparehong modelo (1969 Mercury Montego) · Photo: Sicnag, CC BY 2.0",
+    "badge": "FEBRUARY 28, 1978",
+    "headline": "Walang sira ang *kotse*",
+    "sub": "Umaandar, may quarter tank pa ng gas",
+    "headline_size": 80
+   },
+   "sfx": [],
+   "lines": [
+    {
+     "speaker": "narrator",
+     "text": "Noong February 28, pinuntahan ito ng mga pulis. Naipit lang ito sa snow. Nang i-hotwire nila, umandar agad, at may quarter tank pa ng gas."
+    },
+    {
+     "speaker": "narrator",
+     "text": "Ayon sa pulis, kaya itong itulak ng limang lalaki palabas ng snow."
+    }
+   ]
+  },
+  {
+   "image": "cards/05b_kakaiba.jpg",
+   "card": {
+    "badge": "MAS KAKAIBA PA",
+    "headline": "*Walang susi.* Hindi naka-lock.",
+    "sub": "Nakababa ang bintana · walang gasgas ang ilalim"
+   },
+   "sfx": [],
+   "lines": [
+    {
+     "speaker": "narrator",
+     "text": "Wala ang susi. Hindi naka-lock, at nakababa ang isang bintana, bagay na hindi raw gagawin ni Jack."
+    },
+    {
+     "speaker": "narrator",
+     "text": "At kahit lubak-lubak ang daan, walang kahit isang gasgas ang ilalim ng kotse."
+    }
+   ]
+  },
+  {
+   "image": "cards/05c_loob.jpg",
+   "card": {
+    "badge": "SA LOOB NG KOTSE",
+    "headline": "Mga balot ng snacks, programa ng laro, at *mapa*",
+    "sub": "Nakatupi nang maayos ang mapa ng California"
+   },
+   "sfx": [],
+   "lines": [
+    {
+     "speaker": "narrator",
+     "text": "Sa loob: mga balot ng snacks, programa ng laro, at isang maayos na nakatuping mapa ng California."
+    }
+   ]
+  },
+  {
+   "image": "cards/05d_bagyo.jpg",
+   "card": {
+    "badge": "SNOWSTORM",
+    "headline": "Itinigil ang *paghahanap*",
+    "sub": "Muntik pang maligaw ang mga naghahanap"
+   },
+   "sfx": [],
+   "lines": [
+    {
+     "speaker": "narrator",
+     "text": "Pero bumagsak ang matinding snowstorm. Muntik pang maligaw ang mga naghahanap, kaya itinigil ito."
+    }
+   ]
+  },
+  {
+   "image": "cards/06_saksi.jpg",
+   "background": "cards/_plate_06_saksi.jpg",
+   "card": {
+    "photo": "photos/plumas_snow_forest.jpg",
+    "photo_mode": "frame",
+    "credit": "Plumas National Forest · USFS photo (public domain)",
+    "badge": "ISANG SAKSI",
+    "headline": "Si *Joseph Schons*",
+    "sub": "Naipit din sa parehong daan, nang gabi ring iyon"
+   },
+   "sfx": [
+    {
+     "path": "../../assets/sfx/whoosh.wav",
+     "at": 0,
+     "volume": 0.05
+    }
+   ],
+   "lines": [
+    {
+     "speaker": "narrator",
+     "text": "Balikan natin ang gabi ng February 24. May isang saksi: si Joseph Schons. Naipit din ang kotse niya sa parehong daan, nang gabi ring iyon."
+    },
+    {
+     "speaker": "narrator",
+     "text": "Nakaramdam siya ng sintomas ng atake sa puso, kaya nanatili siya sa loob ng kotse."
+    }
+   ],
+   "transition": "fade"
+  },
+  {
+   "image": "cards/06b_ilaw.jpg",
+   "card": {
+    "badge": "MAKALIPAS ANG ANIM NA ORAS",
+    "headline": "Mga *ilaw* at grupo ng tao",
+    "sub": "Isa raw, mukhang babaeng may kargang sanggol"
+   },
+   "sfx": [],
+   "lines": [
+    {
+     "speaker": "narrator",
+     "text": "Makalipas ang mga anim na oras, may nakita siyang mga headlight sa likod niya, at grupo ng tao."
+    },
+    {
+     "speaker": "narrator",
+     "text": "Isa raw, mukhang babaeng may kargang sanggol."
+    },
+    {
+     "speaker": "narrator",
+     "text": "Humingi siya ng tulong. Pero tumahimik sila, at namatay ang mga ilaw."
+    }
+   ]
+  },
+  {
+   "image": "cards/06c_umaga.jpg",
+   "card": {
+    "badge": "KINAUMAGAHAN",
+    "headline": "Nadaanan niya ang *kotse ng lima*",
+    "sub": "Kinumpirma ng doktor: inatake siya sa puso"
+   },
+   "sfx": [],
+   "lines": [
+    {
+     "speaker": "narrator",
+     "text": "Kinaumagahan, naglakad siya nang walong milya papunta sa isang lodge."
+    },
+    {
+     "speaker": "narrator",
+     "text": "Pauwi, nadaanan nila ang kotse ng lima, sa mismong lugar kung saan niya narinig ang mga boses."
+    }
+   ]
+  },
+  {
+   "image": "cards/06d_brownsville.jpg",
+   "card": {
+    "badge": "ISA PANG SAKSI",
+    "headline": "Nakita raw sa *Brownsville*",
+    "sub": "Apat na lalaki, sakay ng pulang pickup"
+   },
+   "sfx": [],
+   "lines": [
+    {
+     "speaker": "narrator",
+     "text": "May isa pang saksi. Isang babae sa tindahan sa Brownsville ang nagsabing nakita niya ang apat sa kanila kinabukasan, sakay ng pulang pickup."
+    }
+   ]
+  },
+  {
+   "image": "cards/07_trailer.jpg",
+   "card": {
+    "badge": "JUNE 4, 1978",
+    "big": "19.4 MILYA",
+    "headline": "Isang *Forest Service trailer*",
+    "sub": "Mula sa kinaroonan ng kotse"
+   },
+   "sfx": [
+    {
+     "path": "../../assets/sfx/whoosh.wav",
+     "at": 0,
+     "volume": 0.05
+    }
+   ],
+   "lines": [
+    {
+     "speaker": "narrator",
+     "text": "Lumipas ang mahigit tatlong buwan. Noong June 4, natunaw na ang snow."
+    },
+    {
+     "speaker": "narrator",
+     "text": "Isang grupo ng motorcyclists ang pumasok sa isang Forest Service trailer, 19.4 milya mula sa kotse.",
+     "say": "Isang grupo ng motorcyclists ang pumasok sa isang Forest Service trailer, nineteen point four milya mula sa kotse."
+    }
+   ],
+   "transition": "fade"
+  },
+  {
+   "image": "cards/07b_kama.jpg",
+   "background": "cards/_plate_07b_kama.jpg",
+   "card": {
+    "photo": "photos/trailer_bunk.jpg",
+    "photo_mode": "frame",
+    "credit": "Ang kama kung saan natagpuan si Ted Weiher · via dyatlovpass.com",
+    "badge": "SA LOOB NG TRAILER",
+    "headline": "Natagpuan si *Ted Weiher*",
+    "sub": "Nakabalot sa walong kumot, pati ang ulo"
+   },
+   "sfx": [],
+   "lines": [
+    {
+     "speaker": "narrator",
+     "text": "Basag ang bintana. Sa loob, nakita nila si Ted sa kama, nakabalot sa walong kumot, pati ang ulo."
+    }
+   ]
+  },
+  {
+   "image": "cards/07c_autopsy.jpg",
+   "card": {
+    "badge": "ANG AUTOPSY",
+    "big": "~100 LBS",
+    "headline": "Halos *kalahati* ng timbang niya ang nawala",
+    "sub": "Gutom at hypothermia"
+   },
+   "sfx": [],
+   "lines": [
+    {
+     "speaker": "narrator",
+     "text": "Gutom at hypothermia ang ikinamatay niya. Halos kalahati ng dalawandaang librang timbang niya ang nawala."
+    },
+    {
+     "speaker": "narrator",
+     "text": "Ayon sa haba ng balbas niya, posibleng mga tatlong buwan pa siyang nabuhay."
+    }
+   ]
+  },
+  {
+   "image": "cards/07d_paa.jpg",
+   "card": {
+    "badge": "ANG KANYANG MGA PAA",
+    "headline": "Frostbite, at *walang sapatos*",
+    "sub": "Halos ma-gangrene na"
+   },
+   "sfx": [],
+   "lines": [
+    {
+     "speaker": "narrator",
+     "text": "Halos ma-gangrene ang mga paa niya dahil sa frostbite. At wala ang sapatos niya."
+    }
+   ]
+  },
+  {
+   "image": "cards/07e_mesa.jpg",
+   "card": {
+    "badge": "SA MESA",
+    "headline": "Wallet, singsing na *Ted*, at isang *relo*",
+    "sub": "Ayon sa pamilya, hindi kay Ted ang relo"
+   },
+   "sfx": [],
+   "lines": [
+    {
+     "speaker": "narrator",
+     "text": "Sa mesa: ang wallet niya na may pera pa, ang singsing na may nakaukit na Ted, at isang gintong relo, na ayon sa pamilya, hindi kanya."
+    }
+   ]
+  },
+  {
+   "image": "cards/08_pagkain.jpg",
+   "card": {
+    "badge": "ANG NAKAKAKILABOT",
+    "big": "36",
+    "headline": "lata ng *C-ration* ang kinain",
+    "sub": "Pero ang pagkaing pang-isang taon, hindi binuksan"
+   },
+   "sfx": [],
+   "lines": [
+    {
+     "speaker": "narrator",
+     "text": "Ang nakakakilabot? Sa labas, may tatlumpu't anim na lata ng C-ration na binuksan at kinain."
+    },
+    {
+     "speaker": "narrator",
+     "text": "Pero ang locker na may pagkaing pang-isang taon, hindi binuksan."
+    }
+   ]
+  },
+  {
+   "image": "cards/08b_heater.jpg",
+   "card": {
+    "badge": "HINDI GINALAW",
+    "headline": "Heater, fireplace, at makakapal na *damit*",
+    "sub": "May posporo at panggatong pa"
+   },
+   "sfx": [],
+   "lines": [
+    {
+     "speaker": "narrator",
+     "text": "May gas para sa heater, posporo, at mga libro na pwedeng panggatong. May makakapal na damit pa. Pero wala ni isang ginamit."
+    }
+   ]
+  },
+  {
+   "image": "cards/08c_p38.jpg",
+   "card": {
+    "badge": "ISANG CLUE",
+    "headline": "Binuksan gamit ang *P-38*",
+    "sub": "Army can opener: sina Gary at Jack lang ang marunong"
+   },
+   "sfx": [],
+   "lines": [
+    {
+     "speaker": "narrator",
+     "text": "At ang mga lata? Binuksan gamit ang P-38, isang can opener ng Army. Sa lima, sina Gary at Jack lang ang marunong gumamit nito."
+    }
+   ]
+  },
+  {
+   "image": "cards/09_labi.jpg",
+   "card": {
+    "badge": "KINABUKASAN",
+    "headline": "Natagpuan sina *Madruga* at *Sterling*",
+    "sub": "Magkabilang gilid ng daan, 11.4 milya mula sa kotse"
+   },
+   "sfx": [
+    {
+     "path": "../../assets/sfx/whoosh.wav",
+     "at": 0,
+     "volume": 0.05
+    }
+   ],
+   "lines": [
+    {
+     "speaker": "narrator",
+     "text": "Kinabukasan, natagpuan ang mga labi nina Jack Madruga at Bill Sterling, sa magkabilang gilid ng daan, 11.4 milya mula sa kotse.",
+     "say": "Kinabukasan, natagpuan ang mga labi nina Jack Madruga at Bill Sterling, sa magkabilang gilid ng daan, eleven point four milya mula sa kotse."
+    }
+   ],
+   "transition": "fade"
+  },
+  {
+   "image": "cards/09b_huett.jpg",
+   "background": "cards/_plate_09b_huett.jpg",
+   "card": {
+    "photo": "photos/jackie_huett.jpg",
+    "photo_mode": "frame",
+    "credit": "Jackie Huett · Photo: courtesy of Tom & Claudia Huett, via dyatlovpass.com",
+    "photo_w": 480,
+    "badge": "MAKALIPAS ANG DALAWANG ARAW",
+    "headline": "Ang ama ni *Jackie* ang nakakita",
+    "sub": "2 milya mula sa trailer",
+    "headline_size": 80
+   },
+   "sfx": [],
+   "lines": [
+    {
+     "speaker": "narrator",
+     "text": "Makalipas ang dalawang araw, ang ama mismo ni Jackie Huett ang nakakita sa mga labi ng anak niya, dalawang milya mula sa trailer."
+    }
+   ]
+  },
+  {
+   "image": "cards/10_gary.jpg",
+   "background": "cards/_plate_10_gary.jpg",
+   "card": {
+    "photo": "photos/gary_mathias.jpg",
+    "photo_mode": "frame",
+    "credit": "Gary Mathias, 1978 · archival photo",
+    "photo_w": 560,
+    "badge": "HANGGANG NGAYON",
+    "headline": "Nawawala pa rin si *Gary Mathias*",
+    "sub": "Nasa trailer ang tennis shoes niya",
+    "headline_size": 80
+   },
+   "sfx": [
+    {
+     "path": "../../assets/sfx/whoosh.wav",
+     "at": 0,
+     "volume": 0.05
+    }
+   ],
+   "lines": [
+    {
+     "speaker": "narrator",
+     "text": "Pero si Gary Mathias? Nasa trailer ang tennis shoes niya. Posibleng isinuot niya ang sapatos ni Ted, at umalis."
+    },
+    {
+     "speaker": "narrator",
+     "text": "Ipinakalat ang litrato niya sa mga mental institution sa buong California. Pero hanggang ngayon, hindi pa siya natatagpuan."
+    }
+   ],
+   "transition": "fade"
+  },
+  {
+   "image": "cards/11_teorya.jpg",
+   "card": {
+    "badge": "ANG TEORYA NG PULIS",
+    "headline": "*Naligaw* sila",
+    "sub": "Baka papunta sa mga kaibigan ni Gary sa Forbestown"
+   },
+   "sfx": [
+    {
+     "path": "../../assets/sfx/whoosh.wav",
+     "at": 0,
+     "volume": 0.05
+    }
+   ],
+   "lines": [
+    {
+     "speaker": "narrator",
+     "text": "Ang teorya ng pulis: baka papunta sila sa mga kaibigan ni Gary sa Forbestown, at naligaw."
+    },
+    {
+     "speaker": "narrator",
+     "text": "Nang maipit ang kotse, sinundan daw nila ang bakas ng isang snowcat, umaasang may masisilungan."
+    }
+   ],
+   "transition": "fade"
+  },
+  {
+   "image": "cards/11b_takot.jpg",
+   "card": {
+    "badge": "AT SA TRAILER?",
+    "headline": "Baka *natakot* silang gumamit",
+    "sub": "Naka-lock ang trailer: baka mapagbintangan silang magnanakaw"
+   },
+   "sfx": [],
+   "lines": [
+    {
+     "speaker": "narrator",
+     "text": "Pagdating sa trailer, baka natakot silang gamitin ang mga gamit doon, dahil baka mapagbintangan silang magnanakaw."
+    }
+   ]
+  },
+  {
+   "image": "cards/11c_bizarre.jpg",
+   "background": "cards/_plate_11c_bizarre.jpg",
+   "card": {
+    "photo": "photos/la_times_1978.jpg",
+    "photo_mode": "frame",
+    "credit": "Los Angeles Times, 1978 · via dyatlovpass.com",
+    "photo_w": 960,
+    "badge": "PERO...",
+    "headline": "This case is *bizarre as hell.*",
+    "sub": "Ayon sa undersheriff ng Yuba County",
+    "headline_size": 80
+   },
+   "sfx": [],
+   "lines": [
+    {
+     "speaker": "narrator",
+     "text": "Pero hindi nito masagot ang lahat. Sino ang mga taong nakita ni Schons? Bakit nila iniwan ang kotseng umaandar pa?"
+    },
+    {
+     "speaker": "narrator",
+     "text": "Sabi nga ng undersheriff ng Yuba County: this case is bizarre as hell."
+    }
+   ]
+  },
+  {
+   "image": "cards/11d_ina.jpg",
+   "card": {
+    "badge": "ANG INA NI JACK",
+    "headline": "\"Alam naming may *nagpilit* sa kanila\"",
+    "sub": "Melba Madruga"
+   },
+   "sfx": [],
+   "lines": [
+    {
+     "speaker": "narrator",
+     "text": "At ayon sa ina ni Jack: alam naming may nagpilit sa kanila."
+    }
+   ]
+  },
+  {
+   "image": "cards/12_tanong.jpg",
+   "card": {
+    "big": "?",
+    "headline": "Ano sa tingin *mo* ang nangyari?",
+    "sub": "I-comment mo sa baba!"
+   },
+   "sfx": [
+    {
+     "path": "../../assets/sfx/ding.wav",
+     "at": 0,
+     "volume": 0.07
+    }
+   ],
+   "lines": [
+    {
+     "speaker": "narrator",
+     "text": "Ikaw, ano sa tingin mo ang nangyari? I-comment mo sa baba."
+    }
+   ]
+  },
+  {
+   "image": "cards/13_follow.jpg",
+   "card": {
+    "badge": "SALAMAT SA PANONOOD!",
+    "headline": "Gusto mo pa ng mga ganitong *kwento?*",
+    "sub": "I-follow ang Juan Fact a Day!",
+    "mascot": true
+   },
+   "sfx": [
+    {
+     "path": "../../assets/sfx/pop.wav",
+     "at": 0,
+     "volume": 0.06
+    }
+   ],
+   "lines": [
+    {
+     "speaker": "narrator",
+     "text": "Kung gusto mo pa ng mga ganitong kwento, i-follow mo ako, dito sa Juan Fact a Day!",
+     "say": "Kung gusto mo pa ng mga ganitong kwento, i-follow mo ako, dito sa Hu-wan Fact a Day!"
+    }
+   ],
+   "hold_after": 0.8
+  }
+ ],
+ "thumbnail": {
+  "top": 420,
+  "badge": "HINDI PA NALULUTAS",
+  "big": "5 UMALIS",
+  "big_size": 230,
+  "headline": "4 patay. *1 nawawala.*",
+  "headline_size": 96,
+  "lineup": [
+   {
+    "photo": "photos/censored/jack_madruga.jpg",
+    "label": "PATAY",
+    "dim": true
+   },
+   {
+    "photo": "photos/censored/bill_sterling.jpg",
+    "label": "PATAY",
+    "dim": true
+   },
+   {
+    "photo": "photos/censored/jackie_huett.jpg",
+    "label": "PATAY",
+    "dim": true
+   },
+   {
+    "photo": "photos/censored/ted_weiher.jpg",
+    "label": "PATAY",
+    "dim": true
+   },
+   {
+    "photo": "photos/censored/gary_mathias.jpg",
+    "label": "NAWAWALA"
+   }
+  ],
+  "sticker": "TOTOONG KASO, 1978",
+  "mascot": false
+ }
+}
