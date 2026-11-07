@@ -25,7 +25,7 @@
  "defaults": {
   "narration": "continuous",
   "animate": true,
-  "background": "../../brand/card_background.png"
+  "background": "../../brand/card_background_v2.png"
  },
  "audio": {
   "target_lufs": -14
