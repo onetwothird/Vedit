@@ -201,7 +201,13 @@ def make_plate(spec, base):
     else:  # brand background as-is (framed photos sit on top of it)
         plate = bg.copy()
     if dark or (photo and spec.get("photo_mode", "full") == "full"):
-        plate.paste(_header_layer(bg), (0, 0), _header_layer(bg))
+        ho = B.get("header_overlay")
+        if ho and ho.exists():  # clean transparent logo from the brand (no leftover background)
+            hl = Image.open(ho).convert("RGBA")  # full 1080x1920 overlay or just a header strip, pinned to the top
+            hl = hl.resize((W, round(hl.height * W / hl.width)), Image.LANCZOS)
+        else:
+            hl = _header_layer(bg)
+        plate.paste(hl, (0, 0), hl)
         plate.paste(bg.crop((0, H - 17, W, H)), (0, H - 17))  # bottom stripe
     if spec.get("credit"):
         d = ImageDraw.Draw(plate)
