@@ -4,6 +4,7 @@
  "art_dir": "assets/art",
  "mascot_peek": "assets/art/mascot_peek.png",
  "mascot": "brand/juan_mascot.png",
+ "header_overlay": "brand/juanfactaday_nobackground.png",
  "sfx_dir": "assets/sfx",
  "content_top": 395,
  "colors": {
