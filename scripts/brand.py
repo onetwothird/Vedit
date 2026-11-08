@@ -15,6 +15,7 @@ brand.json (paths are relative to brand.json; every key is optional):
   "art_dir": "assets/art",                # pictures you name in a card's "art"
   "mascot_peek": "assets/art/mascot_peek.png",   # small character for "mascot": true on cards (optional)
   "mascot": "brand/mascot.png",           # big character on the thumbnail (optional)
+  "header_overlay": "brand/header.png",   # transparent PNG of just the logo/header (1080 wide, top-aligned), used on photo cards (optional)
   "sfx_dir": "assets/sfx",                # whoosh/ding/pop are generated here
   "content_top": 395,                     # y where card content starts (just under your header)
   "header_bottom": 360                    # rows above this are the static header (never animated)
@@ -67,6 +68,7 @@ def load(path: Path | None) -> dict:
         "art_dir": rel(raw.get("art_dir", "assets/art")),
         "mascot_peek": rel(raw.get("mascot_peek")),
         "mascot": rel(raw.get("mascot")),
+        "header_overlay": rel(raw.get("header_overlay")),
         "sfx_dir": rel(raw.get("sfx_dir", "assets/sfx")),
         "content_top": int(raw.get("content_top", 395)),
         "header_bottom": int(raw.get("header_bottom", 200)),
