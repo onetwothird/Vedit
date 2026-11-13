@@ -13,6 +13,7 @@ from __future__ import annotations
 import argparse
 import shutil
 import sys
+import subprocess
 import tempfile
 from pathlib import Path
 
@@ -20,6 +21,10 @@ sys.path.insert(0, str(Path(__file__).parent))
 from common import ffprobe, need, parse_time, run, ts, workdir_for  # noqa: E402
 
 PER_SHEET = 12
+# Bundled font for the time labels: without an explicit fontfile, some Windows FFmpeg builds
+# need a fontconfig file and crash.
+_fonts = sorted((Path(__file__).resolve().parent.parent / "fonts").glob("Poppins-*.ttf"))
+_FONT = (":fontfile='" + _fonts[0].as_posix().replace(":", "\\:") + "'") if _fonts else ""
 
 
 def grab(video: str, t: float, out: Path, width: int, grid: bool):
@@ -29,12 +34,10 @@ def grab(video: str, t: float, out: Path, width: int, grid: bool):
         vf.append("drawgrid=w=iw/10:h=ih:t=2:c=yellow@0.6")
     base = ",".join(vf)
     txt = (f",drawtext=text='{label}':x=8:y=8:fontsize={max(14, width // 22)}:fontcolor=white:"
-           f"box=1:boxcolor=black@0.6:boxborderw=4")
+           f"box=1:boxcolor=black@0.6:boxborderw=4{_FONT}")
     cmd = ["ffmpeg", "-y", "-v", "error", "-ss", f"{t:.3f}", "-i", video, "-frames:v", "1", "-q:v", "3"]
-    try:
-        run(cmd + ["-vf", base + txt, str(out)])
-    except SystemExit:  # drawtext unavailable (no fontconfig) -> no label
-        run(cmd + ["-vf", base, str(out)])
+    if subprocess.run(cmd + ["-vf", base + txt, str(out)], capture_output=True).returncode != 0:
+        run(cmd + ["-vf", base, str(out)])  # drawtext unusable here -> frame without the time label
 
 
 def sheets(video: str, times: list[float], outdir: Path, width: int, cols: int, grid: bool, tag: str) -> list[Path]:

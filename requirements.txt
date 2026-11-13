@@ -2,4 +2,4 @@ numpy
 pillow
 faster-whisper>=1.0   # transcription with word timestamps
 edge-tts>=7.0         # free neural voices (story mode)
-opencv-python         # auto face reframing for vertical video
+opencv-python<5      # auto face reframing for vertical video

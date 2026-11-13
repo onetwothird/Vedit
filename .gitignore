@@ -17,3 +17,8 @@ venv/
 
 # personal scratch folders
 Claude outputs/
+
+# Personal channel / drafts: kept on the editor's PC only, not on GitHub
+juan_fact_a_day/
+alam_mo_ba/
+docs/superpowers/

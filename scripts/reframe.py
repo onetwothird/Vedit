@@ -29,8 +29,11 @@ def _detector():
     base = getattr(getattr(cv2, "data", None), "haarcascades", "") or ""
     for name in ("haarcascade_frontalface_default.xml", "haarcascade_frontalface_alt2.xml"):
         p = Path(base) / name
-        if p.exists():
-            return cv2, cv2.CascadeClassifier(str(p))
+        if p.exists() and hasattr(cv2, "CascadeClassifier"):  # OpenCV 5 removed it from the main package
+            try:
+                return cv2, cv2.CascadeClassifier(str(p))
+            except Exception:
+                break
     return cv2, None
 
 
