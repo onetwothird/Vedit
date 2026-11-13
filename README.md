@@ -4,6 +4,8 @@
 
 **An open-source AI video editor for content creators. Raw footage in, finished video out.**
 
+**Not a coder? 👉 [START HERE](START_HERE.md): download, double-click to install, drag your video in. Works in English, Filipino and Taglish.**
+
 [![CI](https://github.com/onetwothird/vedit/actions/workflows/ci.yml/badge.svg)](https://github.com/onetwothird/vedit/actions/workflows/ci.yml)
 [![Python](https://img.shields.io/badge/python-3.9%2B-3776AB?logo=python&logoColor=white)](https://www.python.org/)
 [![FFmpeg](https://img.shields.io/badge/powered%20by-FFmpeg-007808?logo=ffmpeg&logoColor=white)](https://ffmpeg.org/)
@@ -78,7 +80,7 @@ Every edit is stored as a plain JSON file (`edl.json`, an *edit decision list*).
 - **Motion-graphics cards**: flat fact cards are split into elements that pop in, pulse on each line and snap out
 
 ### Fact Reels kit
-- **Make fact Reels like [Juan Fact a Day](juan_fact_a_day/) from your own raw photos and clips.** You bring
+- **Make "Did you know?" fact Reels from your own raw photos and clips.** You bring
   plain footage and the tool adds the animated cards, narration, word-by-word subtitles, sound effects and music
 - Three scene types: card/photo + AI narration, raw B-roll + AI narration, and **you talking on camera**
   (your real voice, auto-transcribed into subtitles)
@@ -228,11 +230,9 @@ vedit story build story.json    # render the final video
 
 Start from [`examples/story.example.json`](examples/story.example.json). The full schema is in [`references/story.md`](references/story.md).
 
-For a complete real-world series, see [`juan_fact_a_day/`](juan_fact_a_day/): 60-second Filipino "Alam mo ba?" fact Reels with shared channel settings, a card and cover generator, and one folder per video.
-
 ## Make fact Reels from your own footage
 
-The [Fact Reels starter kit](templates/fact_reels/) packages the Juan Fact a Day format so anyone can make the
+The [Fact Reels starter kit](templates/fact_reels/) packages a ready-made fact Reels format so anyone can make the
 same kind of video with their own brand. You supply raw photos and clips with nothing on them, and write one
 `story.json` per video. The tool does all the editing.
 
@@ -320,7 +320,6 @@ vedit/
 ├── references/            edl.json and story.json schemas
 ├── examples/              sample brand kit and story
 ├── templates/fact_reels/  starter kit to make fact Reels with your own brand and footage
-├── juan_fact_a_day/       example series: Filipino fact Reels (see its README)
 ├── fonts/                 Poppins (SIL Open Font License, see fonts/OFL.txt)
 ├── docs/                  usage guide
 └── tests/                 pytest suite (no models or network required)
@@ -367,4 +366,4 @@ Built on [FFmpeg](https://ffmpeg.org/), [libass](https://github.com/libass/libas
 The code is released under the [MIT License](LICENSE). © 2026 Angelito P. Decatoria III
 
 - Fonts in `fonts/` are Poppins, under the [SIL Open Font License 1.1](fonts/OFL.txt).
-- The **Juan Fact a Day** name, mascot, logo and artwork in `juan_fact_a_day/` are **not** covered by the MIT License; see [`juan_fact_a_day/LICENSE.md`](juan_fact_a_day/LICENSE.md).
+- The **Juan Fact a Day** name, mascot, logo and artwork are **not** included in this repository and are not covered by the MIT License.

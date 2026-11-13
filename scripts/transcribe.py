@@ -51,18 +51,27 @@ def transcribe_words(wav: str, model_name: str, language: str | None, keep_fille
                 device, compute = "cuda", "float16"
         except Exception:
             pass
-        print(f"[transcribe] faster-whisper model={model_name} device={device}", file=sys.stderr)
-        model = WhisperModel(model_name, device=device, compute_type=compute)
         audio = _load_wav16k(wav)  # hand over samples: avoids PyAV decoding (breaks on some av versions)
-        segs, info = model.transcribe(audio if audio is not None else wav, language=language, word_timestamps=True, initial_prompt=prompt,
-                                      vad_filter=False, condition_on_previous_text=False, beam_size=5)
-        words = []
-        for s in segs:
-            for w in s.words or []:
-                words.append({"start": w.start, "end": w.end, "text": w.word.strip(), "p": round(w.probability, 3)})
-            print(f"\r[transcribe] {ts(s.end)}", end="", file=sys.stderr)
-        print(file=sys.stderr)
-        return words, info.language
+
+        def run(device, compute):
+            print(f"[transcribe] faster-whisper model={model_name} device={device}", file=sys.stderr)
+            model = WhisperModel(model_name, device=device, compute_type=compute)
+            segs, info = model.transcribe(audio if audio is not None else wav, language=language, word_timestamps=True,
+                                          initial_prompt=prompt, vad_filter=False, condition_on_previous_text=False, beam_size=5)
+            words = []
+            for s in segs:  # lazy: GPU errors (missing CUDA/cuBLAS DLLs) show up here, not at load
+                for w in s.words or []:
+                    words.append({"start": w.start, "end": w.end, "text": w.word.strip(), "p": round(w.probability, 3)})
+                print(f"\r[transcribe] {ts(s.end)}", end="", file=sys.stderr)
+            print(file=sys.stderr)
+            return words, info.language
+
+        if device == "cuda":
+            try:
+                return run(device, compute)
+            except (RuntimeError, OSError) as e:  # e.g. "cublas64_12.dll is not found": fall back instead of crashing
+                print(f"\n[transcribe] GPU not usable ({e}); using CPU instead", file=sys.stderr)
+        return run("cpu", "int8")
     except ImportError:
         pass
     try:

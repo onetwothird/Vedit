@@ -1,8 +1,7 @@
 # Fact Reels starter kit
 
 Make 60-second **fact Reels / Shorts / TikToks** with animated fact cards, a narrator voice, word-by-word
-subtitles, sound effects and music. This is the same format as
-[Juan Fact a Day](../../juan_fact_a_day/), but with **your** name, colors and footage.
+subtitles, sound effects and music. Use **your** name, colors and footage.
 
 **You bring the raw material.** Photos and/or raw video clips with nothing on them: no captions, no text, no
 voice-over. **The tool does the editing:** cards, subtitles, narration, sound effects, music, loudness and
@@ -248,5 +247,4 @@ Claude writes `story.json`, looks at your footage and builds the video.
 
 ## License
 The kit's code is MIT. Your stories, brand, artwork and videos are yours. The Juan Fact a Day name, mascot and
-artwork are **not** part of this kit and are all rights reserved; see
-[juan_fact_a_day/LICENSE.md](../../juan_fact_a_day/LICENSE.md).
+artwork are **not** part of this kit and are all rights reserved.

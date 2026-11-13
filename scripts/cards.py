@@ -268,14 +268,14 @@ def render_card(spec, out, base):
         lines = wrap(parse_marked(spec["sub"]), f, MAX_W - 40, d)
         y = draw_lines(d, lines, f, y, 62, color=SOFT, shadow=spec.get("sub_shadow", 0)) + 40
     if spec.get("photo") and spec.get("photo_mode", "full") == "frame":
-        room_h = SAFE_BOTTOM - y - 10
+        room_h = spec.get("safe_bottom", SAFE_BOTTOM) - y - 10  # per-card override: more room for captions
         fr = framed(base / spec["photo"], round(spec.get("photo_w", 900)), max(room_h, 200))
         img.paste(fr, ((W - fr.width) // 2, y + max(0, (room_h - fr.height) // 2)), fr)
     if spec.get("lineup"):  # row of people photos, same look as the thumbnail lineup
         y = draw_lineup(img, spec["lineup"], y + 30, base)
     if spec.get("art"):
         art = load_art(spec["art"])
-        room_h = SAFE_BOTTOM - y - 20
+        room_h = spec.get("safe_bottom", SAFE_BOTTOM) - y - 20
         s = min(spec.get("art_scale", 1.0), 860 / art.width, max(room_h, 120) / art.height)
         art = art.resize((max(1, round(art.width * s)), max(1, round(art.height * s))), Image.LANCZOS)
         ay = y + max(0, (room_h - art.height) // 2) if spec.get("art_center", True) else y

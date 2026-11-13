@@ -1,14 +1,17 @@
 # Changelog
 
 ## Unreleased
-- **Fact Reels starter kit** (`templates/fact_reels/`, `vedit reels new|story|build|demo`): make fact Reels in the
-  Juan Fact a Day format with your own brand and raw footage; step-by-step guide in the kit's README
+- **No-code Windows workflow**: `1_INSTALL.bat` (installs Python, FFmpeg and dependencies) and
+  `2_MAKE_VIDEO.bat` (drag a video on it, pick platform and English / Filipino / Taglish); guide in `START_HERE.md`
+- Transcription falls back to CPU when the GPU is unusable (e.g. missing cuBLAS DLLs) instead of crashing
+- Reframe: no crash with OpenCV 5 (no `CascadeClassifier`); OpenCV pinned `<5`
+- Fact cards: per-card `safe_bottom` to keep card text clear of the captions
+- **Fact Reels starter kit** (`templates/fact_reels/`, `vedit reels new|story|build|demo`): make fact Reels with your own brand and raw footage; step-by-step guide in the kit's README
 - Story mode: raw **video scenes with cards**: the card is composited over the footage (dimmed while visible,
   `card_hold` to hide it); clips shorter than the narration loop
 - Story mode: **talking clips** (`"video"` + `"keep_audio": true`, no `lines`): real voice kept, auto-transcribed
   for word-by-word subtitles (`defaults.transcribe`); stories without any AI narration work
-- New shared modules `scripts/brand.py`, `scripts/cards.py`, `scripts/sfx.py` (moved from `juan_fact_a_day/tools`,
-  driven by `brand.json`); Juan Fact a Day output is pixel-identical
+- New shared modules `scripts/brand.py`, `scripts/cards.py`, `scripts/sfx.py` (driven by `brand.json`)
 - Transcription: pass samples to faster-whisper directly (fixes `metadata_errors` crash with some PyAV versions)
 - Story mode: **continuous narration** (`defaults.narration: "continuous"`): whole script voiced in one take,
   long TTS pauses tightened (`max_pause`), cut only between scenes on frame boundaries
@@ -17,7 +20,6 @@
   shared series settings via `extends`, TTS silence trimming in per-line mode
 - Captions: numeric `position`, `outline_color`, `outline`, `shadow`, `active_scale`; speaker color no longer hides the highlight
 - Bundled Poppins font (SIL OFL) in `fonts/`
-- Example series `juan_fact_a_day/`: Filipino fact Reels with card/cover generators and one folder per video
 - Tests: read script output as UTF-8 (fixes failures on Windows)
 
 ## 0.2.0
