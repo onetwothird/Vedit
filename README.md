@@ -39,8 +39,6 @@ vedit auto raw.mp4 --preset youtube --formats 9:16 --thumbs
 
 Every edit is stored as a plain JSON file (`edl.json`, an *edit decision list*). That makes edits reviewable, repeatable, version-controllable, and easy for both people and AI to change.
 
-> **Demo:** _add a GIF or before/after video here_ (`docs/assets/demo.gif`)
-
 ## Features
 
 ### Editing
@@ -98,6 +96,13 @@ Every edit is stored as a plain JSON file (`edl.json`, an *edit decision list*).
 
 ## Installation
 
+### Windows, no coding (easiest)
+
+Double-click **`1_INSTALL.bat`** (it installs Python, FFmpeg and everything else), then drag a video onto
+**`2_MAKE_VIDEO.bat`**. See [START_HERE.md](START_HERE.md).
+
+### Manual install (Windows, macOS, Linux)
+
 **1. Install FFmpeg**
 
 ```bash
@@ -105,6 +110,8 @@ winget install Gyan.FFmpeg      # Windows
 brew install ffmpeg             # macOS
 sudo apt install ffmpeg         # Debian / Ubuntu
 ```
+
+Open a **new** terminal afterwards so `PATH` refreshes.
 
 **2. Install vedit**
 
@@ -114,11 +121,27 @@ cd vedit
 pip install -e ".[all]"
 ```
 
+If `git clone` says the folder already exists, you already have it: just `cd vedit` and `git pull`.
+
 **3. Verify the setup**
 
 ```bash
 vedit doctor
 ```
+
+You should see `ready` at the end. The `OPENAI_API_KEY` / `ELEVENLABS_API_KEY` lines are optional.
+
+> **`'vedit' is not recognized` (Windows)?** pip installed the command into a folder that is not on your `PATH`
+> (look for the *"script vedit.exe is installed in ... which is not on PATH"* warning). Pick one fix:
+>
+> - **Run it without the command.** From the `vedit` folder, replace `vedit` with `python scripts\vedit.py`:
+>   `python scripts\vedit.py doctor`
+> - **Add the folder to PATH** (run once, then open a new terminal), using the folder named in the warning:
+>   `setx PATH "%PATH%;%APPDATA%\Python\Python312\Scripts"` (change `Python312` to your Python version)
+> - **Use a virtual environment**, whose scripts folder is on `PATH` once activated:
+>   `python -m venv .venv`, then `.venv\Scripts\activate`, then `pip install -e ".[all]"`
+>
+> Every example in this README works with `python scripts\vedit.py` in place of `vedit`.
 
 <details>
 <summary>Minimal install (no transcription, voices or face detection)</summary>
@@ -329,7 +352,10 @@ vedit/
 
 | Problem | Solution |
 |---|---|
+| `'vedit' is not recognized` | The install folder is not on `PATH`. Use `python scripts\vedit.py ...` from the `vedit` folder, or see [Installation](#installation) |
+| `can't open file '...\scripts\vedit.py'` | You are in the wrong folder. `cd` into the `vedit` folder first |
 | `ffmpeg not found` | Install FFmpeg and open a new terminal so `PATH` refreshes |
+| pip warnings about `license` / `BuildBackendWarning` | Harmless setuptools deprecation notices; ignore them |
 | First run is slow | The Whisper model is downloaded once (~500 MB for `small`). Use `--model base` on slower machines |
 | Wrong transcription language | Pass `--language en` (or `tl`, `es`, `ja`, …) |
 | Captions use the wrong font | Set `captions.font` to an installed font, or add `.ttf` files to `fonts/` |
