@@ -13,6 +13,7 @@ For a truly *edited* video (story, hook, best takes), ask Claude Code to refine 
 from __future__ import annotations
 
 import argparse
+import json
 import subprocess
 import sys
 import time
@@ -32,12 +33,30 @@ def step(cmd: list[str]) -> None:
         sys.exit(r)
 
 
+def transcript_is_stale(wd: Path, a) -> bool:
+    """True when the cached transcript was made with a different model/language/prompt version."""
+    if a.no_transcribe:
+        return False
+    tp = wd / "transcript.main.json"
+    if not tp.exists():
+        return False  # no audio, or transcription failed before: re-running won't help
+    try:
+        made = json.loads(tp.read_text(encoding="utf-8")).get("made_with") or {}
+    except (OSError, ValueError):
+        return True
+    from transcribe import TRANSCRIBE_VERSION
+    return (made.get("model"), made.get("language"), made.get("version")) != (a.model, a.language, TRANSCRIBE_VERSION)
+
+
 def process(video: Path, a) -> dict:
     t0 = time.time()
     p = get_preset(a.preset)
     wd = workdir_for(video)
     print(f"\n━━ {video.name}  [{a.preset}: {p['desc']}]", flush=True)
-    if not (wd / "analysis.main.json").exists() or a.reanalyze:
+    stale = transcript_is_stale(wd, a)
+    if stale and not a.reanalyze:
+        print("[auto] model or language changed since last time: redoing captions", flush=True)
+    if not (wd / "analysis.main.json").exists() or a.reanalyze or stale:
         cmd = [str(HERE / "analyze.py"), str(video), "--model", a.model]
         if a.language:
             cmd += ["--language", a.language]
