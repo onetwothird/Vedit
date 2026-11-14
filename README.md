@@ -101,6 +101,19 @@ Every edit is stored as a plain JSON file (`edl.json`, an *edit decision list*).
 Double-click **`1_INSTALL.bat`** (it installs Python, FFmpeg and everything else), then drag a video onto
 **`2_MAKE_VIDEO.bat`**. See [START_HERE.md](START_HERE.md).
 
+### Any computer, no coding: `easy.py`
+
+After installing (below), run **`easy.py`**. It asks you to drag a video into the window, asks where you'll
+post it and which language you speak, then makes the video. Same on Windows, macOS and Linux:
+
+```bash
+python easy.py            # Windows
+python3 easy.py           # macOS / Linux
+```
+
+In **VS Code**: open the vedit folder, open `easy.py`, press the **Run** (▷) button at the top right, then
+answer the questions in the terminal panel. `2_MAKE_VIDEO.bat` uses `easy.py` too.
+
 ### Manual install (Windows, macOS, Linux)
 
 **1. Install FFmpeg**
