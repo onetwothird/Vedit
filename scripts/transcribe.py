@@ -22,6 +22,42 @@ from common import (FILLER_PHRASES, FILLERS_HARD, FILLERS_SOFT, die, need, norm_
 FILLER_PROMPT = "Umm, let me think, like, hmm... Okay, uh, so here's what I'm, you know, thinking."
 
 
+# Bump when prompts or decoding change, so cached transcripts get redone.
+TRANSCRIBE_VERSION = 4
+
+# Tagalog/Taglish: an English filler prompt makes Whisper guess English-sounding spellings.
+# A short, correctly spelled Taglish sample steers spelling and sentence structure instead.
+TAGLISH_PROMPT = ("Ito ay isang usapan sa Taglish. Okay, so ngayon, pag-usapan natin kung paano natin ito gagawin. "
+                  "Hindi ba mas maganda kung araw-araw na itong nararanasan ng mga Pilipino, at hindi lang kapag may kondisyon?")
+
+
+def _norm(text: str) -> str:
+    return " ".join("".join(c for c in text.lower() if c.isalnum() or c.isspace()).split())
+
+
+def echoes_prompt(words: list[tuple[str, float]], prompt: str | None) -> bool:
+    """Whisper sometimes 'hears' its prompt during silence or music. Catch those fake segments.
+
+    Fake: mostly prompt words AND low confidence (seen: avg ~0.1). Real speech that happens to use the
+    same words is kept, because Whisper is confident about it (real Tagalog median ~0.9).
+    """
+    if not prompt or len(words) < 3:
+        return False
+    vocab = set(_norm(prompt).split())
+    toks = [(_norm(t), p) for t, p in words if _norm(t)]
+    if not toks:
+        return False
+    overlap = sum(1 for t, _ in toks if t in vocab) / len(toks)
+    confidence = sum(p for _, p in toks) / len(toks)
+    return overlap >= 0.75 and confidence < 0.35
+
+
+def pick_prompt(language: str | None, keep_fillers: bool):
+    if language in ("tl", "fil"):
+        return TAGLISH_PROMPT
+    return FILLER_PROMPT if keep_fillers else None
+
+
 def extract_audio(video: str, wav: str):
     need("ffmpeg")
     run(["ffmpeg", "-y", "-v", "error", "-i", video, "-vn", "-ac", "1", "-ar", "16000", "-c:a", "pcm_s16le", wav])
@@ -41,7 +77,7 @@ def _load_wav16k(path: str):
 
 
 def transcribe_words(wav: str, model_name: str, language: str | None, keep_fillers: bool):
-    prompt = FILLER_PROMPT if keep_fillers else None
+    prompt = pick_prompt(language, keep_fillers)
     try:
         from faster_whisper import WhisperModel  # type: ignore
         device, compute = "cpu", "int8"
@@ -60,6 +96,9 @@ def transcribe_words(wav: str, model_name: str, language: str | None, keep_fille
                                           initial_prompt=prompt, vad_filter=False, condition_on_previous_text=False, beam_size=5)
             words = []
             for s in segs:  # lazy: GPU errors (missing CUDA/cuBLAS DLLs) show up here, not at load
+                if echoes_prompt([(w.word, w.probability) for w in s.words or []], prompt):
+                    print(f"\n[transcribe] dropped fake caption (repeats the prompt): {s.text.strip()}", file=sys.stderr)
+                    continue
                 for w in s.words or []:
                     words.append({"start": w.start, "end": w.end, "text": w.word.strip(), "p": round(w.probability, 3)})
                 print(f"\r[transcribe] {ts(s.end)}", end="", file=sys.stderr)
@@ -81,7 +120,9 @@ def transcribe_words(wav: str, model_name: str, language: str | None, keep_fille
         res = model.transcribe(wav, language=language, word_timestamps=True, initial_prompt=prompt,
                                condition_on_previous_text=False)
         words = [{"start": w["start"], "end": w["end"], "text": w["word"].strip(), "p": round(w.get("probability", 1), 3)}
-                 for s in res["segments"] for w in s.get("words", [])]
+                 for s in res["segments"]
+                 if not echoes_prompt([(w["word"], w.get("probability", 1)) for w in s.get("words", [])], prompt)
+                 for w in s.get("words", [])]
         return words, res.get("language")
     except ImportError:
         die("No transcription backend. Install one:  pip install faster-whisper")
@@ -189,6 +230,8 @@ def main():
         extract_audio(a.video, wav)
         words, lang = transcribe_words(wav, a.model, a.language, not a.no_fillers)
     data = build(a.video, words, lang, a.name, info["duration"])
+    # what produced this transcript, so auto.py can redo it when the model/language/prompt changes
+    data["made_with"] = {"model": a.model, "language": a.language, "version": TRANSCRIBE_VERSION}
     save_json(data, wd / f"transcript.{a.name}.json")
     write_txt(wd / f"transcript.{a.name}.txt", data)
     hard = sum(1 for w in data["words"] if w["filler"] == "hard")
