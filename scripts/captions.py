@@ -7,7 +7,7 @@ run it alone to inspect/tweak captions.
 edl.json "captions" block (all optional):
   {"enabled": true, "style": "pop" | "box" | "clean", "max_words": 3, "font": "Arial", "size": null,
    "color": "#FFFFFF", "highlight": "#FFD400", "uppercase": true, "position": "lower" | "middle" | "bottom",
-   "hide_fillers": true, "srt": true, "replace": {"teh": "the"},
+   "hide_fillers": true, "srt": true, "replace": {"teh": "the"}, "min_show": 0.7,
    "speaker_colors": {"maria": "#FF6FB5", "narrator": "#FFD400"}}   # skits: active word colored per speaker
 Text overlays (titles, lower-thirds, callouts) come from edl.json "overlays" entries with "type": "text".
 """
@@ -59,6 +59,42 @@ def group_words(words, max_words: int, max_chars: int, gap: float = 0.45):
     if cur:
         groups.append(cur)
     return groups
+
+
+def merge_fast(groups, max_words: int, max_chars: int, min_show: float, gap: float = 0.45):
+    """Fast talkers make 1-3 word groups that flash by too quickly to read. Join a group that would be on
+    screen less than `min_show` seconds with its neighbour, up to two lines (2x the word/char limits).
+    Never joins across a pause, a cut or a speaker change."""
+    def dur(g):
+        return g[-1]["oend"] - g[0]["ostart"]
+
+    def can_join(a, b):
+        return (a[-1]["clip"] == b[0]["clip"] and a[-1].get("speaker") == b[0].get("speaker")
+                and b[0]["ostart"] - a[-1]["oend"] <= gap
+                and len(a) + len(b) <= 2 * max_words
+                and sum(len(x["text"]) + 1 for x in a + b) - 1 <= 2 * max_chars)
+
+    out = []
+    for g in groups:
+        if out and dur(out[-1]) < min_show and can_join(out[-1], g):
+            out[-1] = out[-1] + g
+        else:
+            out.append(list(g))
+    if len(out) > 1 and dur(out[-1]) < min_show and can_join(out[-2], out[-1]):  # short last group: join back
+        out[-2] = out[-2] + out.pop()
+    return out
+
+
+def join_hyphen_pieces(words):
+    """Whisper splits Taglish words like "nag-agree" into "nag" + "-agree". Glue them back into one word."""
+    out = []
+    for w in words:
+        if out and w["text"].startswith("-") and len(w["text"]) > 1 and w["clip"] == out[-1]["clip"] \
+                and not out[-1]["text"][-1:] in ".?!,;:":
+            out[-1] = {**out[-1], "text": out[-1]["text"] + w["text"], "oend": w["oend"]}
+        else:
+            out.append(w)
+    return out
 
 
 def apply_replacements(words, repl: dict):
@@ -117,10 +153,12 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
     events, srt = [], []
     if cfg.get("enabled", True):
         words = [w for w in tl.output_words() if not (cfg["hide_fillers"] and w["filler"] == "hard")]
+        words = join_hyphen_pieces(words)
         apply_replacements(words, cfg.get("replace") or {})
-        groups = group_words(words, max_words, max_chars)
+        min_show = float(cfg.get("min_show", 0.7))  # seconds a caption must stay up to be readable
+        groups = merge_fast(group_words(words, max_words, max_chars), max_words, max_chars, min_show)
         for gi, g in enumerate(groups):
-            g_end = g[-1]["oend"] + 0.15
+            g_end = max(g[-1]["oend"] + 0.15, g[0]["ostart"] + min_show)  # hold short ones, if there is room
             if gi + 1 < len(groups):
                 g_end = min(g_end, groups[gi + 1][0]["ostart"])
             texts = [esc(w["text"].upper() if upper else w["text"]) for w in g]
