@@ -90,7 +90,7 @@ def join_hyphen_pieces(words):
     out = []
     for w in words:
         if out and w["text"].startswith("-") and len(w["text"]) > 1 and w["clip"] == out[-1]["clip"] \
-                and not out[-1]["text"][-1:] in ".?!,;:":
+                and out[-1]["text"][-1:] not in ".?!,;:":
             out[-1] = {**out[-1], "text": out[-1]["text"] + w["text"], "oend": w["oend"]}
         else:
             out.append(w)
