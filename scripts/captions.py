@@ -80,7 +80,7 @@ def merge_fast(groups, max_words: int, max_chars: int, min_show: float, gap: flo
             out[-1] = out[-1] + g
         else:
             out.append(list(g))
-    if len(out) > 1 and dur(out[-1]) < min_show and can_join(out[-2], out[-1]):  # short last group: join back
+    if len(out) > 1 and dur(out[-1]) < min_show and can_join(out[-2], out[-1]): 
         out[-2] = out[-2] + out.pop()
     return out
 
