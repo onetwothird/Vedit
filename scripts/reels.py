@@ -127,10 +127,10 @@ def make_demo(folder: Path, quiet=False):
                       fill=("#e63946", "#f1faee", "#a8dadc", "#457b9d")[i % 4])
         d.text((40, 40), "Sample photo: replace with your own", fill="#f1faee")
         im.save(photo, quality=92)
-    if not broll.exists():  # 4 s of moving footage: shorter than the narration, so it loops
+    if not broll.exists():  
         subprocess.check_call(ff + ["-f", "lavfi", "-i", "mandelbrot=s=1280x720:r=30", "-t", "4", "-pix_fmt", "yuv420p",
                                     "-c:v", "libx264", "-preset", "veryfast", str(broll)])
-    if not talk.exists():  # stands in for you talking to the camera
+    if not talk.exists(): 
         from tts import synth
         wav, _w, dur, _e = synth("Which fact surprised you the most? Tell me in the comments, and follow for a "
                                  "new fact every day!", {"engine": "edge", "voice": "en-US-AvaNeural"},
