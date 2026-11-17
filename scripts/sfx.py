@@ -24,7 +24,6 @@ def whoosh(d=0.42):
     t = np.arange(n) / SR
     rng = np.random.default_rng(7)
     noise = rng.standard_normal(n)
-    # band-pass sweep: one-pole low-pass with a cutoff that rises then falls
     fc = 300 + 4200 * np.sin(np.pi * t / d) ** 2
     a = np.exp(-2 * np.pi * fc / SR)
     y = np.zeros(n)
@@ -32,14 +31,14 @@ def whoosh(d=0.42):
     for i in range(n):
         lp = (1 - a[i]) * noise[i] + a[i] * lp
         y[i] = lp
-    y -= np.convolve(y, np.ones(40) / 40, "same")  # remove rumble
+    y -= np.convolve(y, np.ones(40) / 40, "same") 
     env = np.sin(np.pi * np.clip(t / d, 0, 1)) ** 1.6
     return y * env
 
 
 def ding(d=0.9):
     t = np.arange(int(SR * d)) / SR
-    f = 1318.5  # E6
+    f = 1318.5 
     y = sum(a * np.sin(2 * np.pi * f * m * t) * np.exp(-t * k) for a, m, k in [(1, 1, 5), (.45, 2.01, 8), (.2, 3.0, 12)])
     return y * np.minimum(1, t / 0.004)
 
