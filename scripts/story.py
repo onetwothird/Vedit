@@ -50,8 +50,8 @@ import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent))
-from common import die, load_json, run, save_json, ts  # noqa: E402
-from tts import synth  # noqa: E402
+from common import die, load_json, run, save_json, ts  
+from tts import synth 
 
 SHOT_ZOOM = {"wide": 1.0, "medium": 1.35, "close": 1.8, "extreme": 2.4}
 AUTO_MOTIONS = ["in", "right", "out", "left", "up", "in", "down"]
@@ -73,7 +73,7 @@ def motion_path(m: str):
 def scale_motion(path, strength: float):
     """Shrink/grow the zoom of a motion path; 1.0 = default (18% zoom), 0.5 = 9%."""
     z0, z1, f0, f1 = path
-    s = lambda z: round(1 + (z - 1) * strength, 4)  # noqa: E731
+    s = lambda z: round(1 + (z - 1) * strength, 4) 
     return s(z0), s(z1), f0, f1
 
 
@@ -83,8 +83,6 @@ def retime_caption(display: str, words: list[dict]) -> list[dict]:
     toks = display.split()
     if not words or not toks:
         return words
-    # align caption tokens to spoken words; identical words keep their exact timing, and a differing span
-    # (e.g. "7,641" vs "seven thousand six hundred forty-one") takes exactly the time those words are spoken
     a, b = [_norm(t) for t in toks], [_norm(w["text"]) for w in words]
     out = []
     for tag, i1, i2, j1, j2 in difflib.SequenceMatcher(a=a, b=b, autojunk=False).get_opcodes():
@@ -111,7 +109,7 @@ def lerp(a, b, t):
 def normalize_image(src: Path, build: Path, i: int) -> Path:
     """Apply EXIF rotation (phone photos) so the renderer sees the photo upright."""
     try:
-        from PIL import Image, ImageOps  # type: ignore
+        from PIL import Image, ImageOps  
         im = Image.open(src)
         if (im.getexif() or {}).get(0x0112, 1) not in (1, None) or im.mode not in ("RGB", "L") \
                 or src.suffix.lower() in (".heic", ".webp", ".gif"):
@@ -186,7 +184,7 @@ def tighten_pauses(wav: Path, words: list[dict], dur: float, build: Path, max_pa
     run(["ffmpeg", "-y", "-v", "error", "-i", str(wav), "-f", "s16le", "-ac", "1", "-ar", str(sr), str(tmp)])
     x = np.fromfile(tmp, dtype=np.int16)
     tmp.unlink(missing_ok=True)
-    cuts = []  # (start_s, end_s) of silence to remove
+    cuts = [] 
     for a, b in zip(words, words[1:]):
         gap = b["start"] - a["end"]
         if gap > max_pause + 0.02:
@@ -202,7 +200,7 @@ def tighten_pauses(wav: Path, words: list[dict], dur: float, build: Path, max_pa
         keep.append(x[prev:int(s * sr)])
         prev = int(e * sr)
     keep.append(x[prev:])
-    fade = int(0.008 * sr)  # tiny fades at each join (inside silence) -> no clicks
+    fade = int(0.008 * sr) 
     for k in range(len(keep) - 1):
         if len(keep[k]) > fade and len(keep[k + 1]) > fade:
             keep[k] = keep[k].copy()
@@ -232,7 +230,7 @@ def synth_continuous(story: dict, root: Path, build: Path):
     d = story.get("defaults") or {}
     fps = int((story.get("output") or {}).get("fps", 30))
     items = [(si, ln) for si, sc in enumerate(story["scenes"]) for ln in (sc.get("lines") or [])]
-    if not items:  # e.g. only talking clips: nothing to voice
+    if not items: 
         return []
     spk = items[0][1].get("speaker", "narrator")
     cfg = dict(voices.get(spk) or {})
@@ -240,7 +238,6 @@ def synth_continuous(story: dict, root: Path, build: Path):
     wav, words, dur, eng = synth(" ".join(spoken), cfg, build / "voice_cache")
     if d.get("max_pause", 0.32):
         wav, words, dur = tighten_pauses(wav, words, dur, build, float(d.get("max_pause", 0.32)))
-    # which words belong to which line: walk the letters (robust to punctuation/hyphen differences)
     bounds, acc = [], 0
     for t in spoken:
         acc += len(_norm(t))
@@ -255,7 +252,7 @@ def synth_continuous(story: dict, root: Path, build: Path):
     scene_ids = sorted({si for si, _ in items})
     first = {si: min(w["start"] for (s2, _), ws in zip(items, per) if s2 == si for w in ws) for si in scene_ids}
     last = {si: max(w["end"] for (s2, _), ws in zip(items, per) if s2 == si for w in ws) for si in scene_ids}
-    fr = lambda t: round(t * fps) / fps  # noqa: E731
+    fr = lambda t: round(t * fps) / fps 
     cuts = [max(0.0, fr(first[scene_ids[0]] - 0.06))]
     for a, b in zip(scene_ids, scene_ids[1:]):
         gap_mid = (last[a] + first[b]) / 2 + float(d.get("cut_offset", 0.0))
@@ -278,7 +275,7 @@ def synth_continuous(story: dict, root: Path, build: Path):
                 continue
             ws = [{**w, "start": round(w["start"] - a, 3), "end": round(w["end"] - a, 3)} for w in ws]
             beats.append(ws[0]["start"])
-            disp += retime_caption(ln["text"], ws)  # subtitles show the script's exact spelling
+            disp += retime_caption(ln["text"], ws)  
         joined = " ".join(ln["text"] for s2, ln in items if s2 == si)
         sc["lines"] = [{"speaker": spk, "text": joined, "_wav": out, "_words": disp, "_dur": round(b - a, 4),
                         "_engine": eng, "pause_after": 0}]
@@ -302,7 +299,7 @@ def synth_all(story: dict, root: Path, build: Path):
             for k in ("engine", "voice", "rate", "pitch", "volume", "style", "model", "stability"):
                 if k in ln:
                     cfg[k] = ln[k]
-            spoken = ln.get("say") or ln["text"]  # "say" = pronunciation spelling, "text" = caption
+            spoken = ln.get("say") or ln["text"] 
             wav, words, dur, eng = synth(spoken, cfg, cache)
             if story.get("defaults", {}).get("trim_silence", True) and words:
                 wav, words, dur = trim_line(wav, words, dur, build,
@@ -340,7 +337,7 @@ def animate_scene(story: dict, sc: dict, root: Path, build: Path, si: int, parts
         if kind == "line":
             beats.append(round(t, 3))
         t += d
-    if sc.get("_beats"):  # continuous narration: pulse when each script line starts
+    if sc.get("_beats"): 
         beats = [round(b, 3) for b in sc["_beats"]]
     key = hashlib.md5(json.dumps([str(card), card.stat().st_mtime, str(bgp), bgp.stat().st_mtime, round(T, 3),
                                   beats, round(t0, 3), 2]).encode()).hexdigest()[:10]
@@ -437,10 +434,10 @@ def build_edl(story: dict, root: Path, build: Path) -> dict:
     sources, clips, overlays = {}, [], []
     defaults = story.get("defaults") or {}
     gap = float(defaults.get("pause_after", 0.25))
-    scene_t0 = 0.0  # global start time of each scene (keeps the animated background drift continuous)
+    scene_t0 = 0.0 
     for si, sc in enumerate(story["scenes"]):
         if sc.get("image") and sc.get("animate", defaults.get("animate")):
-            alias, vin = f"vid{si}", 0.0  # rendered below, once the scene length is known
+            alias, vin = f"vid{si}", 0.0 
         elif sc.get("image"):
             ip = root / sc["image"]
             if not ip.exists():
