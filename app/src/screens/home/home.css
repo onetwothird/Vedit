@@ -4,8 +4,8 @@
 
 /* Hero tile: the whole card is one link (one tab stop). */
 .mode-hero {
-  display: grid; grid-template-columns: minmax(230px, 0.8fr) minmax(0, 680px); align-items: center; gap: 28px;
-  padding: 28px 28px 22px 30px; border-radius: 16px; background: var(--bg); border: 1px solid var(--line-2);
+  display: grid; grid-template-columns: minmax(230px, 1fr) minmax(0, 680px); align-items: center; gap: 28px;
+  padding: 28px 28px 22px 30px; border-radius: 16px; border: 1px solid var(--line-2);
 }
 .mode-hero:hover { border-color: color-mix(in srgb, var(--accent) 45%, var(--line-2)); }
 .mode-hero:focus-visible { border-radius: 16px; }
@@ -19,14 +19,13 @@
 .mode-hero:hover .m-cta { filter: brightness(1.08); }
 
 /* Coming-soon row. */
-.mode-soon-row { list-style: none; padding: 0; display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 14px; }
+.mode-soon-row { list-style: none; padding: 0; display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 28px 20px; margin-top: 18px; }
 .mode-soon {
-  display: flex; flex-direction: column; height: 100%; padding: 14px 16px 16px; border-radius: 12px;
-  background: var(--bg); border: 1px solid var(--line);
+  display: flex; flex-direction: column; height: 100%;
 }
 .mode-soon .m-title { font: 600 14px/1.3 var(--sans); color: var(--ink); }
 .mode-soon .m-desc { margin-top: 6px; font-size: 12.5px; line-height: 1.5; color: var(--body); }
-.mode-soon .m-soon { margin-top: auto; padding-top: 12px; font-size: 12px; color: var(--muted); }
+.mode-soon .m-soon { margin-top: auto; padding-top: 8px; font-size: 12px; color: var(--muted); }
 
 /* ---- artwork ---- */
 .art text { font-family: var(--sans); }
@@ -35,7 +34,7 @@
    9:16 cut is exactly as tall as the source frame and the 1:1 + 16:9 column stacks to the same height. */
 .hero-art {
   container-type: inline-size; justify-self: end; width: 100%; max-width: 680px;
-  display: flex; gap: 2cqw; align-items: flex-start;
+  display: flex; column-gap: 2%; align-items: flex-start;
 }
 .hero-art video { display: block; }
 .src { width: 58cqw; flex: none; }
@@ -154,7 +153,7 @@ html.light .art-bar.on { fill: #22a35a; }
   .mode-hero .m-title { font-size: 20px; }
   /* Phone: source frame full width, the three cuts in a row underneath; the 9:16 cut matches the
      height of the 1:1 + 16:9 column (widths solved for a 3cqw gap). */
-  .hero-art { flex-direction: column; gap: 3cqw; }
+  .hero-art { flex-direction: column; row-gap: 12px; }
   .src { width: 100cqw; }
   .cuts { gap: 3cqw; width: 100cqw; }
   .cuts-col { gap: 3cqw; width: 50.73cqw; }

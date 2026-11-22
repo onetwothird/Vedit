@@ -2,6 +2,7 @@ import { useState } from "react";
 import { Link } from "react-router-dom";
 import { t } from "../i18n/t";
 import { getTheme, setTheme, type Theme } from "../theme/theme";
+import Logo from "./Logo";
 import Steps, { type StepNumber } from "./Steps";
 
 export interface TopBarProps {
@@ -25,11 +26,14 @@ export default function TopBar({ fileName, saved, step, editHid, primary }: TopB
   return (
     <header className="pane top">
       <div className="brand">
-        <Link className="word" to="/" aria-label={t("topbar.home")}>{t("app.name")}</Link>
+        <Link className="word" to="/" aria-label={t("topbar.home")}>
+          <Logo size={26} className="mark" />
+          <span>{t("app.name")}</span>
+        </Link>
         {fileName && <span className="proj" title={fileName}>{fileName}</span>}
         {saved && <span className="saved">{t("topbar.saved")}</span>}
       </div>
-      <Steps current={step} editHid={editHid} />
+      {step !== undefined ? <Steps current={step} editHid={editHid} /> : <span aria-hidden="true" />}
       <div className="actions">
         <Link className="secondary" to="/settings">{t("topbar.settings")}</Link>
         <button

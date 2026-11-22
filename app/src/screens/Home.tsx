@@ -1,10 +1,12 @@
 import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
+import FilmFrame from "../components/FilmFrame";
 import Screen from "../components/Screen";
 import { engine } from "../engine/client";
 import type { Project } from "../engine/types";
 import { t } from "../i18n/t";
 import { baseName } from "../lib/native";
+import { useFilmstrip } from "../lib/useFilmstrip";
 import { BatchArt, ClipArt, PhotosArt, ReelArt, VlogArt } from "./home/HomeArt";
 import "./home/home.css";
 
@@ -80,23 +82,30 @@ export default function Home() {
         )}
         {recent.status === "ready" && recent.projects.length > 0 && (
           <ul className="recent-list">
-            {recent.projects.map((p) => {
-              const n = p.clips.length;
-              return (
-                <li key={p.id}>
-                  <Link className="recent-item" to={n > 0 ? `/p/${p.id}/pick` : `/p/${p.id}/import`}>
-                    <span className="r-name">{baseName(p.source)}</span>
-                    <span className="r-meta mono">{formatDate(p.created)}</span>
-                    <span className="r-meta mono">
-                      {n > 0 ? t(n === 1 ? "home.recent.clips.one" : "home.recent.clips.other", { n }) : t("home.recent.noclips")}
-                    </span>
-                  </Link>
-                </li>
-              );
-            })}
+            {recent.projects.map((p) => <RecentItem key={p.id} p={p} />)}
           </ul>
         )}
       </section>
     </Screen>
+  );
+}
+
+/** One recent project: its first frame, file name, then date and clip count underneath. */
+function RecentItem({ p }: { p: Project }) {
+  const film = useFilmstrip(p.id);
+  const n = p.clips.length;
+  return (
+    <li>
+      <Link className="recent-item" to={n > 0 ? `/p/${p.id}/pick` : `/p/${p.id}/import`}>
+        <span className="r-thumb">
+          <FilmFrame film={film} t={p.clips[0]?.highlight.start ?? 0} fit={{ width: 232, height: 130 }} />
+        </span>
+        <span className="r-name" title={baseName(p.source)}>{baseName(p.source)}</span>
+        <span className="r-meta">
+          <span>{formatDate(p.created)}</span>
+          <span>{n > 0 ? t(n === 1 ? "home.recent.clips.one" : "home.recent.clips.other", { n }) : t("home.recent.noclips")}</span>
+        </span>
+      </Link>
+    </li>
   );
 }
