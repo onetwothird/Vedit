@@ -83,3 +83,31 @@ def probe(path):
     out = subprocess.run(["ffprobe", "-v", "error", "-print_format", "json", "-show_streams", "-show_format", str(path)],
                          capture_output=True, text=True, check=True).stdout
     return json.loads(out)
+
+
+def _workdir_from(sample_edl, talking, tmp_path_factory, name, **output):
+    """A private copy of the pristine edit (edl + transcript) so tests can't disturb each other."""
+    d = tmp_path_factory.mktemp(name)
+    for f in (talking / "pristine.edit").glob("transcript.*.json"):
+        shutil.copy(f, d / f.name)
+    e = json.loads(sample_edl.read_text())
+    e["output"] = {**e["output"], "path": str(d / "prog.mp4"), **output}
+    (d / "edl.json").write_text(json.dumps(e))
+    return d
+
+
+@pytest.fixture(scope="session")
+def pipeline_workdir(talking, sample_edl, tmp_path_factory):
+    """16:9 edl.json + transcript, independent of raw.edit."""
+    return _workdir_from(sample_edl, talking, tmp_path_factory, "wd169", aspect="16:9")
+
+
+@pytest.fixture(scope="session")
+def pipeline_workdir_9x16(talking, sample_edl, tmp_path_factory):
+    """9:16 edl.json with pop captions."""
+    d = _workdir_from(sample_edl, talking, tmp_path_factory, "wd916", aspect="9:16")
+    p = d / "edl.json"
+    e = json.loads(p.read_text())
+    e["captions"] = {**(e.get("captions") or {}), "style": "pop"}
+    p.write_text(json.dumps(e))
+    return d
