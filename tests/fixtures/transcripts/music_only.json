@@ -1,0 +1,9 @@
+{"source": "fixtures/music_only.mp4", "name": "main", "language": "en", "duration": 180.0,
+ "words": [
+  {"start": 61.2, "end": 61.6, "text": "Thank", "p": 0.31, "i": 0, "filler": null},
+  {"start": 61.6, "end": 62.0, "text": "you.", "p": 0.28, "i": 1, "filler": null}
+ ],
+ "sentences": [
+  {"w0": 0, "w1": 1, "start": 61.2, "end": 62.0, "text": "Thank you."}
+ ]
+}
