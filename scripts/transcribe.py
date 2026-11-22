@@ -230,7 +230,9 @@ def main():
     with tempfile.TemporaryDirectory() as td:
         wav = str(Path(td) / "a.wav")
         extract_audio(a.video, wav)
+        progress("transcribe", 0, "Transcribing")
         words, lang = transcribe_words(wav, a.model, a.language, not a.no_fillers)
+        progress("transcribe", 100, "Transcribed")
     data = build(a.video, words, lang, a.name, info["duration"])
     # what produced this transcript, so auto.py can redo it when the model/language/prompt changes
     data["made_with"] = {"model": a.model, "language": a.language, "version": TRANSCRIBE_VERSION}

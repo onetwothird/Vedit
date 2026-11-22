@@ -26,8 +26,9 @@ def ff(*args):
 
 
 def run_script(name, *args, check=True, env: dict | None = None):
+    # scripts print UTF-8; Windows default is cp1252
     r = subprocess.run([sys.executable, str(SCRIPTS / name), *map(str, args)], capture_output=True, text=True,
-                       encoding="utf-8", errors="replace", env={**os.environ, **env} if env else None)  # scripts print UTF-8; Windows default is cp1252
+                       encoding="utf-8", errors="replace", env={**os.environ, **env} if env else None)
     if check and r.returncode != 0:
         raise AssertionError(f"{name} failed:\n{r.stdout}\n{r.stderr}")
     return r
