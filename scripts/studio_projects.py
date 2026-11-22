@@ -5,6 +5,7 @@ import hashlib
 import json
 import os
 import re
+import sys
 import tempfile
 from dataclasses import asdict, dataclass, field
 from datetime import datetime, timezone
@@ -16,6 +17,7 @@ from highlights import Highlight
 
 LANG_MODEL = {"en": ("en", "small"), "tl": ("tl", "large-v3"), "taglish": ("tl", "large-v3")}
 
+PLATFORMS = ("reels", "shorts", "tiktok")
 PROJECT_FILE = "project.json"
 MAX_NAME_LEN = 60  # whole name before ".mp4": "NN " prefix + title + any " (WxH)" suffix
 _ILLEGAL = re.compile(r'[<>:"/\\|?*\x00-\x1f\x7f]')
@@ -69,6 +71,8 @@ def _atomic_write_json(path: Path, data) -> None:
     try:
         with os.fdopen(fd, "w", encoding="utf-8") as f:
             json.dump(data, f, ensure_ascii=False, indent=2)
+            f.flush()
+            os.fsync(f.fileno())
         os.replace(tmp, path)
     except BaseException:
         try:
@@ -86,10 +90,38 @@ def _read_registry() -> dict:
     return data if isinstance(data, dict) else {}
 
 
+def _stamp() -> str:
+    return datetime.now().strftime("%Y%m%d-%H%M%S-%f")
+
+
+def _backup(path: Path) -> Path:
+    """Move an unreadable file aside (never delete it) so a fresh one can take its place."""
+    bak = path.with_name(f"{path.name}.bak-{_stamp()}")
+    os.replace(path, bak)
+    return bak
+
+
 def _register(pid: str, wd: Path) -> None:
-    reg = _read_registry()
+    path = _registry_path()
+    try:
+        reg = json.loads(path.read_text(encoding="utf-8"))
+        if not isinstance(reg, dict):
+            raise ValueError("registry is not an object")
+    except FileNotFoundError:
+        reg = {}
+    except ValueError:  # unparseable: keep a copy before rewriting
+        _backup(path)
+        reg = {}
     reg[pid] = {"workdir": str(wd), "opened": _now()}
-    _atomic_write_json(_registry_path(), reg)
+    _atomic_write_json(path, reg)
+
+
+def _touch_registry(pid: str, wd: Path) -> None:
+    """Recency bump is best-effort: the project itself is already safely on disk."""
+    try:
+        _register(pid, wd)
+    except Exception as e:  # noqa: BLE001
+        print(f"vedit: could not update project registry: {e}", file=sys.stderr)
 
 
 def _from_dict(d: dict) -> Project:
@@ -102,7 +134,7 @@ def _read_project(wd: Path) -> Project:
     f = wd / PROJECT_FILE
     try:
         return _from_dict(json.loads(f.read_text(encoding="utf-8")))
-    except (OSError, ValueError, KeyError, TypeError) as e:
+    except (ValueError, KeyError, TypeError) as e:  # other OSErrors (locks, permissions) propagate
         raise ValueError(f"corrupt or unreadable project file {f}: {e}") from e
 
 
@@ -111,16 +143,26 @@ def save_project(p: Project) -> None:
 
 
 def create_project(source: Path, language: str, platform: str) -> Project:
-    """New project for `source`. The id is derived from the path, so an existing project keeps its work."""
+    """New project for `source`. The id is derived from the path, so an existing project keeps its work.
+
+    A missing project.json starts fresh; a corrupt one is moved to project.json.bak-<stamp> first; any other
+    I/O error propagates so a valid project is never replaced.
+    """
+    if language not in LANG_MODEL:
+        raise ValueError(f"unsupported language: {language!r}")
+    if platform not in PLATFORMS:
+        raise ValueError(f"unsupported platform: {platform!r}")
     source = Path(source).resolve()
     wd = workdir_for(source)
     try:
         p = _read_project(wd)
-    except ValueError:
+    except (FileNotFoundError, ValueError) as e:
+        if isinstance(e, ValueError):
+            _backup(wd / PROJECT_FILE)
         p = Project(id=project_id(source), type="clip", source=str(source), language=language,
                     platform=platform, created=_now())
         save_project(p)
-    _register(p.id, wd)
+    _touch_registry(p.id, wd)
     return p
 
 
@@ -128,8 +170,11 @@ def load_project(pid: str) -> Project:
     """Raises KeyError for an unknown id and ValueError for a missing or corrupt project file."""
     entry = _read_registry()[pid]
     wd = Path(entry["workdir"])
-    p = _read_project(wd)
-    _register(pid, wd)
+    try:
+        p = _read_project(wd)
+    except FileNotFoundError as e:
+        raise ValueError(f"project file missing in {wd}") from e
+    _touch_registry(pid, wd)
     return p
 
 
@@ -139,7 +184,7 @@ def list_recent(limit: int = 10) -> list[Project]:
     for _pid, entry in rows:
         try:
             out.append(_read_project(Path(entry["workdir"])))
-        except (ValueError, KeyError, TypeError):
+        except (OSError, ValueError, KeyError, TypeError):
             continue  # workdir or project.json gone/corrupt: skip, don't raise
         if len(out) >= limit:
             break

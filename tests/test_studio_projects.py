@@ -100,3 +100,75 @@ def test_save_is_atomic(tmp_path, home, monkeypatch):
     monkeypatch.undo()
     save_project(p)
     assert json.loads(f.read_text(encoding="utf-8"))["settings"] == {"changed": True}
+
+
+def _bak(d, name):
+    return [x for x in d.iterdir() if x.name.startswith(name + ".bak-")]
+
+
+def test_create_never_overwrites_unreadable_file(tmp_path, home, monkeypatch):
+    src = make_tiny_video(tmp_path / "a.mp4")
+    create_project(src, "en", "reels")
+    f = sp.workdir_for(src) / "project.json"
+    before = f.read_bytes()
+    real = type(f).read_text
+
+    def locked(self, *a, **k):
+        if self.name == "project.json":
+            raise PermissionError("locked")
+        return real(self, *a, **k)
+    monkeypatch.setattr(type(f), "read_text", locked)
+    with pytest.raises(OSError):
+        create_project(src, "en", "reels")
+    assert f.read_bytes() == before and _bak(f.parent, "project.json") == []
+
+
+def test_create_backs_up_corrupt_or_mismatched_file(tmp_path, home):
+    src = make_tiny_video(tmp_path / "a.mp4")
+    f = sp.workdir_for(src) / "project.json"
+    for bad in ("{not json", '{"id": "x"}'):
+        f.write_text(bad, encoding="utf-8")
+        p = create_project(src, "en", "reels")
+        assert load_project(p.id) == p
+    baks = _bak(f.parent, "project.json")
+    assert len(baks) == 2 and {b.read_text(encoding="utf-8") for b in baks} == {"{not json", '{"id": "x"}'}
+
+
+def test_recreate_keeps_work_and_settings(tmp_path, home):
+    src = make_tiny_video(tmp_path / "a.mp4")
+    p = create_project(src, "en", "reels")
+    hl = {"id": "h01", "start": 0.0, "end": 5.0, "w0": 0, "w1": 9, "score": 5, "title": "t", "features": {}}
+    p.clips.append(ProjectClip(highlight=hl, kept=True, edl_file="clip-h01.edl.json"))
+    save_project(p)
+    q = create_project(src, "taglish", "tiktok")
+    assert q == p and q.language == "en" and q.platform == "reels" and q.clips[0].kept
+
+
+def test_registry_failure_is_best_effort(tmp_path, home, monkeypatch, capsys):
+    src = make_tiny_video(tmp_path / "a.mp4")
+    p = create_project(src, "en", "reels")
+
+    def boom(*a, **k):
+        raise OSError("registry locked")
+    monkeypatch.setattr(sp, "_register", boom)
+    assert load_project(p.id) == p
+    assert create_project(src, "en", "reels") == p
+    assert "registry" in capsys.readouterr().err
+
+
+def test_corrupt_registry_is_backed_up(tmp_path, home):
+    home.mkdir(parents=True)
+    (home / "projects.json").write_text("garbage{", encoding="utf-8")
+    p = create_project(make_tiny_video(tmp_path / "a.mp4"), "en", "reels")
+    baks = _bak(home, "projects.json")
+    assert len(baks) == 1 and baks[0].read_text(encoding="utf-8") == "garbage{"
+    assert [x.id for x in list_recent()] == [p.id]
+
+
+def test_create_validates_language_and_platform(tmp_path, home):
+    src = make_tiny_video(tmp_path / "a.mp4")
+    with pytest.raises(ValueError):
+        create_project(src, "fr", "reels")
+    with pytest.raises(ValueError):
+        create_project(src, "en", "youtube")
+    assert not (sp.workdir_for(src) / "project.json").exists()
