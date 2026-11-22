@@ -54,6 +54,7 @@ def test_rotated_phone_clip_proxy_is_upright(tmp_path):
     p = make_proxy(src, tmp_path / "wd")
     v = video_stream(probe(p))
     assert (v["width"], v["height"]) == (540, 960) and rotation(v) == 0
+    assert v["pix_fmt"] == "yuv420p"
 
 
 def test_compliant_source_returned_as_is(tmp_path):
@@ -79,5 +80,36 @@ def test_filmstrip_metadata(tmp_path):
     assert out.exists()
     assert meta["count"] == math.ceil(float(probe(src)["format"]["duration"]) / 2) == 3
     assert meta["every"] == 2.0 and meta["height"] == 96 and meta["width"] == 170
+    assert (meta["cols"], meta["rows"]) == (3, 1)
     sprite = video_stream(probe(out))
-    assert (sprite["width"], sprite["height"]) == (meta["width"] * meta["count"], 96)
+    assert (sprite["width"], sprite["height"]) == (meta["width"] * meta["cols"], 96 * meta["rows"])
+
+
+def test_filmstrip_grid_for_many_frames(tmp_path):
+    src = _clip(tmp_path / "a.mp4", dur=6)
+    out = filmstrip(src, tmp_path, every=0.1, height=16)
+    meta = load_json(tmp_path / "filmstrip.json")
+    assert meta["count"] == 60 and (meta["cols"], meta["rows"]) == (50, 2)
+    sprite = video_stream(probe(out))
+    assert (sprite["width"], sprite["height"]) == (meta["width"] * 50, 32)
+
+
+def test_non_ascii_spaced_paths(tmp_path):
+    folder = tmp_path / "Mga Video ñ"
+    folder.mkdir()
+    src = _clip(folder / "pelikula ñ.mp4", rot=90)
+    p = make_proxy(src, folder / "wd ñ")
+    assert p.exists() and video_stream(probe(p))["height"] == 960
+    filmstrip(p, folder / "wd ñ")
+    assert load_json(folder / "wd ñ" / "filmstrip.json")["count"] == 1
+
+
+def test_proxy_keyframes_every_second(tmp_path):
+    src = _clip(tmp_path / "phone.mp4", dur=5, rot=90)
+    p = make_proxy(src, tmp_path / "wd")
+    out = subprocess.run([ffmpeg_bin("ffprobe"), "-v", "error", "-skip_frame", "nokey", "-select_streams", "v:0",
+                          "-show_entries", "frame=pts_time", "-of", "csv=p=0", str(p)],
+                         capture_output=True, text=True, check=True).stdout
+    keys = [float(x.rstrip(",")) for x in out.split()]
+    assert keys[0] == 0 and len(keys) == 5
+    assert all(abs((b - a) - 1.0) < 0.05 for a, b in zip(keys, keys[1:]))

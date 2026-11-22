@@ -7,18 +7,27 @@ import os
 import subprocess
 from pathlib import Path
 
-from common import die, ffmpeg_bin, load_json, need, progress, run, save_json
+from common import die, ffmpeg_bin, load_json, need, progress, save_json
 
 PROXY_SHORT_SIDE = 540
 MAX_DIRECT_SECONDS = 1800
+MAX_STRIP_COLS = 50  # keeps the sprite under the 65535 px JPEG limit for any realistic source
+
+
+def _run(cmd: list[str]) -> str:
+    """Run a command, decoding output as UTF-8 (Windows consoles default to cp1252); die with its stderr tail."""
+    res = subprocess.run(cmd, capture_output=True, encoding="utf-8", errors="replace")
+    if res.returncode != 0:
+        tail = "\n".join(res.stderr.strip().splitlines()[-25:])
+        die(f"command failed ({res.returncode}): {Path(cmd[0]).name}\n{tail}")
+    return res.stdout
 
 
 def probe(path: str | Path) -> dict:
     """Raw ffprobe JSON (format + streams)."""
     need("ffprobe")
-    res = run([ffmpeg_bin("ffprobe"), "-v", "error", "-print_format", "json", "-show_format", "-show_streams",
-               str(path)], capture=True)
-    return json.loads(res.stdout)
+    return json.loads(_run([ffmpeg_bin("ffprobe"), "-v", "error", "-print_format", "json", "-show_format",
+                            "-show_streams", str(path)]))
 
 
 def video_stream(info: dict) -> dict | None:
@@ -77,14 +86,20 @@ def _fps(v: dict) -> int:
 def _encode(cmd: list[str], duration: float, tmp: Path) -> None:
     """Run ffmpeg, mapping its -progress output onto progress('proxy', 0..100)."""
     proc = subprocess.Popen(cmd + ["-progress", "pipe:1", "-nostats"], stdout=subprocess.PIPE,
-                            stderr=subprocess.PIPE, text=True)
-    for line in proc.stdout:
-        if line.startswith("out_time_us=") and duration > 0:
-            try:
-                progress("proxy", 100 * int(line.split("=", 1)[1]) / 1e6 / duration)
-            except ValueError:
-                pass
-    err = proc.stderr.read()
+                            stderr=subprocess.PIPE, encoding="utf-8", errors="replace")
+    try:
+        for line in proc.stdout:
+            if line.startswith("out_time_us=") and duration > 0:
+                try:
+                    progress("proxy", 100 * int(line.split("=", 1)[1]) / 1e6 / duration)
+                except ValueError:
+                    pass
+        err = proc.stderr.read()
+    except BaseException:
+        proc.kill()
+        proc.wait()
+        tmp.unlink(missing_ok=True)
+        raise
     if proc.wait() != 0:
         tmp.unlink(missing_ok=True)
         die("proxy encode failed:\n" + "\n".join(err.strip().splitlines()[-25:]))
@@ -96,6 +111,7 @@ def make_proxy(video: Path, wd: Path) -> Path:
     info = probe(video)
     if not needs_proxy(info):
         return video
+    need("ffmpeg")
     wd.mkdir(parents=True, exist_ok=True)
     out, meta = wd / "proxy.mp4", wd / "proxy.json"
     st = video.stat()
@@ -114,7 +130,7 @@ def make_proxy(video: Path, wd: Path) -> Path:
     g = str(_fps(v))
     tmp = wd / "proxy.part.mp4"
     meta.unlink(missing_ok=True)
-    cmd = [ffmpeg_bin("ffmpeg"), "-y", "-v", "error", "-i", str(video), "-vf", f"scale={scale}",
+    cmd = [ffmpeg_bin("ffmpeg"), "-y", "-v", "error", "-i", str(video), "-vf", f"scale={scale}", "-pix_fmt", "yuv420p",
            "-c:v", "libx264", "-preset", "veryfast", "-crf", "26", "-g", g, "-keyint_min", g,
            "-sc_threshold", "0"]
     cmd += ["-c:a", "aac", "-b:a", "128k"] if audio_stream(info) else ["-an"]
@@ -128,14 +144,19 @@ def make_proxy(video: Path, wd: Path) -> Path:
 
 
 def filmstrip(video: Path, wd: Path, every: float = 2.0, height: int = 96) -> Path:
-    """Single-row JPEG sprite of one frame per `every` seconds, plus filmstrip.json {every, height, width, count}."""
+    """JPEG sprite grid (<=50 columns) of one frame per `every` seconds, plus filmstrip.json
+    {every, height, width, count, cols, rows}; width is one frame's width."""
     video, wd = Path(video), Path(wd)
+    need("ffmpeg")
     wd.mkdir(parents=True, exist_ok=True)
     duration = float(probe(video).get("format", {}).get("duration", 0) or 0)
     count = max(1, math.ceil(duration / every))
+    cols = min(count, MAX_STRIP_COLS)
+    rows = math.ceil(count / cols)
     out = wd / "filmstrip.jpg"
-    run([ffmpeg_bin("ffmpeg"), "-y", "-v", "error", "-i", str(video), "-an",
-         "-vf", f"fps=1/{every},scale=-2:{height},tile={count}x1", "-frames:v", "1", "-q:v", "5", str(out)])
+    _run([ffmpeg_bin("ffmpeg"), "-y", "-v", "error", "-i", str(video), "-an",
+         "-vf", f"fps=1/{every},scale=-2:{height},tile={cols}x{rows}", "-frames:v", "1", "-q:v", "5", str(out)])
     sprite_w = int(video_stream(probe(out))["width"])
-    save_json({"every": every, "height": height, "width": sprite_w // count, "count": count}, wd / "filmstrip.json")
+    save_json({"every": every, "height": height, "width": sprite_w // cols, "count": count, "cols": cols,
+               "rows": rows}, wd / "filmstrip.json")
     return out
