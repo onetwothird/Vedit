@@ -1,0 +1,43 @@
+{
+  "$schema": "../node_modules/@tauri-apps/cli/config.schema.json",
+  "productName": "vedit Studio",
+  "version": "0.1.0",
+  "identifier": "studio.vedit.app",
+  "build": {
+    "beforeDevCommand": "npm run dev",
+    "devUrl": "http://localhost:5173",
+    "beforeBuildCommand": "npm run build",
+    "frontendDist": "../dist"
+  },
+  "app": {
+    "windows": [
+      {
+        "label": "main",
+        "title": "vedit Studio",
+        "width": 1280,
+        "height": 800,
+        "minWidth": 960,
+        "minHeight": 600
+      }
+    ],
+    "security": {
+      "csp": "default-src 'self'; media-src 'self' asset: http://asset.localhost; connect-src 'self' http://127.0.0.1:* ws://127.0.0.1:*; img-src 'self' asset: http://asset.localhost data:; font-src 'self'",
+      "assetProtocol": {
+        "enable": true,
+        "scope": ["**"]
+      }
+    }
+  },
+  "bundle": {
+    "active": true,
+    "targets": ["nsis"],
+    "icon": ["icons/32x32.png", "icons/128x128.png", "icons/128x128@2x.png", "icons/icon.icns", "icons/icon.ico"],
+    "externalBin": ["bin/vedit-engine"]
+  },
+  "plugins": {
+    "updater": {
+      "pubkey": "PLACEHOLDER-TASK-22-UPDATER-PUBKEY",
+      "endpoints": ["https://updates.invalid/PLACEHOLDER-TASK-22/{{target}}/{{arch}}/{{current_version}}"]
+    }
+  }
+}
