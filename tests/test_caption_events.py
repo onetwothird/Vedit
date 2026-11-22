@@ -102,3 +102,29 @@ def test_events_box_and_speakers(pipeline_workdir_box, pipeline_workdir_speakers
 def test_events_vertical_lower_position(pipeline_workdir_9x16):
     ev = caption_events(Timeline(pipeline_workdir_9x16 / "edl.json"))
     assert ev["baseline_frac"] == 0.24 and ev["style"] == "pop" and ev["uppercase"] is True
+
+
+def _with_intro(wd, tmp_path, seconds):
+    """Copy of the workdir whose edl opens with a still-image intro of `seconds`."""
+    import shutil
+    import subprocess
+    d = tmp_path / "wd_intro"
+    shutil.copytree(wd, d, ignore=shutil.ignore_patterns("*.mp4", "*.ass", "*.srt"))
+    subprocess.run(["ffmpeg", "-y", "-v", "error", "-f", "lavfi", "-i", "color=c=blue:s=640x360", "-frames:v", "1",
+                    str(d / "intro.png")], check=True)
+    e = json.loads((d / "edl.json").read_text())
+    e["intro"] = {"path": "intro.png", "duration": seconds}
+    (d / "edl.json").write_text(json.dumps(e))
+    return d
+
+
+def test_lead_in_is_the_intro_length_and_captions_start_after_it(pipeline_workdir, tmp_path):
+    """The preview skips bumpers, so it subtracts lead_in from caption times: those times include the intro."""
+    plain = caption_events(Timeline(pipeline_workdir / "edl.json"))
+    assert plain["lead_in"] == 0
+    d = _with_intro(pipeline_workdir, tmp_path, 2.0)
+    ev = caption_events(Timeline(d / "edl.json"))
+    assert ev["lead_in"] == pytest.approx(2.0, abs=1 / 30)
+    assert len(ev["events"]) == len(plain["events"])
+    for a, b in zip(plain["events"], ev["events"]):
+        assert b["start"] - a["start"] == pytest.approx(ev["lead_in"], abs=1e-6)

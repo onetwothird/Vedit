@@ -1,0 +1,206 @@
+{
+ "style": "pop",
+ "font": "Arial",
+ "size_frac": 0.0484,
+ "baseline_frac": 0.24,
+ "uppercase": true,
+ "color": "#FFFFFF",
+ "highlight": "#FFD400",
+ "outline_frac": 0.0031,
+ "active_scale": 108,
+ "outline_color": "#000000",
+ "shadow": 1,
+ "back_color": null,
+ "back_alpha": null,
+ "speaker_colors": {},
+ "lead_in": 0.0,
+ "events": [
+  {
+   "start": 0.0,
+   "end": 0.8,
+   "words": [
+    {
+     "text": "Hello",
+     "start": 0.0,
+     "end": 0.34,
+     "hl_start": 0.0,
+     "hl_end": 0.4,
+     "speaker": null
+    },
+    {
+     "text": "everyone,",
+     "start": 0.4,
+     "end": 0.74,
+     "hl_start": 0.4,
+     "hl_end": 0.8,
+     "speaker": null
+    }
+   ]
+  },
+  {
+   "start": 0.8,
+   "end": 1.69,
+   "words": [
+    {
+     "text": "welcome",
+     "start": 0.8,
+     "end": 1.14,
+     "hl_start": 0.8,
+     "hl_end": 1.2,
+     "speaker": null
+    },
+    {
+     "text": "back.",
+     "start": 1.2,
+     "end": 1.54,
+     "hl_start": 1.2,
+     "hl_end": 1.69,
+     "speaker": null
+    }
+   ]
+  },
+  {
+   "start": 1.7558,
+   "end": 2.6558,
+   "words": [
+    {
+     "text": "today",
+     "start": 1.7558,
+     "end": 2.0108,
+     "hl_start": 1.7558,
+     "hl_end": 2.0558,
+     "speaker": null
+    },
+    {
+     "text": "we",
+     "start": 2.0558,
+     "end": 2.3108,
+     "hl_start": 2.0558,
+     "hl_end": 2.3558,
+     "speaker": null
+    },
+    {
+     "text": "build",
+     "start": 2.3558,
+     "end": 2.6108,
+     "hl_start": 2.3558,
+     "hl_end": 2.6558,
+     "speaker": null
+    }
+   ]
+  },
+  {
+   "start": 2.6558,
+   "end": 3.3608,
+   "words": [
+    {
+     "text": "an",
+     "start": 2.6558,
+     "end": 2.9108,
+     "hl_start": 2.6558,
+     "hl_end": 2.9558,
+     "speaker": null
+    },
+    {
+     "text": "editor.",
+     "start": 2.9558,
+     "end": 3.2108,
+     "hl_start": 2.9558,
+     "hl_end": 3.3608,
+     "speaker": null
+    }
+   ]
+  },
+  {
+   "start": 3.5,
+   "end": 4.505,
+   "words": [
+    {
+     "text": "So",
+     "start": 3.5,
+     "end": 3.755,
+     "hl_start": 3.5,
+     "hl_end": 3.8,
+     "speaker": null
+    },
+    {
+     "text": "first",
+     "start": 3.8,
+     "end": 4.055,
+     "hl_start": 3.8,
+     "hl_end": 4.1,
+     "speaker": null
+    },
+    {
+     "text": "you",
+     "start": 4.1,
+     "end": 4.355,
+     "hl_start": 4.1,
+     "hl_end": 4.505,
+     "speaker": null
+    }
+   ]
+  },
+  {
+   "start": 5.5333,
+   "end": 5.5333,
+   "words": [
+    {
+     "text": "Thanks",
+     "start": 5.5333,
+     "end": 5.8733,
+     "hl_start": 5.5333,
+     "hl_end": 5.9333,
+     "speaker": null
+    },
+    {
+     "text": "for",
+     "start": 5.9333,
+     "end": 6.2733,
+     "hl_start": 5.9333,
+     "hl_end": 6.3333,
+     "speaker": null
+    },
+    {
+     "text": "watching.",
+     "start": 6.3333,
+     "end": 6.6733,
+     "hl_start": 6.3333,
+     "hl_end": 5.5333,
+     "speaker": null
+    }
+   ]
+  },
+  {
+   "start": 5.5333,
+   "end": 6.4233,
+   "words": [
+    {
+     "text": "Thanks",
+     "start": 5.5333,
+     "end": 5.8733,
+     "hl_start": 5.5333,
+     "hl_end": 5.9333,
+     "speaker": null
+    },
+    {
+     "text": "for",
+     "start": 5.9333,
+     "end": 6.2733,
+     "hl_start": 5.9333,
+     "hl_end": 6.4233,
+     "speaker": null
+    }
+   ]
+  }
+ ],
+ "ass_starts": [
+  0.0,
+  0.8,
+  1.76,
+  2.66,
+  3.5,
+  5.53,
+  5.53
+ ]
+}

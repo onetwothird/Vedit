@@ -78,3 +78,29 @@ test("pick screenshots", async ({ page }) => {
   await page.evaluate(() => document.documentElement.classList.add("light"));
   await shot(page, "pick-empty-light", "t16");
 });
+
+test("player screenshots", async ({ page }) => {
+  test.setTimeout(60_000);
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await page.goto("/#/");
+  await page.evaluate(() => {
+    localStorage.setItem("vedit.theme", "dark");
+    localStorage.removeItem("vedit.safezone");
+  });
+  await page.goto("/#/p/mock-1/pick");
+  await page.reload();
+  await expect(page.locator(".pv video")).toBeVisible();
+  await expect.poll(() => page.locator(".pv video").evaluate((v: HTMLVideoElement) => v.readyState)).toBeGreaterThanOrEqual(2);
+  await page.getByRole("button", { name: "Play", exact: true }).click();
+  await page.waitForTimeout(1500);
+  await expect(page.locator("[data-caption]")).toBeVisible();
+  await shot(page, "pick-player-dark", "t18");
+
+  await page.evaluate(() => document.documentElement.classList.add("light"));
+  await expect(page.locator("[data-caption]")).toBeVisible();
+  await shot(page, "pick-player-light", "t18");
+
+  await page.evaluate(() => document.documentElement.classList.remove("light"));
+  await page.getByRole("button", { name: "Safe zone" }).click();
+  await shot(page, "safezone", "t18");
+});

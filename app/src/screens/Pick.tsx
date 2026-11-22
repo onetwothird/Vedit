@@ -5,17 +5,22 @@ import FilmFrame from "../components/FilmFrame";
 import Screen from "../components/Screen";
 import { engine } from "../engine/client";
 import { useJob } from "../engine/events";
-import type { AnalyzeResult, Project } from "../engine/types";
+import type { Aspect, AnalyzeResult, ClipView, Project } from "../engine/types";
 import { t } from "../i18n/t";
 import { keptCount, sortClips, type ClipSort } from "../lib/clips";
 import { analyzeBody, baseName } from "../lib/native";
 import { formatLength } from "../lib/time";
 import { useFilmstrip } from "../lib/useFilmstrip";
+import { coverWidth } from "../lib/filmstrip";
+import { previewSrc } from "../preview/media";
+import Player from "../preview/Player";
 
 const MORE_CLIPS = 6;
 const MAX_CLIPS = 60; // the most the engine accepts
 const STAGE_PAD = 48; // .stage padding, both sides
 const STAGE_MAX_H = 420;
+
+const ASPECTS: Aspect[] = ["9:16", "1:1", "4:5", "16:9"];
 
 const plural = (key: string, n: number, vars: Record<string, string | number> = {}) =>
   t(`${key}.${n === 1 ? "one" : "other"}`, { n, ...vars });
@@ -49,6 +54,9 @@ export default function Pick() {
   const busy = running || starting;
   const stage = useRef<HTMLDivElement>(null);
   const [stageW, setStageW] = useState(560);
+
+  // the selected clip's edit, for the player; until it arrives (or if it never does) the filmstrip frame stands in
+  const [loaded, setLoaded] = useState<{ hid: string; view: ClipView } | null>(null);
 
   function load(pid: string): Promise<void> {
     return engine.getProject(pid).then((p) => setProject(p));
@@ -102,6 +110,17 @@ export default function Pick() {
   const sorted = sortClips(clips, sort);
   const currentId = sorted.some((c) => c.highlight.id === picked) ? picked : sorted[0]?.highlight.id;
   const current = sorted.find((c) => c.highlight.id === currentId);
+  useEffect(() => {
+    if (!id || !currentId) return;
+    let live = true;
+    Promise.resolve()
+      .then(() => engine.clip(id, currentId))
+      .then((view) => live && setLoaded({ hid: currentId, view }), () => undefined);
+    return () => {
+      live = false;
+    };
+  }, [id, currentId]);
+
   const kept = keptCount(clips);
   const full = clips.length >= MAX_CLIPS;
   const analyze = routed ?? (project ? lastAnalyze(project) : undefined);
@@ -216,7 +235,18 @@ export default function Pick() {
           {current && (
             <>
               <div className="stage" ref={stage}>
-                <FilmFrame film={film} t={current.highlight.start} fit={{ width: stageW, height: STAGE_MAX_H }} className="preview-frame" />
+                {loaded && loaded.hid === current.highlight.id && project ? (
+                  <Player
+                    key={loaded.hid}
+                    view={loaded.view}
+                    src={previewSrc(project)}
+                    aspect={ASPECTS.find((a) => a === loaded.view.edl.output?.aspect) ?? "9:16"}
+                    fit={{ width: stageW, height: STAGE_MAX_H }}
+                    poster={(f) => <FilmFrame film={film} t={current.highlight.start} width={coverWidth(film, f.width, f.height)} />}
+                  />
+                ) : (
+                  <FilmFrame film={film} t={current.highlight.start} fit={{ width: stageW, height: STAGE_MAX_H }} className="preview-frame" />
+                )}
               </div>
               <h2 className="preview-title">{current.highlight.title}</h2>
               <p className="preview-meta mono">

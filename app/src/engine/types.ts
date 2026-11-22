@@ -159,6 +159,8 @@ export interface CaptionTrack {
   back_color: string | null;
   back_alpha: number | null;
   speaker_colors: Record<string, string>;
+  /** Seconds of intro bumper before the first edited clip; caption times include it, the preview skips it. */
+  lead_in?: number;
   events: CaptionEvent[];
 }
 
