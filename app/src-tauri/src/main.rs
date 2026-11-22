@@ -41,16 +41,31 @@ async fn show_in_folder(path: String) -> Result<(), String> {
     })
 }
 
-/// Only absolute local paths that exist: no relative paths, no UNC/network or `\\?\` device paths.
+/// Only absolute local paths that exist: no relative paths, no UNC/network or `\\?\` / `\\.\` device paths.
+/// The check runs before `exists()`, which would otherwise open an SMB connection for a UNC path.
 fn local_existing_path(path: &str) -> Result<&Path, String> {
     let p = Path::new(path);
-    if path.starts_with("\\\\") || path.starts_with("//") || !p.is_absolute() {
+    if !is_local_absolute(p) {
         return Err("invalid_path".into());
     }
     if !p.exists() {
         return Err("path_not_found".into());
     }
     Ok(p)
+}
+
+/// Windows: a plain drive path with a root (`C:\...`), judged by how Rust parses it, so mixed separators such as
+/// `/\server\share` (UNC) or `/\?\C:\x` (verbatim) are caught too. `C:x` (drive-relative) has no root.
+#[cfg(windows)]
+fn is_local_absolute(p: &Path) -> bool {
+    use std::path::{Component, Prefix};
+    matches!(p.components().next(), Some(Component::Prefix(pre)) if matches!(pre.kind(), Prefix::Disk(_)))
+        && p.has_root()
+}
+
+#[cfg(not(windows))]
+fn is_local_absolute(p: &Path) -> bool {
+    p.is_absolute() && !p.to_string_lossy().starts_with("//")
 }
 
 #[cfg(windows)]
@@ -151,6 +166,13 @@ mod tests {
             "//server/share/x.mp4".to_string(),
             r"\\localhost\C$\Windows".to_string(),
             format!(r"\\?\{here}"),
+            r"/\server\share\x.mp4".to_string(),
+            r"\/server\share\x.mp4".to_string(),
+            r"/\.\C:\x".to_string(),
+            r"/\?\C:\x".to_string(),
+            r"\\?\C:\x".to_string(),
+            r"\\.\C:\x".to_string(),
+            r"\\?\UNC\server\share\x".to_string(),
         ] {
             assert_eq!(local_existing_path(&p).unwrap_err(), "invalid_path", "{p:?}");
         }
