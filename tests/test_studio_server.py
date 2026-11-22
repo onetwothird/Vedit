@@ -14,6 +14,7 @@ pytest.importorskip("fastapi", reason="needs the studio extra")
 import httpx  # noqa: E402
 from fastapi.testclient import TestClient  # noqa: E402
 
+import models  # noqa: E402
 import vedit  # noqa: E402
 from common import load_json, save_json, workdir_for  # noqa: E402
 from conftest import SCRIPTS  # noqa: E402
@@ -75,13 +76,19 @@ def home(tmp_path, monkeypatch):
     return h
 
 
+def installed(monkeypatch, *names):
+    st = {n: {"installed": n in names, "size_mb": m["size_mb"]} for n, m in models.MODELS.items()}
+    monkeypatch.setattr(models, "status", lambda: st)
+
+
 @pytest.fixture
 def fake_queue():
     return FakeQueue()
 
 
 @pytest.fixture
-def app(home, fake_queue):
+def app(home, fake_queue, monkeypatch):
+    installed(monkeypatch, "small", "large-v3")  # default: no model step; tests override
     a = create_app(TOKEN, fake_queue)
     fake_queue.on_event = a.state.engine.on_event
     yield a
@@ -151,7 +158,7 @@ def test_health_and_allowed_origins(client, auth):
 
 def test_doctor_shape(client, auth):
     d = client.get("/doctor", headers=auth).json()
-    assert isinstance(d["ffmpeg"], bool) and isinstance(d["libass"], bool) and d["models"] == {}
+    assert isinstance(d["ffmpeg"], bool) and isinstance(d["libass"], bool) and set(d["models"]) == {"small", "large-v3"}
 
 
 # ---- projects -------------------------------------------------------------------------------------------------
@@ -183,6 +190,18 @@ def test_analyze_submits_expected_steps(client, auth, fake_queue, tiny_video):
     assert "--framing" in fake_queue.steps[3][1] and "--ai" not in fake_queue.steps[2][1]
     assert all(str(tiny_video.resolve()) in s[1] for s in fake_queue.steps)
     assert fake_queue.submits[-1]["env"] == {} and all(len(s) == 3 for s in fake_queue.steps)
+
+
+def test_analyze_prepends_model_step_when_missing(client, auth, fake_queue, tiny_video, monkeypatch):
+    installed(monkeypatch, "small")  # tagalog needs large-v3
+    pid = client.post("/projects", headers=auth, json={"source": str(tiny_video), "language": "tl",
+                                                       "platform": "shorts"}).json()["id"]
+    client.post(f"/projects/{pid}/analyze", headers=auth, json={})
+    steps = fake_queue.steps
+    assert [s[0] for s in steps] == ["model", "proxy", "analyze", "highlights", "framing"]
+    assert steps[0][1][-3:] == ["models.py", "download", "large-v3"] or steps[0][1][-2:] == ["download", "large-v3"]
+    assert [s[2] for s in steps] == pytest.approx([0.3, 0.07, 0.42, 0.105, 0.105])
+    assert sum(s[2] for s in steps) == pytest.approx(1.0)
 
 
 def test_analyze_without_body(client, auth, fake_queue, tiny_video):
@@ -607,3 +626,40 @@ def test_render_crf_flag(pipeline_workdir, tmp_path, monkeypatch):
         monkeypatch.setattr(sys, "argv", ["render.py", str(wd / "edl.json"), *extra])
         render.main()
     assert seen == [20, 18]
+
+
+# ---- models ---------------------------------------------------------------------------------------------------
+
+def test_models_status_route(client, auth, monkeypatch):
+    installed(monkeypatch, "small")
+    r = client.get("/models", headers=auth).json()
+    assert r == {"small": {"installed": True, "size_mb": 484}, "large-v3": {"installed": False, "size_mb": 3090}}
+
+
+def test_model_download_submits_model_job(client, auth, fake_queue):
+    job = client.post("/models/large-v3/download", headers=auth).json()
+    assert job["kind"] == "model"
+    assert [s[0] for s in fake_queue.steps] == ["model"] and fake_queue.steps[0][2] == 1.0
+    assert fake_queue.steps[0][1][-2:] == ["download", "large-v3"]
+
+
+def test_model_unknown_name_404(client, auth):
+    for r in (client.post("/models/huge/download", headers=auth), client.delete("/models/huge", headers=auth)):
+        assert r.status_code == 404 and r.json()["code"] == "not_found"
+
+
+def test_model_delete_and_busy(client, auth, app, fake_queue, tmp_path, monkeypatch):
+    monkeypatch.undo()  # real status()/delete against a temp folder
+    monkeypatch.setenv("VEDIT_MODELS", str(tmp_path / "m"))
+    monkeypatch.setenv("VEDIT_HOME", str(tmp_path / "home"))
+    (tmp_path / "m" / "small").mkdir(parents=True)
+    for f in models.REQUIRED_FILES:
+        (tmp_path / "m" / "small" / f).write_bytes(b"x")
+    job = client.post("/models/large-v3/download", headers=auth).json()
+    app.state.engine.wait_idle()
+    busy = client.delete("/models/small", headers=auth)
+    assert busy.status_code == 409 and busy.json()["code"] == "busy" and (tmp_path / "m" / "small").exists()
+    fake_queue.finish(job["id"])
+    app.state.engine.wait_idle()
+    r = client.delete("/models/small", headers=auth)
+    assert r.status_code == 200 and r.json()["small"]["installed"] is False and not (tmp_path / "m" / "small").exists()

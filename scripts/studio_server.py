@@ -32,6 +32,7 @@ from fastapi.responses import JSONResponse  # noqa: E402
 from pydantic import BaseModel  # noqa: E402
 from starlette.exceptions import HTTPException as StarletteHTTPException  # noqa: E402
 
+import models  # noqa: E402
 import vedit  # noqa: E402
 from captions import caption_events  # noqa: E402
 from common import ffmpeg_bin, ffprobe, load_json, py_cmd, save_json, workdir_for  # noqa: E402
@@ -531,7 +532,26 @@ def create_app(token: str, queue: JobQueue | None = None) -> FastAPI:
     @app.get("/doctor")
     def doctor():
         ffmpeg, libass = _ffmpeg_status()
-        return {"ffmpeg": ffmpeg, "libass": libass, "models": {}}
+        return {"ffmpeg": ffmpeg, "libass": libass, "models": models.status()}
+
+    @app.get("/models")
+    def model_status():
+        return models.status()
+
+    @app.post("/models/{name}/download")
+    def model_download(name: str):
+        if name not in models.MODELS:
+            raise NotFound(f"model {name}")
+        return _job_dict(engine.submit("", "model", [("model", py_cmd("models.py", "download", name), 1.0)]))
+
+    @app.delete("/models/{name}")
+    def model_delete(name: str):
+        if name not in models.MODELS:
+            raise NotFound(f"model {name}")
+        if engine.active_jobs():
+            return _error(409, "busy", "a job is running; try again when it finishes")
+        models.delete(name)
+        return models.status()
 
     @app.get("/projects/recent")
     def recent():
@@ -564,6 +584,8 @@ def create_app(token: str, queue: JobQueue | None = None) -> FastAPI:
                 "framing": py_cmd("highlights.py", src, "--framing")}
         steps = [(stage, argv[stage], share) + ((step_env[stage],) if stage in step_env else ())
                  for stage, share in ANALYZE_STEPS]
+        if not models.status()[model]["installed"]:  # fetch the speech model first, as 30% of the job
+            steps = [("model", py_cmd("models.py", "download", model), 0.3)] +                     [(st, argv_, share * 0.7, *rest) for st, argv_, share, *rest in steps]
         return _job_dict(engine.submit(pid, "analyze", steps))
 
     @app.get("/projects/{pid}/transcript")
