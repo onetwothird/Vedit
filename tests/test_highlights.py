@@ -72,6 +72,23 @@ def short_speech_long_video_wd(tmp_path_factory):
     return _synthetic_wd(tmp_path_factory.mktemp("shortlong"), SHORT_TALK, duration=120.0)
 
 
+RUN = "We finally found the trail and it went straight up the hill to the old lookout."  # 16 words
+
+
+@pytest.fixture(scope="module")
+def sparse_wd(tmp_path_factory):
+    """Three ~6 s runs of speech, 40 s of silence after each, in a 150 s video."""
+    return _synthetic_wd(tmp_path_factory.mktemp("sparse"), [(RUN, 16 / 6, 40.0)] * 3, duration=150.0)
+
+
+@pytest.fixture(scope="module")
+def long_sentence_wd(tmp_path_factory):
+    """One 100 s sentence (40 slow words, no pause over 0.6 s), then "Yes."."""
+    slow = " ".join(["slowly"] * 39 + ["done."])
+    return _synthetic_wd(tmp_path_factory.mktemp("longsent"), [(slow, 0.4, 0.5), ("Yes.", 2.0, 0.0)],
+                         duration=110.0)
+
+
 VOCAB = ("we went to the market and talked about money and work and family and the new place "
          "then everyone laughed because the plan changed again at the last minute").split()
 HOOKS = ["Nobody believes this part", "Why does this keep happening?", "The worst day was", "Grabe talaga",
@@ -148,13 +165,44 @@ def test_short_speech_in_long_video_is_one_padded_clip(short_speech_long_video_w
     assert 0 <= h["start"] and h["end"] <= 120.0 and h["end"] - h["start"] >= min(20, 120.0) - 1e-6
 
 
+def test_sparse_speech_is_padded_runs(sparse_wd):
+    sents = load_json(sparse_wd / "transcript.main.json")["sentences"]
+    hs, why = find_highlights(sparse_wd)
+    assert why is None and 1 <= len(hs) <= 3
+    for h in hs:
+        assert 20 <= h["end"] - h["start"] <= 90
+        own = [s for s in sents if h["w0"] <= s["w0"] and s["w1"] <= h["w1"]]
+        others = [s for s in sents if s not in own]
+        assert own and not any(s["start"] < h["end"] and h["start"] < s["end"] for s in others)
+        assert all(b["start"] - a["end"] <= 2 for a, b in zip(own, own[1:]))   # silence barrier kept
+
+
+def test_overlong_sentence_never_breaks_bounds(long_sentence_wd):
+    hs, why = find_highlights(long_sentence_wd)
+    assert all(20 <= h["end"] - h["start"] <= 90 for h in hs)
+    assert hs or why == "no_speech"
+
+
+@pytest.mark.parametrize("name", ["en_podcast_wd", "taglish_wd", "music_only_wd", "short_wd",
+                                  "short_speech_long_video_wd", "sparse_wd", "long_sentence_wd", "long_wd"])
+def test_every_clip_within_bounds(name, request):
+    wd = request.getfixturevalue(name)
+    duration = load_json(wd / "analysis.main.json")["probe"]["duration"]
+    hs, why = find_highlights(wd)
+    assert hs or why == "no_speech"
+    for h in hs:
+        length = h["end"] - h["start"]
+        whole_video = duration < 20 and len(hs) == 1 and h["start"] == 0 and h["end"] == duration
+        assert whole_video or min(20, duration) - 1e-6 <= length <= 90, (name, h["start"], h["end"])
+        assert 0 <= h["start"] < h["end"] <= duration
+
+
 def test_padding_is_even_and_clamped():
     from highlights import _padded
-    assert _padded(10, 20, 20, 0, 100) == (5, 25)
-    assert _padded(2, 12, 20, 0, 100) == (0, 20)
-    assert _padded(2, 12, 40, 0, 30) == (0, 30)                    # both sides clamped: the whole video                  # start side clamped, end takes the rest
-    assert _padded(90, 98, 20, 0, 100) == (80, 100)               # end side clamped, start takes the rest
-
+    assert _padded(10, 20, 20, 0, 100) == (5, 25)                  # even split
+    assert _padded(2, 12, 20, 0, 100) == (0, 20)                   # start side clamped, end takes the rest
+    assert _padded(90, 98, 20, 0, 100) == (80, 100)                # end side clamped, start takes the rest
+    assert _padded(2, 12, 40, 0, 30) == (0, 30)                    # both sides clamped: the whole video
 
 
 def test_three_hour_video_fast_and_spread(long_wd):              # synthetic 3 h transcript, no audio

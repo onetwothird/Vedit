@@ -118,7 +118,8 @@ def _load_energy(wd: Path, tr: dict, ana: dict, hop: float = 0.5) -> list[float]
 def make_title(words: list[dict]) -> str:
     """First sentence, fillers out, sentence case, cut to 48 chars at a word boundary."""
     toks = [w for w in words if w.get("filler") != "hard"]
-    while toks and toks[0].get("filler"):  # soft fillers only go at the front ("So, ..."), mid-sentence they carry meaning
+    # soft fillers only go at the front ("So, ..."); mid-sentence they carry meaning
+    while toks and toks[0].get("filler"):
         toks = toks[1:]
     toks = [w["text"].strip() for w in toks if w["text"].strip()]
     caps = [t.isupper() and len(re.sub(r"\W", "", t)) > 1 for t in toks]
@@ -219,20 +220,30 @@ def find_highlights(wd: Path, max_clips: int = 12, min_len: float = 20,
         return [], "no_speech"
     duration = float((ana.get("probe") or {}).get("duration") or (ana.get("info") or {}).get("duration")
                      or words[-1]["end"])
-    whole = None  # (start, end) when one clip must cover all the speech
-    spans = []
+    last, spans = len(sents) - 1, []
+    bounds: dict[tuple[int, int], tuple[float, float]] = {}  # spans whose clip is padded past their speech
     if duration < min_len:  # the whole video is shorter than one clip: it is the clip
-        whole = (0.0, duration)
+        bounds[(0, last)] = (0.0, duration)
     else:
         bar = _barriers(sents, ana.get("silences") or [], duration)
         spans = _candidates(sents, bar, min_len, max_len)
-        if not spans and words[-1]["end"] - words[0]["start"] <= max_len:
-            whole = _padded(words[0]["start"], words[-1]["end"], min_len, 0.0, duration)
-        elif not spans:  # sparse speech spread wider than a clip: let windows cross the long silences
-            spans = (_candidates(sents, [False] * len(sents), min_len, max_len)
-                     or [(i, i) for i in range(len(sents))])
-    if whole:
-        spans = [(0, len(sents) - 1)]
+        if not spans and sents[last]["end"] - sents[0]["start"] <= max_len:  # all speech fits one clip
+            bounds[(0, last)] = _padded(sents[0]["start"], sents[last]["end"], min_len, 0.0, duration)
+        elif not spans:  # sparse speech: each barrier-separated run, padded into its own silence
+            cuts = [0] + [k for k in range(1, len(sents)) if bar[k]] + [len(sents)]
+            for i, nxt in zip(cuts, cuts[1:]):
+                j = nxt - 1
+                lo = sents[i - 1]["end"] if i else 0.0
+                hi = sents[j + 1]["start"] if j < last else duration
+                if sents[j]["end"] - sents[i]["start"] <= max_len:
+                    bounds[(i, j)] = _padded(sents[i]["start"], sents[j]["end"], min_len, lo, hi)
+        if not spans:
+            floor = min(min_len, duration)
+            bounds = {k: v for k, v in bounds.items() if floor <= v[1] - v[0] <= max_len}
+    spans = spans if not bounds else list(bounds)
+    if not spans:
+        progress("highlights", 100, "No speech fits a clip")
+        return [], "no_speech"
     progress("highlights", 20, f"{len(spans)} candidate windows")
 
     hop = 0.5
@@ -268,8 +279,7 @@ def find_highlights(wd: Path, max_clips: int = 12, min_len: float = 20,
     for (i, j), rate in zip(spans, rates):
         a, b = sents[i], sents[j]
         w0, w1, start, end = a["w0"], b["w1"], a["start"], b["end"]
-        if whole:
-            start, end = whole
+        start, end = bounds.get((i, j), (start, end))
         n = w1 - w0 + 1
         f = {"speech_rate": _clamp(0.5 + (rate / med_rate - 1)),
              "hook": hooks[i],
@@ -312,7 +322,7 @@ def find_highlights(wd: Path, max_clips: int = 12, min_len: float = 20,
     for n, (raw, start, end, i, j, f) in enumerate(picked, 1):
         s = sents[i]
         out.append({"id": f"h{n:02d}", "start": round(start, 3), "end": round(end, 3),
-                    "w0": 0 if whole else s["w0"], "w1": len(words) - 1 if whole else sents[j]["w1"],
+                    "w0": s["w0"], "w1": sents[j]["w1"],
                     "score": int(max(0, min(100, round(100 * raw)))),
                     "title": make_title(words[s["w0"]:s["w1"] + 1]),
                     "features": {k: round(f[k], 3) for k in WEIGHTS}})
