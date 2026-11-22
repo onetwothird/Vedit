@@ -29,7 +29,7 @@ from fastapi import Body, FastAPI, Request, WebSocket  # noqa: E402
 from fastapi.exceptions import RequestValidationError  # noqa: E402
 from fastapi.middleware.cors import CORSMiddleware  # noqa: E402
 from fastapi.responses import JSONResponse  # noqa: E402
-from pydantic import BaseModel  # noqa: E402
+from pydantic import BaseModel, Field  # noqa: E402
 from starlette.exceptions import HTTPException as StarletteHTTPException  # noqa: E402
 
 import models  # noqa: E402
@@ -68,6 +68,7 @@ class AIOptions(BaseModel):
 
 class AnalyzeBody(BaseModel):
     ai: Optional[AIOptions] = None
+    max_clips: Optional[int] = Field(default=None, ge=1, le=60)  # most highlights to keep; None = the engine default
 
 
 class KeptBody(BaseModel):
@@ -85,6 +86,11 @@ class ExportBody(BaseModel):
 class NotFound(Exception):
     """An explicit lookup (project, clip, job, transcript) found nothing: the API answers 404."""
     code = "not_found"
+
+
+class NoFilmstrip(NotFound):
+    """The project has no thumbnail sprite (yet)."""
+    code = "no_filmstrip"
 
 
 class ClipMissing(NotFound):
@@ -574,9 +580,11 @@ def create_app(token: str, queue: JobQueue | None = None) -> FastAPI:
         lang, model = LANG_MODEL[p.language]
         src = str(Path(p.source))
         hl_args: list[str] = []
+        if body is not None and body.max_clips is not None:
+            hl_args += ["--max", str(body.max_clips)]
         step_env: dict[str, dict] = {}
         if body is not None and body.ai is not None:
-            hl_args = ["--ai", body.ai.provider] + (["--ai-model", body.ai.model] if body.ai.model else [])
+            hl_args += ["--ai", body.ai.provider] + (["--ai-model", body.ai.model] if body.ai.model else [])
             step_env["highlights"] = {"VEDIT_AI_KEY": body.ai.api_key}  # only the step that calls the AI sees it
         argv = {"proxy": py_cmd("proxy.py", src),
                 "analyze": py_cmd("analyze.py", src, "--model", model, "--language", lang),
@@ -595,6 +603,14 @@ def create_app(token: str, queue: JobQueue | None = None) -> FastAPI:
         if not tp.is_file():
             raise NotFound("transcript")
         return load_json(tp)
+
+    @app.get("/projects/{pid}/filmstrip")
+    def filmstrip(pid: str):
+        wd = workdir_for(_project(pid).source)
+        meta_path, image = wd / "filmstrip.json", wd / "filmstrip.jpg"
+        if not meta_path.is_file() or not image.is_file():
+            raise NoFilmstrip("this project has no thumbnails yet")
+        return {**load_json(meta_path), "image": str(image)}
 
     @app.get("/projects/{pid}/clips/{hid}")
     def get_clip(pid: str, hid: str):

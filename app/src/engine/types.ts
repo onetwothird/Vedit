@@ -185,7 +185,21 @@ export interface NewProjectBody {
 }
 
 export interface AnalyzeBody {
+  /** Most highlights to find (1 to 60). Re-analyzing with a bigger number finds more; existing clips stay. */
+  max_clips?: number;
   ai?: { provider: "anthropic" | "openai"; api_key: string; model?: string };
+}
+
+/** The thumbnail sprite: one frame of `width` x `height` per `every` seconds, laid out `cols` x `rows`. */
+export interface FilmstripInfo {
+  every: number;
+  height: number;
+  width: number;
+  count: number;
+  cols: number;
+  rows: number;
+  /** Absolute file path from the engine; a URL the webview can load in the mock. */
+  image: string;
 }
 
 export interface ExportBody {
@@ -221,6 +235,7 @@ export interface Engine {
   getProject(pid: string): Promise<Project>;
   analyze(pid: string, body?: AnalyzeBody): Promise<Job>;
   transcript(pid: string): Promise<Transcript>;
+  filmstrip(pid: string): Promise<FilmstripInfo>;
   clip(pid: string, hid: string): Promise<ClipView>;
   patchClip(pid: string, hid: string, op: ClipOp): Promise<ClipView>;
   setKept(pid: string, hid: string, kept: boolean): Promise<Project>;

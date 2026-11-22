@@ -127,25 +127,44 @@ def trim(edl: dict, w_first: int, w_last: int) -> dict:
 
 
 def fix_word(edl: dict, wrong: str, right: str) -> dict:
-    """Spell `wrong` as `right` in the captions."""
+    """Spell `wrong` as `right` in the captions. `right == wrong` removes the replacement (the undo of a first fix)."""
     e = deepcopy(edl)
-    e.setdefault("captions", {}).setdefault("replace", {})[wrong] = right
+    rep = e.setdefault("captions", {}).setdefault("replace", {})
+    if right == wrong:
+        rep.pop(wrong, None)
+    else:
+        rep[wrong] = right
     return e
 
 
 def patch_section(edl: dict, section: Section, patch: dict) -> dict:
-    """Shallow-merge `patch` into a section. "framing" maps crop_x/zoom onto every clip and fit onto the edl."""
+    """Shallow-merge `patch` into a section. "framing" maps crop_x/zoom onto every clip and fit onto the edl.
+    A null value removes the key (the undo of setting a key that was absent)."""
     e = deepcopy(edl)
     if section in ("captions", "audio", "color"):
-        e.setdefault(section, {}).update(deepcopy(patch))
+        sec = e.setdefault(section, {})
+        for k, v in patch.items():
+            if v is None:
+                sec.pop(k, None)
+            else:
+                sec[k] = deepcopy(v)
     elif section == "framing":
         bad = set(patch) - {"crop_x", "zoom", "fit"}
         if bad:
             raise ValueError(f"unknown framing keys: {sorted(bad)}")
         if "fit" in patch:
-            e["fit"] = patch["fit"]
+            if patch["fit"] is None:
+                e.pop("fit", None)
+            else:
+                e["fit"] = patch["fit"]
         for c in e["clips"]:
-            c.update({k: v for k, v in patch.items() if k != "fit"})
+            for k, v in patch.items():
+                if k == "fit":
+                    continue
+                if v is None:
+                    c.pop(k, None)
+                else:
+                    c[k] = v
     else:
         raise ValueError(f"unknown section '{section}'")
     return e
