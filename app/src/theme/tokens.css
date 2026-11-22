@@ -28,7 +28,8 @@
   --chip-2: #26272c;
   --ink: #ececea;
   --body: #b3b5b9;
-  --muted: #7d8085;
+  /* mockup #7d8085: nudged to reach 4.5:1 (WCAG AA) on --panel */
+  --muted: #7e8186;
   --line: #ffffff14;
   --line-2: #ffffff24;
   --accent: #4ade80;
@@ -48,7 +49,8 @@ html.light {
   --chip-2: #e4e4e3;
   --ink: #18181a;
   --body: #4b4e53;
-  --muted: #85888d;
+  /* mockup #85888d: darkened to reach 4.5:1 (WCAG AA) on --page, --panel, --bg */
+  --muted: #5e6166;
   --line: #18181a14;
   --line-2: #18181a26;
   --accent: #18181a;
