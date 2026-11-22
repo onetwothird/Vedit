@@ -84,7 +84,7 @@ def process(video: Path, a) -> dict:
     if a.preview:
         out = out.with_name(out.stem + "_preview" + out.suffix)
     if a.thumbs:
-        step([str(HERE / "thumbs.py"), str(video)])
+        step(["thumbs.py", str(video)])
     return {"video": video.name, "out": str(out), "before": st["original"], "after": st["kept"],
             "secs": time.time() - t0}
 

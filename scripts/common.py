@@ -63,7 +63,7 @@ def run(cmd: list[str], capture: bool = False, quiet: bool = True) -> subprocess
 
 def ffprobe(path: str | Path) -> dict:
     need("ffprobe")
-    res = run(["ffprobe", "-v", "error", "-print_format", "json", "-show_format", "-show_streams", str(path)],
+    res = run([ffmpeg_bin("ffprobe"), "-v", "error", "-print_format", "json", "-show_format", "-show_streams", str(path)],
               capture=True)
     data = json.loads(res.stdout)
     v = next((s for s in data["streams"] if s["codec_type"] == "video"), None)

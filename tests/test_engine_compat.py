@@ -1,4 +1,5 @@
 """Frozen-safe subprocess helpers, bundled-ffmpeg lookup and the engine entry point."""
+import re
 import shutil
 import sys
 from pathlib import Path
@@ -30,7 +31,7 @@ def test_ffmpeg_bin_prefers_env(monkeypatch, tmp_path):
 
 def test_ffmpeg_bin_falls_back_to_path(monkeypatch):
     monkeypatch.delenv("VEDIT_FFMPEG_DIR", raising=False)
-    assert common.ffmpeg_bin("ffmpeg") == shutil.which("ffmpeg")
+    assert common.ffmpeg_bin("ffmpeg") == (shutil.which("ffmpeg") or "ffmpeg")
 
 
 def test_engine_entry_run_dispatches(capsys):
@@ -41,4 +42,33 @@ def test_engine_entry_run_dispatches(capsys):
 def test_no_raw_sys_executable_calls():
     offenders = [p.name for p in SCRIPTS.glob("*.py")
                  if p.name not in ("common.py", "engine_entry.py") and "sys.executable" in p.read_text("utf-8")]
+    assert offenders == []
+
+
+def test_ffmpeg_bin_ffprobe_in_env_dir(monkeypatch, tmp_path):
+    exe = tmp_path / "ffprobe.exe"
+    exe.write_bytes(b"")
+    monkeypatch.setenv("VEDIT_FFMPEG_DIR", str(tmp_path))
+    assert common.ffmpeg_bin("ffprobe") == str(exe)
+
+
+def test_ffmpeg_bin_env_dir_without_exe_suffix(monkeypatch, tmp_path):
+    exe = tmp_path / "ffprobe"
+    exe.write_bytes(b"")
+    monkeypatch.setenv("VEDIT_FFMPEG_DIR", str(tmp_path))
+    assert common.ffmpeg_bin("ffprobe") == str(exe)
+
+
+def test_engine_entry_keeps_string_exit_message(tmp_path, capsys):
+    script = tmp_path / "boom.py"
+    script.write_text('import sys; sys.exit("error: boom")', "utf-8")
+    assert engine_entry.main(["run", str(script)]) == 1
+    assert "error: boom" in capsys.readouterr().err
+
+
+def test_no_raw_ffmpeg_literals_in_argv():
+    # list element or first argument of run()/subprocess calls; need("ffmpeg") and hint strings do not match
+    pattern = re.compile(r"(?:\[|(?:run|call|Popen|check_call|check_output)\()\s*[\"'](ffmpeg|ffprobe)[\"']")
+    offenders = [p.name for p in SCRIPTS.glob("*.py")
+                 if p.name != "common.py" and pattern.search(p.read_text("utf-8"))]
     assert offenders == []

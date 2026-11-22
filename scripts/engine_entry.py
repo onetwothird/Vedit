@@ -7,7 +7,6 @@ from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
 
-
 sys.path.insert(0, str(HERE))
 
 
@@ -21,7 +20,10 @@ def _run(script: str, args: list[str]) -> int:
     except SystemExit as e:
         if e.code is None:
             return 0
-        return e.code if isinstance(e.code, int) else 1
+        if isinstance(e.code, int):
+            return e.code
+        print(e.code, file=sys.stderr)
+        return 1
     return 0
 
 
