@@ -25,3 +25,9 @@ docs/superpowers/
 
 # brainstorm mockups and plan-execution scratch
 .superpowers/
+
+# vedit Studio app
+app/node_modules/
+app/dist/
+app/src-tauri/target/
+app/src-tauri/bin/

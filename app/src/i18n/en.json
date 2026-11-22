@@ -1,0 +1,7 @@
+{
+  "app.name": "vedit",
+  "theme.toggle": "Switch to {mode} theme",
+  "theme.dark": "dark",
+  "theme.light": "light",
+  "export.button": "Export {n} clips"
+}
