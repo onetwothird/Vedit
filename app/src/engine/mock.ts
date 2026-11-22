@@ -7,6 +7,7 @@ import {
   type ExportBody, type FilmstripInfo, type Health, type Highlight, type Job, type ModelStatus, type NewProjectBody, type Project,
   type ProjectClip, type RenderPlanEntry, type Transcript, type TranscriptWord,
 } from "./types";
+import { fixWord, patchSection } from "../edit/timeline";
 
 const CLIPS: [title: string, score: number, kept: boolean][] = [
   ["Nobody tells you this when you start", 94, true], ["The ₱500 mistake on my first gig", 88, true],
@@ -111,12 +112,14 @@ function applyOp(edl: Edl, op: ClipOp): Edl {
       checkRange(op.w_first, op.w_last);
       return withRanges(edl, wordRanges(edl).map(([a, b]) => [Math.max(a, op.w_first), Math.min(b, op.w_last)] as Range));
     }
-    case "fix_word": {
-      const captions = (edl.captions ?? {}) as { replace?: Record<string, string> };
-      return { ...edl, captions: { ...captions, replace: { ...captions.replace, [op.wrong]: op.right } } };
-    }
+    case "fix_word":
+      return fixWord(edl, op.wrong, op.right); // right === wrong removes the replacement
     case "patch":
-      return { ...edl, [op.section]: { ...((edl[op.section] as object | undefined) ?? {}), ...op.patch } };
+      try {
+        return patchSection(edl, op.section, op.patch); // a null value removes the key
+      } catch (e) {
+        throw new EngineError(400, "bad_request", e instanceof Error ? e.message : "bad patch");
+      }
     default:
       throw new EngineError(400, "bad_request", `unknown op ${(op as { op?: unknown }).op}`);
   }
