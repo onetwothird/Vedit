@@ -6,6 +6,7 @@ import shutil
 import subprocess
 import sys
 import threading
+from pathlib import Path
 
 import pytest
 
@@ -181,7 +182,14 @@ def test_analyze_submits_expected_steps(client, auth, fake_queue, tiny_video):
     assert analyze[analyze.index("--language") + 1] == "tl" and analyze[analyze.index("--model") + 1] == "large-v3"
     assert "--framing" in fake_queue.steps[3][1] and "--ai" not in fake_queue.steps[2][1]
     assert all(str(tiny_video.resolve()) in s[1] for s in fake_queue.steps)
-    assert fake_queue.submits[-1]["env"] == {}
+    assert fake_queue.submits[-1]["env"] == {} and all(len(s) == 3 for s in fake_queue.steps)
+
+
+def test_analyze_without_body(client, auth, fake_queue, tiny_video):
+    pid = client.post("/projects", headers=auth, json={"source": str(tiny_video), "language": "en",
+                                                       "platform": "reels"}).json()["id"]
+    assert client.post(f"/projects/{pid}/analyze", headers=auth).status_code == 200
+    assert [s[0] for s in fake_queue.steps] == ["proxy", "analyze", "highlights", "framing"]
 
 
 def test_analyze_done_builds_clips(client, auth, analyzed_project):
@@ -190,7 +198,62 @@ def test_analyze_done_builds_clips(client, auth, analyzed_project):
     assert hs and [c["highlight"]["id"] for c in p["clips"]] == [h["id"] for h in hs]
     assert all(c["kept"] and (analyzed_project["wd"] / c["edl_file"]).is_file() for c in p["clips"])
     assert p["last_job"]["state"] == "done"
-    assert p["last_job"]["result"] == {"clips": len(hs), "reason": None}
+    assert p["last_job"]["result"] == {"clips": len(hs), "new": len(hs), "reason": None}
+    wd = analyzed_project["wd"]
+    assert p["settings"] == {"workdir": str(wd), "proxy": str(Path(p["source"])),  # no proxy needed: the source
+                             "filmstrip": str(wd / "filmstrip.json")}
+
+
+def test_settings_point_at_proxy_when_one_was_built(client, auth, app, fake_queue, analyzed_project):
+    wd, pid = analyzed_project["wd"], analyzed_project["id"]
+    src = client.get(f"/projects/{pid}", headers=auth).json()["source"]
+    (wd / "proxy.mp4").write_bytes(b"")
+    save_json({"src": src, "size": 1, "mtime": 1}, wd / "proxy.json")
+    job = client.post(f"/projects/{pid}/analyze", headers=auth, json={}).json()
+    fake_queue.finish(job["id"])
+    app.state.engine.wait_idle()
+    assert client.get(f"/projects/{pid}", headers=auth).json()["settings"]["proxy"] == str(wd / "proxy.mp4")
+
+
+def test_reanalyze_keeps_edits_and_adds_new_ids(client, auth, app, fake_queue, analyzed_project):
+    wd, pid = analyzed_project["wd"], analyzed_project["id"]
+    hid = analyzed_project["highlights"][0]["id"]
+    url = f"/projects/{pid}/clips/{hid}"
+    a, _ = client.get(url, headers=auth).json()["edl"]["clips"][0]["words"]
+    edited = client.patch(url, headers=auth, json={"op": "cut", "w0": a, "w1": a}).json()["edl"]
+    # shrink the kept clip's highlight so a later stretch of speech is free for a new highlight
+    proj = load_project(pid)
+    tr = load_json(wd / "transcript.main.json")
+    sents = tr["sentences"]
+    proj.clips[0].highlight = {**proj.clips[0].highlight, "start": 0.0, "end": sents[1]["end"]}
+    save_project(proj)
+    kept_before = dataclasses.asdict(proj.clips[0])
+    later = {"id": hid, "start": sents[3]["start"], "end": sents[-1]["end"], "w0": sents[3]["w0"],
+             "w1": sents[-1]["w1"], "score": 50, "title": "Later bit", "features": {}}
+    same = {**analyzed_project["highlights"][0], "id": "h05"}  # overlaps the kept clip by > 50%: dropped
+    save_json({"source": "x", "highlights": [same, later], "reason": None}, wd / "highlights.json")
+    job = client.post(f"/projects/{pid}/analyze", headers=auth, json={}).json()
+    fake_queue.finish(job["id"])
+    app.state.engine.wait_idle()
+    p = client.get(f"/projects/{pid}", headers=auth).json()
+    assert p["clips"][0] == kept_before                       # highlight and file name untouched
+    assert load_json(wd / f"clip-{hid}.edl.json") == edited   # the user's cut survived
+    assert [c["highlight"]["id"] for c in p["clips"]] == [hid, "h02"]
+    assert p["clips"][1]["highlight"]["title"] == "Later bit" and (wd / "clip-h02.edl.json").is_file()
+    assert p["last_job"]["result"] == {"clips": 2, "new": 1, "reason": None}
+
+
+def test_unsafe_highlight_ids_never_become_files(client, auth, app, fake_queue, analyzed_project):
+    wd, pid = analyzed_project["wd"], analyzed_project["id"]
+    for f in wd.glob("clip-*.edl.json"):
+        f.unlink()  # nothing preserved, so every highlight is considered
+    h = {**analyzed_project["highlights"][0], "id": "../../x"}
+    save_json({"source": "x", "highlights": [h], "reason": None}, wd / "highlights.json")
+    job = client.post(f"/projects/{pid}/analyze", headers=auth, json={}).json()
+    fake_queue.finish(job["id"])
+    app.state.engine.wait_idle()
+    assert load_project(pid).clips == []
+    assert not list(wd.parent.parent.rglob("x.edl.json"))
 
 
 def test_clip_edl_error_skips_that_highlight(client, auth, app, fake_queue, analyzed_project):
@@ -199,6 +262,7 @@ def test_clip_edl_error_skips_that_highlight(client, auth, app, fake_queue, anal
     bad = {**hl["highlights"][0], "id": "h99", "w0": 10**6, "w1": 10**6 + 1}  # no speech in range -> ValueError
     hl["highlights"].append(bad)
     save_json(hl, wd / "highlights.json")
+    (wd / "clip-h01.edl.json").unlink()  # not preserved, so both highlights are rebuilt
     job = client.post(f"/projects/{analyzed_project['id']}/analyze", headers=auth, json={}).json()
     fake_queue.finish(job["id"])
     app.state.engine.wait_idle()
@@ -214,7 +278,11 @@ def test_transcript_and_clip_view(client, auth, analyzed_project):
     v = client.get(f"/projects/{pid}/clips/{hid}", headers=auth).json()
     assert v["edl"]["clips"] and v["kept_ranges"] and all(e > s for s, e in v["kept_ranges"])
     assert "events" in v["captions"]
-    assert client.get(f"/projects/{pid}/clips/nope", headers=auth).status_code == 404
+    r = client.get(f"/projects/{pid}/clips/nope", headers=auth)
+    assert r.status_code == 404 and r.json()["code"] == "not_found" and isinstance(r.json()["detail"], str)
+    (analyzed_project["wd"] / f"clip-{hid}.edl.json").unlink()
+    r = client.get(f"/projects/{pid}/clips/{hid}", headers=auth)
+    assert r.status_code == 404 and r.json()["code"] == "clip_missing"
 
 
 def test_patch_cut_returns_new_ranges(client, auth, analyzed_project):
@@ -243,13 +311,14 @@ def test_patch_other_ops_and_errors(client, auth, analyzed_project):
     e = client.patch(url, headers=auth, json={"op": "patch", "section": "framing", "patch": {"crop_x": 0.3}}).json()
     assert all(c["crop_x"] == 0.3 for c in e["edl"]["clips"])
     a, b = e["edl"]["clips"][0]["words"]
-    trimmed = client.patch(url, headers=auth, json={"op": "trim", "w0": a + 1, "w1": b}).json()
+    trimmed = client.patch(url, headers=auth, json={"op": "trim", "w_first": a + 1, "w_last": b}).json()
     assert trimmed["edl"]["clips"][0]["words"][0] == a + 1
     restored = client.patch(url, headers=auth, json={"op": "restore", "w0": a, "w1": a}).json()
     assert restored["edl"]["clips"][0]["words"][0] == a
     assert client.patch(url, headers=auth, json={"op": "cut", "w0": 5, "w1": 2}).status_code == 400
     assert client.patch(url, headers=auth, json={"op": "explode"}).status_code == 400
     assert client.patch(url, headers=auth, json={"op": "cut"}).status_code == 400
+    assert client.patch(url, headers=auth, json={"op": "trim", "w0": a, "w1": b}).status_code == 400
     assert client.patch(url, headers=auth, json={"op": "patch", "section": "bogus", "patch": {}}).status_code == 400
 
 
@@ -268,7 +337,10 @@ def test_export_steps_paths_and_result(client, auth, app, fake_queue, analyzed_p
     assert r.status_code == 200
     job = r.json()
     steps = fake_queue.steps
-    assert [s[0] for s in steps] == ["render", "render"] and [s[2] for s in steps] == [0.5, 0.5]
+    assert [s[0] for s in steps] == ["render 1/2", "render 2/2"] and [s[2] for s in steps] == [0.5, 0.5]
+    assert [(x["stage"], x["hid"], x["aspect"]) for x in job["result"]["renders"]] == [
+        ("render 1/2", h["id"], "9:16"), ("render 2/2", h["id"], "1:1")]
+    temps = [Path(s[1][s[1].index("--crf") - 1]) for s in steps]
     assert all(s[1][s[1].index("--crf") + 1] == "18" for s in steps)
     outs = [output_dir(tiny_video.resolve()) / output_name(1, h["title"], a) for a in ("9:16", "1:1")]
     for (_, argv, _), aspect, out in zip(steps, ("9:16", "1:1"), outs):
@@ -283,6 +355,7 @@ def test_export_steps_paths_and_result(client, auth, app, fake_queue, analyzed_p
     last = client.get(f"/projects/{pid}", headers=auth).json()["last_job"]
     assert last["state"] == "done"
     assert last["result"]["files"] == [str(p) for o in outs for p in (o, o.with_suffix(".srt"))]
+    assert "failed" not in last["result"] and not any(t.exists() for t in temps)
     normal = client.post(f"/projects/{pid}/export", headers=auth,
                          json={"clips": [h["id"]], "formats": ["9:16"], "quality": "normal"})
     assert normal.status_code == 200 and "--crf" not in fake_queue.steps[0][1]
@@ -290,6 +363,47 @@ def test_export_steps_paths_and_result(client, auth, app, fake_queue, analyzed_p
                        json={"clips": ["nope"], "formats": ["9:16"]}).status_code == 404
     assert client.post(f"/projects/{pid}/export", headers=auth,
                        json={"clips": [h["id"]], "formats": []}).status_code == 400
+    dup = client.post(f"/projects/{pid}/export", headers=auth, json={"clips": [h["id"], h["id"]], "formats": ["9:16"]})
+    assert dup.status_code == 400 and dup.json()["code"] == "bad_request"
+
+
+@pytest.mark.parametrize("end_state", ["failed", "cancelled"])
+def test_export_failure_reports_finished_files(client, auth, app, fake_queue, analyzed_project, tiny_video,
+                                              end_state):
+    pid, h = analyzed_project["id"], analyzed_project["highlights"][0]
+    job = client.post(f"/projects/{pid}/export", headers=auth,
+                      json={"clips": [h["id"]], "formats": ["9:16", "1:1"]}).json()
+    temps = [Path(s[1][-1]) for s in fake_queue.steps]
+    assert all(t.is_file() for t in temps)
+    first = output_dir(tiny_video.resolve()) / output_name(1, h["title"], "9:16")
+    first.parent.mkdir(parents=True, exist_ok=True)
+    first.write_bytes(b"")  # render 1/2 finished
+    fake_queue.emit(job["id"], state="running", stage="render 1/2")
+    fake_queue.emit(job["id"], stage="render 2/2", pct=50.0)
+    fake_queue.emit(job["id"], state=end_state, error="boom" if end_state == "failed" else None)
+    app.state.engine.wait_idle()
+    got = client.get(f"/jobs/{job['id']}", headers=auth).json()
+    assert got["state"] == end_state and got["result"]["files"] == [str(first)]
+    if end_state == "failed":
+        assert got["result"]["failed"] == {"hid": h["id"], "aspect": "1:1"}
+    else:
+        assert "failed" not in got["result"]
+    assert load_project(pid).last_job == got
+    assert not any(t.exists() for t in temps)
+
+
+def test_post_processing_failure_is_consistent(client, auth, app, fake_queue, analyzed_project):
+    pid = analyzed_project["id"]
+    (analyzed_project["wd"] / "highlights.json").unlink()  # analyze "succeeded" but left nothing to build from
+    with client.websocket_connect(f"/events?token={TOKEN}") as ws:
+        job = client.post(f"/projects/{pid}/analyze", headers=auth, json={}).json()
+        fake_queue.finish(job["id"])
+        app.state.engine.wait_idle()
+        msgs = [ws.receive_json() for _ in range(3)]
+    assert msgs[-1]["job"]["state"] == "failed" and "post-processing failed" in msgs[-1]["job"]["error"]
+    got = client.get(f"/jobs/{job['id']}", headers=auth).json()
+    assert got == msgs[-1]["job"] == load_project(pid).last_job
+    assert client.post(f"/jobs/{job['id']}/cancel", headers=auth).json() == got
 
 
 def test_cancel_job(client, auth, fake_queue, analyzed_project):
@@ -297,6 +411,9 @@ def test_cancel_job(client, auth, fake_queue, analyzed_project):
     r = client.post(f"/jobs/{job['id']}/cancel", headers=auth)
     assert r.status_code == 200 and r.json()["state"] == "cancelled"
     assert client.post("/jobs/nope/cancel", headers=auth).status_code == 404
+    r = client.get("/jobs/nope", headers=auth)
+    assert r.status_code == 404 and r.json()["code"] == "not_found"
+    assert client.get(f"/jobs/{job['id']}", headers=auth).json()["state"] == "cancelled"
 
 
 def test_ai_key_never_persisted(client, auth, app, fake_queue, analyzed_project, tmp_path):
@@ -311,7 +428,9 @@ def test_ai_key_never_persisted(client, auth, app, fake_queue, analyzed_project,
         app.state.engine.wait_idle()
         msgs = [ws.receive_json() for _ in range(3)]
     sub = fake_queue.submits[-1]
-    assert sub["env"] == {"VEDIT_AI_KEY": KEY}
+    assert sub["env"] == {}  # never job-wide: only the highlights step gets the key
+    assert sub["steps"][2][3] == {"VEDIT_AI_KEY": KEY}
+    assert all(len(s) == 3 for k, s in enumerate(sub["steps"]) if k != 2)
     hl = sub["steps"][2][1]
     assert hl[hl.index("--ai") + 1] == "anthropic" and hl[hl.index("--ai-model") + 1] == "m1"
     assert not any(KEY in a for s in sub["steps"] for a in s[1])
@@ -326,6 +445,12 @@ def test_events_websocket(client, auth, app, fake_queue, analyzed_project):
         app.state.engine.wait_idle()
         msg = ws.receive_json()
         assert msg["type"] == "job" and msg["job"]["id"] == job["id"] and msg["job"]["state"] == "queued"
+    with client.websocket_connect(f"/events?token={TOKEN}") as ws:  # reconnect: snapshot of what is active
+        msg = ws.receive_json()
+        assert msg["job"]["id"] == job["id"] and msg["job"]["state"] == "queued"
+    fake_queue.emit(job["id"], state="cancelled")
+    app.state.engine.wait_idle()
+    assert app.state.engine.active_jobs() == []
     from starlette.websockets import WebSocketDisconnect
     with pytest.raises(WebSocketDisconnect):
         with client.websocket_connect("/events?token=wrong") as ws:
@@ -333,6 +458,34 @@ def test_events_websocket(client, auth, app, fake_queue, analyzed_project):
     with pytest.raises(WebSocketDisconnect):
         with client.websocket_connect(f"/events?token={TOKEN}", headers={"Origin": "https://evil.example"}) as ws:
             ws.receive_json()
+
+
+def test_ws_queue_drops_oldest_when_full():
+    import asyncio
+
+    from studio_server import WS_QUEUE_MAX, _offer
+    q = asyncio.Queue(maxsize=WS_QUEUE_MAX)
+    for i in range(WS_QUEUE_MAX + 5):
+        _offer(q, {"n": i})
+    assert q.qsize() == WS_QUEUE_MAX and q.get_nowait() == {"n": 5}
+
+
+def test_error_bodies_have_codes(client, auth):
+    r = client.get("/health")
+    assert r.status_code == 401 and r.json() == {"detail": "missing or wrong token", "code": "unauthorized"}
+    r = client.get("/health", headers={**auth, "Origin": "https://evil.example"})
+    assert r.json()["code"] == "forbidden"
+    r = client.get("/projects/nope", headers=auth)
+    assert r.json()["code"] == "not_found" and isinstance(r.json()["detail"], str)
+    r = client.post("/projects", headers=auth, json={"source": "x", "language": "xx", "platform": "reels"})
+    assert r.status_code == 422 and r.json()["code"] == "bad_request" and isinstance(r.json()["detail"], str)
+    assert client.get("/no-such-route", headers=auth).json()["code"] == "not_found"
+
+
+@pytest.mark.parametrize("token", ["", "   "])
+def test_create_app_rejects_empty_token(home, token):
+    with pytest.raises(ValueError):
+        create_app(token, FakeQueue())
 
 
 # ---- restart and serve ----------------------------------------------------------------------------------------
@@ -403,7 +556,7 @@ def test_unexpected_keyerror_is_500(app, auth, monkeypatch):
         raise KeyError("internal")
     monkeypatch.setattr(studio_server, "list_recent", boom)
     r = TestClient(app, raise_server_exceptions=False).get("/projects/recent", headers=auth)
-    assert r.status_code == 500
+    assert r.status_code == 500 and r.json() == {"detail": "internal error", "code": "internal"}
 
 
 def test_clip_edits_probe_source_once(client, auth, analyzed_project, monkeypatch):

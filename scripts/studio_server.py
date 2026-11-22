@@ -2,7 +2,7 @@
 
 Every request needs `Authorization: Bearer <token>` (the WebSocket takes `?token=`). A request that carries an
 Origin header must come from the app's webview (or the Vite dev server); requests without one (native callers,
-tests) are allowed.
+tests) are allowed. Error bodies are {"detail": str, "code": str}.
 """
 from __future__ import annotations
 
@@ -20,7 +20,7 @@ import threading
 import uuid
 from contextlib import asynccontextmanager
 from pathlib import Path
-from typing import Any, Literal, Optional
+from typing import Literal, Optional
 
 HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE))
@@ -30,20 +30,25 @@ from fastapi.exceptions import RequestValidationError  # noqa: E402
 from fastapi.middleware.cors import CORSMiddleware  # noqa: E402
 from fastapi.responses import JSONResponse  # noqa: E402
 from pydantic import BaseModel  # noqa: E402
+from starlette.exceptions import HTTPException as StarletteHTTPException  # noqa: E402
 
 import vedit  # noqa: E402
 from captions import caption_events  # noqa: E402
 from common import ffmpeg_bin, ffprobe, load_json, py_cmd, save_json, workdir_for  # noqa: E402
 from edl import Timeline  # noqa: E402
 from edl_ops import clip_edl, cut_words, fix_word, kept_ranges, patch_section, restore_words, trim  # noqa: E402
+from highlights_llm import HID_RE  # noqa: E402
 from studio_jobs import Job, JobQueue  # noqa: E402
-from studio_projects import (LANG_MODEL, Project, ProjectClip, create_project, list_recent,  # noqa: E402
-                             load_project, output_dir, output_name, save_project)
+from studio_projects import (LANG_MODEL, Project, ProjectClip, _atomic_write_json,  # noqa: E402
+                             create_project, list_recent, load_project, output_dir, output_name, save_project)
 
 ALLOWED_ORIGINS = ("tauri://localhost", "http://tauri.localhost", "http://localhost:5173")
 FORMATS = ("9:16", "1:1", "4:5", "16:9")
 HIGH_CRF = "18"
 ANALYZE_STEPS = (("proxy", 0.1), ("analyze", 0.6), ("highlights", 0.15), ("framing", 0.15))
+TERMINAL = ("done", "failed", "cancelled")
+WS_QUEUE_MAX = 256
+OVERLAP_DROP = 0.5  # a new highlight overlapping a kept clip by more than this share of the shorter one is dropped
 
 
 # ---- request bodies -------------------------------------------------------------------------------------------
@@ -74,7 +79,21 @@ class ExportBody(BaseModel):
     quality: Literal["normal", "high"] = "normal"
 
 
-# ---- engine state ---------------------------------------------------------------------------------------------
+# ---- errors and small helpers ---------------------------------------------------------------------------------
+
+class NotFound(Exception):
+    """An explicit lookup (project, clip, job, transcript) found nothing: the API answers 404."""
+    code = "not_found"
+
+
+class ClipMissing(NotFound):
+    """The project lists the clip but its edit file is gone from the workdir."""
+    code = "clip_missing"
+
+
+def _error(status: int, code: str, detail: str) -> JSONResponse:
+    return JSONResponse({"detail": detail, "code": code}, status_code=status)
+
 
 def _project_dict(p: Project) -> dict:
     return dataclasses.asdict(p)
@@ -84,8 +103,12 @@ def _job_dict(j: Job) -> dict:
     return dataclasses.asdict(j)
 
 
-class NotFound(Exception):
-    """An explicit lookup (project, clip, job, transcript) found nothing: the API answers 404."""
+def _event(job: Job) -> dict:
+    return {"type": "job", "job": _job_dict(job)}
+
+
+def _valid_hid(hid) -> bool:
+    return isinstance(hid, str) and HID_RE.fullmatch(hid) is not None
 
 
 def _project(pid: str) -> Project:
@@ -100,6 +123,20 @@ def _find_clip(p: Project, hid: str) -> ProjectClip:
         if c.highlight["id"] == hid:
             return c
     raise NotFound(f"clip {hid}")
+
+
+def _edl_path(wd: Path, clip: ProjectClip) -> Path:
+    path = wd / clip.edl_file
+    if not path.is_file():
+        raise ClipMissing(f"edit file for clip {clip.highlight.get('id')} is missing: {clip.edl_file}")
+    return path
+
+
+def _overlap_share(a: dict, b: dict) -> float:
+    """Overlap of two highlights as a share of the shorter one."""
+    inter = min(float(a["end"]), float(b["end"])) - max(float(a["start"]), float(b["start"]))
+    shorter = min(float(a["end"]) - float(a["start"]), float(b["end"]) - float(b["start"]))
+    return max(0.0, inter) / shorter if shorter > 0 else 0.0
 
 
 _probe_cache: dict[tuple[str, int, int], dict] = {}
@@ -127,31 +164,35 @@ def _timeline(edl_path: Path) -> Timeline:
         raise ValueError(f"the edit could not be resolved ({e.code})") from None
 
 
-def _write_json_atomic(data: Any, path: Path) -> None:
-    fd, tmp = tempfile.mkstemp(prefix=path.name + ".", suffix=".tmp", dir=path.parent)
-    try:
-        with os.fdopen(fd, "w", encoding="utf-8") as f:
-            json.dump(data, f, ensure_ascii=False, indent=2)
-        os.replace(tmp, path)
-    except BaseException:
+def _offer(q: asyncio.Queue, msg: dict) -> None:
+    """Put on a bounded client queue, dropping the oldest event when a slow client lets it fill."""
+    if q.full():
         try:
-            os.unlink(tmp)
-        except OSError:
+            q.get_nowait()
+        except asyncio.QueueEmpty:
             pass
-        raise
+    q.put_nowait(msg)
 
+
+# ---- engine state ---------------------------------------------------------------------------------------------
 
 class Engine:
-    """Projects + job queue + event fan-out. on_event only enqueues; one dispatcher thread does the rest."""
+    """Projects + job queue + event fan-out. on_event only enqueues; one dispatcher thread does the rest.
+
+    Fields the queue doesn't know (a post-processing failure, the result) live in a server-side overlay applied to
+    every snapshot, so GET /jobs, cancel, last_job and the WebSocket always agree.
+    """
 
     def __init__(self, token: str, job_queue=None):
         self.token = token
         self._events: queue.Queue[Optional[Job]] = queue.Queue()
         self._locks: dict[str, threading.Lock] = {}
         self._locks_guard = threading.Lock()
-        self._meta_lock = threading.Lock()  # held while a submit registers its post-processing metadata
-        self._exports: dict[str, list[Path]] = {}
-        self._results: dict[str, dict] = {}
+        self._meta_lock = threading.Lock()  # guards the overlay, export plans and latest snapshots
+        self._exports: dict[str, list[dict]] = {}
+        self._overlay: dict[str, dict] = {}
+        self._finalized: set[str] = set()
+        self._jobs: dict[str, Job] = {}
         self._clients: set[tuple[asyncio.AbstractEventLoop, asyncio.Queue]] = set()
         self._clients_lock = threading.Lock()
         self._closed = False
@@ -195,25 +236,42 @@ class Engine:
         """JobQueue callback: never blocks, never raises."""
         self._events.put(dataclasses.replace(job))
 
-    def submit(self, project_id: str, kind: str, steps: list, env: dict | None = None,
-               exports: list[Path] | None = None) -> Job:
-        with self._meta_lock:
-            job = self.queue.submit(project_id, kind, steps, env=env)
-            if exports is not None:
-                self._exports[job.id] = exports
+    def _overlaid(self, job: Job) -> Job:
+        """Copy of `job` with the server-side overlay applied. Caller holds _meta_lock."""
+        job = dataclasses.replace(job)
+        for k, v in self._overlay.get(job.id, {}).items():
+            setattr(job, k, json.loads(json.dumps(v)) if isinstance(v, (dict, list)) else v)
         return job
 
+    def _set_overlay(self, job_id: str, **fields) -> None:
+        with self._meta_lock:
+            self._overlay.setdefault(job_id, {}).update(fields)
+
+    def submit(self, project_id: str, kind: str, steps: list, renders: list[dict] | None = None) -> Job:
+        with self._meta_lock:  # held so no event of this job is processed before its plan is registered
+            job = self.queue.submit(project_id, kind, steps)
+            if renders is not None:
+                self._exports[job.id] = renders
+                self._overlay[job.id] = {"result": {"renders": _public_renders(renders), "files": []}}
+            return self._overlaid(job)
+
     def job_snapshot(self, job_id: str) -> Job:
-        job = self.queue.get(job_id)
-        if job_id in self._results:
-            job.result = self._results[job_id]
-        return job
+        try:
+            job = self.queue.get(job_id)
+        except KeyError:
+            raise NotFound(f"job {job_id}") from None
+        with self._meta_lock:
+            return self._overlaid(job)
+
+    def active_jobs(self) -> list[Job]:
+        with self._meta_lock:
+            return [dataclasses.replace(j) for j in self._jobs.values() if j.state not in TERMINAL]
 
     def _dispatch(self) -> None:
         while True:
             first = self._events.get()
             batch = [first]
-            while True:  # coalesce a burst: only the newest snapshot of each job matters
+            while True:  # coalesce a burst for persistence: only the newest snapshot of each job is written
                 try:
                     batch.append(self._events.get_nowait())
                 except queue.Empty:
@@ -224,10 +282,12 @@ class Engine:
                     if j is None:
                         continue
                     try:
-                        if last[j.id] == k:  # newest snapshot of this job: persist + post-process, then send
+                        if last[j.id] == k:  # newest snapshot of this job: post-process + persist, then send
                             self._handle(j)
                         else:  # superseded within the burst: still sent, never written to disk
-                            self._broadcast({"type": "job", "job": _job_dict(j)})
+                            with self._meta_lock:
+                                j = self._overlaid(j)
+                            self._broadcast(_event(j))
                     except Exception as e:  # noqa: BLE001 - the dispatcher must survive anything
                         print(f"vedit: event handling failed for job {j.id}: {e}", file=sys.stderr)
             finally:
@@ -236,57 +296,94 @@ class Engine:
             if any(j is None for j in batch):
                 return
 
-    def _handle(self, job: Job) -> None:
-        with self.lock_for(job.project_id):
+    def _handle(self, raw: Job) -> None:
+        with self.lock_for(raw.project_id):
             try:
-                p = load_project(job.project_id)
+                p = load_project(raw.project_id)
             except (KeyError, ValueError, OSError):
                 p = None
-            if job.state == "done" and job.id not in self._results:
+            if raw.state in TERMINAL and raw.id not in self._finalized:
+                self._finalized.add(raw.id)
                 try:
-                    if job.kind == "analyze" and p is not None:
-                        self._results[job.id] = self._finish_analyze(p)
-                    elif job.kind == "export":
-                        self._results[job.id] = self._finish_export(job.id)
+                    if raw.kind == "analyze" and raw.state == "done" and p is not None:
+                        self._set_overlay(raw.id, result=self._finish_analyze(p))
+                    elif raw.kind == "export":
+                        self._set_overlay(raw.id, result=self._finish_export(raw))
                 except Exception as e:  # noqa: BLE001 - post-processing failure fails the job, not the server
-                    job.state, job.error = "failed", f"post-processing failed: {e}"
-            if job.id in self._results:
-                job.result = self._results[job.id]
+                    self._set_overlay(raw.id, state="failed", error=f"post-processing failed: {e}")
+            with self._meta_lock:
+                job = self._overlaid(raw)
+                self._jobs[job.id] = job
             if p is not None:
                 p.last_job = _job_dict(job)
                 save_project(p)
-        self._broadcast({"type": "job", "job": _job_dict(job)})
+        self._broadcast(_event(job))
 
     def _finish_analyze(self, p: Project) -> dict:
+        """Add clips for new highlights. Existing clips whose edit file exists are never touched."""
         wd = workdir_for(p.source)
         data = load_json(wd / "highlights.json")
         language = LANG_MODEL[p.language][0]
-        kept = {c.highlight["id"]: c.kept for c in p.clips}
-        clips = []
+        preserved = [c for c in p.clips if _valid_hid(c.highlight.get("id")) and (wd / c.edl_file).is_file()]
+        used = {c.highlight["id"] for c in preserved}
+        added = []
         for h in data.get("highlights") or []:
+            hid = h.get("id")
+            if not _valid_hid(hid):
+                print(f"vedit: skipping highlight with an unsafe id: {hid!r}", file=sys.stderr)
+                continue
+            if any(_overlap_share(h, c.highlight) > OVERLAP_DROP for c in preserved):
+                continue
             try:
                 edl = clip_edl(wd, h, p.platform, language, None)
             except ValueError as e:
-                print(f"vedit: skipping highlight {h.get('id')}: {e}", file=sys.stderr)
+                print(f"vedit: skipping highlight {hid}: {e}", file=sys.stderr)
                 continue
             except SystemExit:
-                print(f"vedit: skipping highlight {h.get('id')}: edit could not be built", file=sys.stderr)
+                print(f"vedit: skipping highlight {hid}: edit could not be built", file=sys.stderr)
                 continue
-            name = f"clip-{h['id']}.edl.json"
-            save_json(edl, wd / name)
-            clips.append(ProjectClip(highlight=h, kept=kept.get(h["id"], True), edl_file=name))
-        p.clips = clips
-        return {"clips": len(clips), "reason": data.get("reason")}
+            if hid in used:
+                n = 1
+                while f"h{n:02d}" in used:
+                    n += 1
+                hid = f"h{n:02d}"
+            name = f"clip-{hid}.edl.json"
+            _atomic_write_json(wd / name, edl)
+            used.add(hid)
+            added.append(ProjectClip(highlight={**h, "id": hid}, kept=True, edl_file=name))
+        p.clips = preserved + added
+        proxy = wd / "proxy.mp4"
+        try:
+            has_proxy = proxy.is_file() and load_json(wd / "proxy.json").get("src") == str(Path(p.source).resolve())
+        except (OSError, ValueError):
+            has_proxy = False
+        p.settings.update(workdir=str(wd), proxy=str(proxy if has_proxy else Path(p.source)),
+                          filmstrip=str(wd / "filmstrip.json"))
+        return {"clips": len(p.clips), "new": len(added), "reason": data.get("reason")}
 
-    def _finish_export(self, job_id: str) -> dict:
+    def _finish_export(self, job: Job) -> dict:
+        """Finished files (+ .srt) and, on failure, which render failed. Always removes the temp edits."""
         with self._meta_lock:
-            outs = self._exports.pop(job_id, [])
+            plan = self._exports.pop(job.id, [])
+        stages = [e["stage"] for e in plan]
+        if job.state == "done":
+            finished, failed = plan, None
+        else:
+            at = stages.index(job.stage) if job.stage in stages else 0
+            finished = plan[:at]
+            failed = plan[at] if job.state == "failed" and plan else None
         files = []
-        for out in outs:
+        for e in finished:
+            out = Path(e["path"])
             files.append(str(out))
             if out.with_suffix(".srt").is_file():
                 files.append(str(out.with_suffix(".srt")))
-        return {"files": files}
+        for e in plan:
+            Path(e["tmp"]).unlink(missing_ok=True)
+        result = {"renders": _public_renders(plan), "files": files}
+        if failed is not None:
+            result["failed"] = {"hid": failed["hid"], "aspect": failed["aspect"]}
+        return result
 
     # -- websocket fan-out --
     def add_client(self, client: tuple[asyncio.AbstractEventLoop, asyncio.Queue]) -> None:
@@ -302,14 +399,20 @@ class Engine:
             clients = list(self._clients)
         for loop, q in clients:
             try:
-                loop.call_soon_threadsafe(q.put_nowait, msg)
+                loop.call_soon_threadsafe(_offer, q, msg)
             except RuntimeError:  # loop already closed
                 self.remove_client((loop, q))
+
+
+def _public_renders(plan: list[dict]) -> list[dict]:
+    """What the UI may read about each render step: its stage name, clip and format, output path."""
+    return [{k: e[k] for k in ("stage", "hid", "aspect", "path")} for e in plan]
 
 
 # ---- route helpers --------------------------------------------------------------------------------------------
 
 def _clip_view(wd: Path, edl_path: Path) -> dict:
+    """GET/PATCH response: the edit, its source ranges and the live caption plan."""
     edl = load_json(edl_path)
     tp = wd / "transcript.main.json"
     tr = load_json(tp) if tp.is_file() else {}
@@ -340,7 +443,7 @@ def _apply_op(edl: dict, body: dict) -> dict:
     if op == "restore":
         return restore_words(edl, _int_arg(body, "w0"), _int_arg(body, "w1"))
     if op == "trim":
-        return trim(edl, _int_arg(body, "w0"), _int_arg(body, "w1"))
+        return trim(edl, _int_arg(body, "w_first"), _int_arg(body, "w_last"))
     if op == "fix_word":
         return fix_word(edl, _str_arg(body, "wrong"), _str_arg(body, "right"))
     if op == "patch":
@@ -367,6 +470,8 @@ def _ffmpeg_status() -> tuple[bool, bool]:
 # ---- app ------------------------------------------------------------------------------------------------------
 
 def create_app(token: str, queue: JobQueue | None = None) -> FastAPI:
+    if not isinstance(token, str) or not token.strip():
+        raise ValueError("the engine needs a non-empty bearer token")
     engine = Engine(token, queue)
 
     @asynccontextmanager
@@ -386,10 +491,10 @@ def create_app(token: str, queue: JobQueue | None = None) -> FastAPI:
     @app.middleware("http")
     async def guard(request: Request, call_next):
         if not origin_ok(request.headers.get("origin")):
-            return JSONResponse({"detail": "origin not allowed"}, status_code=403)
+            return _error(403, "forbidden", "origin not allowed")
         auth = request.headers.get("authorization") or ""
         if not (auth.startswith("Bearer ") and token_ok(auth[len("Bearer "):])):
-            return JSONResponse({"detail": "missing or wrong token"}, status_code=401)
+            return _error(401, "unauthorized", "missing or wrong token")
         return await call_next(request)
 
     # added after guard, so it wraps it: preflights are answered here and errors still carry CORS headers
@@ -398,17 +503,26 @@ def create_app(token: str, queue: JobQueue | None = None) -> FastAPI:
 
     @app.exception_handler(NotFound)
     async def not_found(_request: Request, exc: NotFound):
-        return JSONResponse({"detail": f"not found: {exc}"}, status_code=404)
+        return _error(404, exc.code, f"not found: {exc}")
 
     @app.exception_handler(ValueError)
     async def bad_request(_request: Request, exc: ValueError):
-        return JSONResponse({"detail": str(exc)}, status_code=400)
+        return _error(400, "bad_request", str(exc))
 
     @app.exception_handler(RequestValidationError)
     async def invalid_body(_request: Request, exc: RequestValidationError):
         # never echo the submitted values back: the body can carry an API key
-        errors = [{"loc": list(e.get("loc", ())), "msg": e.get("msg", "")} for e in exc.errors()]
-        return JSONResponse({"detail": errors}, status_code=422)
+        msgs = [".".join(str(x) for x in e.get("loc", ())) + ": " + str(e.get("msg", "")) for e in exc.errors()]
+        return _error(422, "bad_request", "; ".join(msgs) or "invalid request")
+
+    @app.exception_handler(StarletteHTTPException)
+    async def http_error(_request: Request, exc: StarletteHTTPException):
+        return _error(exc.status_code, "not_found" if exc.status_code == 404 else "bad_request", str(exc.detail))
+
+    @app.exception_handler(Exception)
+    async def internal(_request: Request, exc: Exception):
+        print(f"vedit: internal error: {type(exc).__name__}: {exc}", file=sys.stderr)
+        return _error(500, "internal", "internal error")
 
     @app.get("/health")
     def health():
@@ -439,17 +553,18 @@ def create_app(token: str, queue: JobQueue | None = None) -> FastAPI:
         p = _project(pid)
         lang, model = LANG_MODEL[p.language]
         src = str(Path(p.source))
-        hl_args = []
-        env = None
+        hl_args: list[str] = []
+        step_env: dict[str, dict] = {}
         if body is not None and body.ai is not None:
             hl_args = ["--ai", body.ai.provider] + (["--ai-model", body.ai.model] if body.ai.model else [])
-            env = {"VEDIT_AI_KEY": body.ai.api_key}
+            step_env["highlights"] = {"VEDIT_AI_KEY": body.ai.api_key}  # only the step that calls the AI sees it
         argv = {"proxy": py_cmd("proxy.py", src),
                 "analyze": py_cmd("analyze.py", src, "--model", model, "--language", lang),
                 "highlights": py_cmd("highlights.py", src, *hl_args),
                 "framing": py_cmd("highlights.py", src, "--framing")}
-        steps = [(stage, argv[stage], share) for stage, share in ANALYZE_STEPS]
-        return _job_dict(engine.submit(pid, "analyze", steps, env=env))
+        steps = [(stage, argv[stage], share) + ((step_env[stage],) if stage in step_env else ())
+                 for stage, share in ANALYZE_STEPS]
+        return _job_dict(engine.submit(pid, "analyze", steps))
 
     @app.get("/projects/{pid}/transcript")
     def transcript(pid: str):
@@ -463,14 +578,14 @@ def create_app(token: str, queue: JobQueue | None = None) -> FastAPI:
     def get_clip(pid: str, hid: str):
         p = _project(pid)
         wd = workdir_for(p.source)
-        return _clip_view(wd, wd / _find_clip(p, hid).edl_file)
+        return _clip_view(wd, _edl_path(wd, _find_clip(p, hid)))
 
     @app.patch("/projects/{pid}/clips/{hid}")
     def patch_clip(pid: str, hid: str, body: dict = Body(...)):
         with engine.lock_for(pid):
             p = _project(pid)
             wd = workdir_for(p.source)
-            path = wd / _find_clip(p, hid).edl_file
+            path = _edl_path(wd, _find_clip(p, hid))
             new = _apply_op(load_json(path), body)
             fd, tmp = tempfile.mkstemp(prefix=path.name + ".", suffix=".tmp", dir=wd)
             os.close(fd)
@@ -498,6 +613,8 @@ def create_app(token: str, queue: JobQueue | None = None) -> FastAPI:
         bad = [f for f in body.formats if f not in FORMATS]
         if bad:
             raise ValueError(f"unsupported formats: {bad}")
+        if len(set(body.clips)) != len(body.clips) or len(set(body.formats)) != len(body.formats):
+            raise ValueError("duplicate clips or formats in export")
         with engine.lock_for(pid):
             p = _project(pid)
             wd = workdir_for(p.source)
@@ -505,7 +622,9 @@ def create_app(token: str, queue: JobQueue | None = None) -> FastAPI:
             plan = []
             for i, hid in enumerate(body.clips, 1):
                 clip = _find_clip(p, hid)
-                edl = load_json(wd / clip.edl_file)
+                if not _valid_hid(hid):
+                    raise ValueError(f"unsafe clip id {hid!r}")
+                edl = load_json(_edl_path(wd, clip))
                 for aspect in body.formats:
                     e = json.loads(json.dumps(edl))
                     out = {k: v for k, v in (e.get("output") or {}).items() if k not in ("width", "height")}
@@ -513,16 +632,21 @@ def create_app(token: str, queue: JobQueue | None = None) -> FastAPI:
                     out.update(aspect=aspect, path=str(path))
                     e["output"] = out
                     plan.append((hid, aspect, e, path))
-        share = 1.0 / len(plan)
+        n = len(plan)
         crf = ["--crf", HIGH_CRF] if body.quality == "high" else []
-        steps, outs = [], []
+        steps, renders = [], []
         tag = uuid.uuid4().hex[:8]  # queued exports never share (and overwrite) each other's edit files
-        for hid, aspect, e, path in plan:
+        for k, (hid, aspect, e, path) in enumerate(plan, 1):
             tmp = wd / f"export-{tag}-{hid}-{aspect.replace(':', 'x')}.edl.json"
-            _write_json_atomic(e, tmp)
-            steps.append(("render", py_cmd("render.py", str(tmp), *crf), share))
-            outs.append(path)
-        return _job_dict(engine.submit(pid, "export", steps, exports=outs))
+            _atomic_write_json(tmp, e)
+            stage = f"render {k}/{n}"
+            steps.append((stage, py_cmd("render.py", str(tmp), *crf), 1.0 / n))
+            renders.append({"stage": stage, "hid": hid, "aspect": aspect, "path": str(path), "tmp": str(tmp)})
+        return _job_dict(engine.submit(pid, "export", steps, renders=renders))
+
+    @app.get("/jobs/{job_id}")
+    def get_job(job_id: str):
+        return _job_dict(engine.job_snapshot(job_id))
 
     @app.post("/jobs/{job_id}/cancel")
     def cancel(job_id: str):
@@ -538,9 +662,11 @@ def create_app(token: str, queue: JobQueue | None = None) -> FastAPI:
             await ws.close(code=1008)
             return
         await ws.accept()
-        q: asyncio.Queue = asyncio.Queue()
+        q: asyncio.Queue = asyncio.Queue(maxsize=WS_QUEUE_MAX)
         client = (asyncio.get_running_loop(), q)
         engine.add_client(client)
+        for job in engine.active_jobs():  # a (re)connecting client catches up on what is in flight
+            _offer(q, _event(job))
 
         async def pump():
             while True:
@@ -568,11 +694,12 @@ def serve(port: int, token: str) -> None:
 
     import uvicorn
 
+    app = create_app(token)  # validates the token before anything binds
     sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
     sock.bind(("127.0.0.1", port))
     real_port = sock.getsockname()[1]
-    app = create_app(token)
-    config = uvicorn.Config(app, log_config=None, access_log=False, log_level="warning", lifespan="on")
+    config = uvicorn.Config(app, log_config=None, access_log=False, log_level="warning", lifespan="on",
+                            timeout_graceful_shutdown=3)
     server = uvicorn.Server(config)
 
     async def announce():

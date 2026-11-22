@@ -12,12 +12,13 @@ import time
 import uuid
 from collections import deque
 from dataclasses import dataclass
-from typing import Callable, Literal, Optional
+from typing import Callable, Literal, Optional, Union
 
 PROGRESS_PREFIX = "@@progress "
 TAIL_LINES = 20
 
-Step = tuple[str, list[str], float]  # (stage name, argv, share of the whole job 0-1)
+# (stage name, argv, share of the whole job 0-1[, env merged into this step only])
+Step = Union[tuple[str, list[str], float], tuple[str, list[str], float, dict[str, str]]]
 
 
 @dataclass
@@ -172,7 +173,8 @@ class JobQueue:
         with self._lock:
             if self._closed:
                 raise RuntimeError("job queue is shut down")
-            self._entries[job.id] = _Entry(job, list(steps), dict(env or {}))
+            self._entries[job.id] = _Entry(job, [tuple(st[:3]) + ((dict(st[3]),) if len(st) > 3 else ())
+                                                 for st in steps], dict(env or {}))
             snap = dataclasses.replace(job)
         self._emit(snap)
         self._queue.put(job.id)
@@ -276,11 +278,13 @@ class JobQueue:
 
     def _run_job(self, entry: _Entry) -> None:
         done_share = 0.0
-        for stage, argv, share in entry.steps:
+        for step in entry.steps:
+            stage, argv, share = step[0], step[1], step[2]
+            step_env = step[3] if len(step) > 3 else {}
             if entry.cancelled:
                 return self._finish(entry, "cancelled")
             self._update(entry, stage=stage)
-            code, tail = self._run_step(entry, stage, argv, done_share, share)
+            code, tail = self._run_step(entry, stage, argv, done_share, share, step_env)
             if entry.cancelled:
                 return self._finish(entry, "cancelled")
             if code != 0:
@@ -290,8 +294,9 @@ class JobQueue:
             self._update(entry, pct=done_share * 100)
         self._finish(entry, "done")
 
-    def _run_step(self, entry: _Entry, stage: str, argv: list[str], done_share: float, share: float):
-        env = {**os.environ, **entry.env, "VEDIT_PROGRESS": "1", "PYTHONIOENCODING": "utf-8"}
+    def _run_step(self, entry: _Entry, stage: str, argv: list[str], done_share: float, share: float,
+                  step_env: dict[str, str] | None = None):
+        env = {**os.environ, **entry.env, **(step_env or {}), "VEDIT_PROGRESS": "1", "PYTHONIOENCODING": "utf-8"}
         kwargs: dict = {}
         if os.name == "nt":
             kwargs["creationflags"] = subprocess.CREATE_NEW_PROCESS_GROUP | subprocess.CREATE_NO_WINDOW

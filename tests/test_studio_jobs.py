@@ -142,6 +142,18 @@ def test_env_reaches_child_but_not_job_or_events(make_queue):
     assert secret not in repr(q.get(job.id)) and all(secret not in repr(e) for e in events)
 
 
+def test_step_env_reaches_only_its_step(make_queue):
+    q, events = make_queue()
+    secret = "s3" + "cret-" + "step"
+    has = [sys.executable, "-c", f"import os, sys; sys.exit(0 if os.environ.get('VEDIT_STEP_ENV') == '{secret}' else 3)"]
+    lacks = [sys.executable, "-c", "import os, sys; sys.exit(3 if 'VEDIT_STEP_ENV' in os.environ else 0)"]
+    job = q.submit("p1", "analyze", [("a", lacks, 0.3), ("b", has, 0.4, {"VEDIT_STEP_ENV": secret}), ("c", lacks, 0.3)],
+                   env={"VEDIT_JOB_ENV": "1"})
+    assert wait_for(lambda: q.get(job.id).state in ("done", "failed"), timeout=20)
+    assert q.get(job.id).state == "done", q.get(job.id).error
+    assert secret not in repr(q.get(job.id)) and all(secret not in repr(e) for e in events)
+
+
 def test_bad_callback_does_not_kill_worker():
     def boom(_job):
         raise RuntimeError("bad callback")
