@@ -171,3 +171,38 @@ def test_step_exit_reaps_orphaned_grandchild(make_queue, tmp_path, code, state):
     assert wait_for(lambda: not pid_alive(gc), 3.0)
     follow = q.submit("p1", "analyze", [("y", fake("y", 1, 0), 1.0)])
     assert wait_for(lambda: q.get(follow.id).state == "done", 3.0)  # queue not blocked
+
+
+def test_held_pipe_does_not_hang_job(make_queue, tmp_path, monkeypatch):
+    import studio_jobs
+    monkeypatch.setattr(studio_jobs._Tree, "kill", lambda self: None)  # grandchild survives and holds the pipes
+    q, _ = make_queue()
+    pidfile = tmp_path / "gc.pid"
+    job = q.submit("p1", "analyze", [("x", fake("x", 1, 0, 0, "", "--grandchild", str(pidfile)), 1.0)])
+    try:
+        assert wait_for(lambda: q.get(job.id).state == "done", 3.5)
+    finally:
+        monkeypatch.undo()
+        if pidfile.exists():
+            gc = int(pidfile.read_text())
+            if os.name == "nt":
+                subprocess.run(["taskkill", "/F", "/PID", str(gc)], capture_output=True)
+            else:
+                os.kill(gc, 9)
+
+
+def test_job_object_failure_falls_back_to_taskkill(make_queue, tmp_path, monkeypatch):
+    import studio_jobs
+
+    def broken(pid):
+        raise RuntimeError("ctypes exploded")
+
+    monkeypatch.setattr(studio_jobs, "_WinJob", broken)
+    q, _ = make_queue()
+    pidfile = tmp_path / "gc.pid"
+    job = q.submit("p1", "export", [("x", fake("x", 1, 30, 0, "", "--grandchild", str(pidfile)), 1.0)])
+    assert wait_for(lambda: pidfile.exists() and pidfile.read_text().strip() != "")
+    gc = int(pidfile.read_text())
+    q.cancel(job.id)
+    assert wait_for(lambda: not pid_alive(gc), 3.0)
+    assert wait_for(lambda: q.get(job.id).state == "cancelled", 3.0)

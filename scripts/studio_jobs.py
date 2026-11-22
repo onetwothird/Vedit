@@ -8,6 +8,7 @@ import queue
 import subprocess
 import sys
 import threading
+import time
 import uuid
 from collections import deque
 from dataclasses import dataclass
@@ -40,6 +41,13 @@ class _Entry:
     env: dict[str, str]
     cancelled: bool = False
     tree: Optional[_Tree] = None
+
+
+def _close_quietly(pipe) -> None:
+    try:
+        pipe.close()
+    except (OSError, ValueError):
+        pass
 
 
 def _taskkill_exe() -> str:
@@ -119,8 +127,8 @@ class _Tree:
         if os.name == "nt":
             try:
                 self.job = _WinJob(proc.pid)
-            except (OSError, AttributeError, ValueError):
-                self.job = None  # fall back to taskkill
+            except Exception:
+                self.job = None  # any Job Object failure: fall back to taskkill
 
     def kill(self) -> None:
         try:
@@ -302,10 +310,19 @@ class JobQueue:
             tree = entry.tree = _Tree(proc)
 
         def drain_stdout():
-            for _ in proc.stdout:
-                pass
+            try:
+                for _ in proc.stdout:
+                    pass
+            finally:
+                _close_quietly(proc.stdout)
 
         def read_stderr():
+            try:
+                read_stderr_lines()
+            finally:
+                _close_quietly(proc.stderr)
+
+        def read_stderr_lines():
             for raw in proc.stderr:
                 line = raw.rstrip("\r\n")
                 row = self._parse_progress(line)
@@ -328,20 +345,25 @@ class JobQueue:
         try:
             code = proc.wait()
             tree.kill()  # reap leftover grandchildren (they hold the pipes open otherwise)
+            deadline = time.monotonic() + 1.5
             for t in readers:
-                t.join(timeout=2)
+                t.join(timeout=max(0.0, deadline - time.monotonic()))
+                if t.is_alive():
+                    # Closing the pipe here would block on the reader's buffer lock; the daemon reader closes
+                    # its own pipe when it reaches EOF.
+                    print(f"studio_jobs: step '{stage}' pipe still held after exit; abandoned", file=sys.stderr)
         finally:
             if proc.poll() is None:
                 tree.kill()
             with self._lock:
                 entry.tree = None
                 tree.close()
-            for pipe in (proc.stdout, proc.stderr):
-                try:
-                    pipe.close()
-                except OSError:
-                    pass
-        return code, list(tail)
+        for _ in range(3):
+            try:
+                return code, list(tail)
+            except RuntimeError:  # deque mutated by an abandoned reader
+                pass
+        return code, []
 
     @staticmethod
     def _parse_progress(line: str) -> dict | None:
