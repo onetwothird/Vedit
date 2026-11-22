@@ -156,4 +156,20 @@ describe("Pick", () => {
     expect(text()).toContain("8 clips found");
     expect((button("Find more clips") as HTMLButtonElement).disabled).toBe(false);
   });
+
+  it("never asks for more than 60 clips", async () => {
+    const many = (n: number) => Array.from({ length: n }, (_, i) => clip(`x${i}`, i * 100, 50 + (i % 40)));
+    fake.getProject.mockResolvedValue(project(many(57)));
+    fake.analyze.mockResolvedValue(job({ id: "j-cap", pct: 0, state: "queued" }));
+    await mount({ analyze: { clips: 57, new: 57 } });
+    await act(async () => button("Find more clips").click());
+    expect(fake.analyze).toHaveBeenCalledWith("p1", { max_clips: 60 });
+  });
+
+  it("disables Find more clips at 60 clips and says why", async () => {
+    fake.getProject.mockResolvedValue(project(Array.from({ length: 60 }, (_, i) => clip(`x${i}`, i * 100, 50))));
+    await mount({ analyze: { clips: 60, new: 60 } });
+    expect((button("Find more clips") as HTMLButtonElement).disabled).toBe(true);
+    expect(text()).toContain("You have the most clips vedit can find (60).");
+  });
 });

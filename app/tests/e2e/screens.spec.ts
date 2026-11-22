@@ -60,6 +60,10 @@ test("pick screenshots", async ({ page }) => {
   await page.evaluate(() => document.documentElement.classList.add("light"));
   await shot(page, "pick-light", "t16");
 
+  await page.setViewportSize({ width: 900, height: 700 });
+  await shot(page, "pick-narrow-light", "t16");
+  await page.setViewportSize({ width: 1440, height: 900 });
+
   await page.getByRole("button", { name: "Find more clips" }).click();
   await expect(page.getByRole("button", { name: /Finding more clips/ })).toBeVisible();
   await shot(page, "pick-finding-light", "t16");

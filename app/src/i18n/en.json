@@ -84,6 +84,7 @@
   "pick.more.running": "Finding more clips {pct}%",
   "pick.more.added.one": "Added {n} clip.",
   "pick.more.added.other": "Added {n} clips.",
+  "pick.more.full": "You have the most clips vedit can find ({n}).",
   "pick.more.none": "No more clips found in this video.",
   "pick.length": "{len} long",
   "pick.score": "score {n}",

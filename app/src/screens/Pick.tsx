@@ -13,6 +13,9 @@ import { formatLength } from "../lib/time";
 import { useFilmstrip } from "../lib/useFilmstrip";
 
 const MORE_CLIPS = 6;
+const MAX_CLIPS = 60; // the most the engine accepts
+const STAGE_PAD = 48; // .stage padding, both sides
+const STAGE_MAX_H = 420;
 
 const plural = (key: string, n: number, vars: Record<string, string | number> = {}) =>
   t(`${key}.${n === 1 ? "one" : "other"}`, { n, ...vars });
@@ -44,6 +47,8 @@ export default function Pick() {
   const job = useJob(jobId);
   const running = job?.state === "queued" || job?.state === "running";
   const busy = running || starting;
+  const stage = useRef<HTMLDivElement>(null);
+  const [stageW, setStageW] = useState(560);
 
   function load(pid: string): Promise<void> {
     return engine.getProject(pid).then((p) => setProject(p));
@@ -82,11 +87,23 @@ export default function Pick() {
     );
   }, [id, job]);
 
+  // the preview frame fits the stage as it resizes
+  useEffect(() => {
+    const el = stage.current;
+    if (!el || typeof ResizeObserver === "undefined") return;
+    const measure = () => setStageW(Math.max(80, el.clientWidth - STAGE_PAD));
+    measure();
+    const ro = new ResizeObserver(measure);
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, [project !== null]);
+
   const clips = project?.clips ?? [];
   const sorted = sortClips(clips, sort);
   const currentId = sorted.some((c) => c.highlight.id === picked) ? picked : sorted[0]?.highlight.id;
   const current = sorted.find((c) => c.highlight.id === currentId);
   const kept = keptCount(clips);
+  const full = clips.length >= MAX_CLIPS;
   const analyze = routed ?? (project ? lastAnalyze(project) : undefined);
   const empty = !!project && (analyze?.reason === "no_speech" || clips.length === 0);
 
@@ -117,7 +134,7 @@ export default function Pick() {
     setError(null);
     setNote(null);
     try {
-      const started = await engine.analyze(id, { ...(await analyzeBody()), max_clips: clips.length + MORE_CLIPS });
+      const started = await engine.analyze(id, { ...(await analyzeBody()), max_clips: Math.min(clips.length + MORE_CLIPS, MAX_CLIPS) });
       setJobId(started.id);
     } catch {
       setError(t("pick.error.more"));
@@ -185,11 +202,12 @@ export default function Pick() {
             onToggleKept={toggleKept}
           />
           <footer className="pick-foot">
-            <button type="button" className="secondary" onClick={findMore} disabled={busy} aria-busy={busy}>
+            <button type="button" className="secondary" onClick={findMore} disabled={busy || full} aria-busy={busy}>
               {running ? t("pick.more.running", { pct }) : t("pick.more")}
             </button>
             {error && <p className="error" role="alert">{error}</p>}
             {!error && failedJob && <p className="error" role="alert">{job.error || t("pick.error.more")}</p>}
+            {full && <p className="note-text" role="status">{t("pick.more.full", { n: MAX_CLIPS })}</p>}
             {note && !error && <p className="note-text" role="status">{note}</p>}
           </footer>
         </section>
@@ -197,8 +215,8 @@ export default function Pick() {
         <section className="pick-preview" aria-label={t("pick.preview")}>
           {current && (
             <>
-              <div className="stage">
-                <FilmFrame film={film} t={current.highlight.start} width={560} className="preview-frame" />
+              <div className="stage" ref={stage}>
+                <FilmFrame film={film} t={current.highlight.start} fit={{ width: stageW, height: STAGE_MAX_H }} className="preview-frame" />
               </div>
               <h2 className="preview-title">{current.highlight.title}</h2>
               <p className="preview-meta mono">

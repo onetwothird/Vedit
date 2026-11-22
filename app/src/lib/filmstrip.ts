@@ -18,6 +18,12 @@ export function frameAt(film: Layout, t: number): FrameAt {
   return { index, col: index % film.cols, row: Math.floor(index / film.cols) };
 }
 
+/** Display width at which a frame fits whole inside boxW x boxH, keeping its aspect (portrait or landscape). */
+export function fitWidth(film: Pick<FilmstripInfo, "width" | "height"> | null, boxW: number, boxH: number): number {
+  const aspect = film && film.width > 0 && film.height > 0 ? film.width / film.height : 16 / 9;
+  return Math.max(1, Math.floor(Math.min(boxW, boxH * aspect)));
+}
+
 /** Style for a box `displayWidth` wide that shows the frame at time `t`. `image` is a CSS url(...) value. */
 export function spriteStyle(film: FilmstripInfo, t: number, displayWidth: number, image: string): CSSProperties {
   const { col, row } = frameAt(film, t);

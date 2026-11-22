@@ -76,7 +76,7 @@ button:focus-visible, a:focus-visible, input:focus-visible, select:focus-visible
   border-radius: 6px;
 }
 .mono { font-family: var(--mono); }
-.pixel { font-family: var(--pixel); }
+.pixel { font-family: var(--pixel); font-weight: 400; font-synthesis: none; }
 
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after {
