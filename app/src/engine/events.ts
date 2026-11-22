@@ -33,6 +33,8 @@ export interface JobStore {
   upsert(job: Job): void;
 }
 
+const rank = (j: Job): number => (TERMINAL.includes(j.state) ? 2 : j.state === "running" ? 1 : 0);
+
 const same = (a: Job, b: Job): boolean =>
   a.state === b.state && a.stage === b.stage && a.pct === b.pct && a.message === b.message && a.error === b.error
   && JSON.stringify(a.result) === JSON.stringify(b.result);
@@ -48,11 +50,22 @@ export function createJobStore(opts: JobStoreOptions): JobStore {
 
   function upsert(job: Job): void {
     const old = jobs.get(job.id);
-    if (old && same(old, job)) return;
-    if (old && TERMINAL.includes(old.state) && !TERMINAL.includes(job.state)) return; // a stale answer
-    const next = new Map(jobs);
-    next.set(job.id, job);
-    jobs = next;
+    let next = job;
+    if (old) {
+      const a = rank(old), b = rank(job);
+      if (b < a) return; // a stale snapshot never moves a job backwards
+      if (a === 2) {
+        // terminal: only the same state, now carrying a result the stored one lacked, may replace it
+        if (job.state !== old.state || old.result !== null || job.result === null) return;
+      } else if (a === 1 && b === 1) {
+        if (job.pct < old.pct) return; // keep the newer stage/message and the higher pct
+        next = { ...job, pct: Math.max(job.pct, old.pct) };
+      }
+      if (same(old, next)) return;
+    }
+    const map = new Map(jobs);
+    map.set(next.id, next);
+    jobs = map;
     listeners.forEach((l) => l());
   }
 

@@ -165,6 +165,30 @@ describe("job store", () => {
     expect(FakeSocket.all).toHaveLength(n + 1);
   });
 
+  it("never moves a job backwards when stale snapshots arrive", () => {
+    const { store } = make();
+    store.upsert(job({ pct: 50, stage: "analyze" }));
+    store.upsert(job({ pct: 20, stage: "proxy" })); // lower pct running
+    expect(store.getJob("j1")).toMatchObject({ pct: 50, stage: "analyze" });
+    store.upsert(job({ state: "queued", pct: 0, stage: "" })); // queued after running
+    expect(store.getJob("j1")?.state).toBe("running");
+    store.upsert(job({ pct: 60, stage: "highlights" }));
+    expect(store.getJob("j1")).toMatchObject({ pct: 60, stage: "highlights" });
+    store.upsert(job({ state: "done", pct: 100 }));
+    store.upsert(job({ pct: 70 })); // running after done
+    store.upsert(job({ state: "failed", pct: 100 })); // different terminal
+    expect(store.getJob("j1")?.state).toBe("done");
+  });
+
+  it("lets a done snapshot gain its result once", () => {
+    const { store } = make();
+    store.upsert(job({ state: "done", pct: 100, result: null }));
+    store.upsert(job({ state: "done", pct: 100, result: { clips: 3 } }));
+    expect(store.getJob("j1")?.result).toEqual({ clips: 3 });
+    store.upsert(job({ state: "done", pct: 100, result: { clips: 9 } }));
+    expect(store.getJob("j1")?.result).toEqual({ clips: 3 });
+  });
+
   it("does not reconnect after the last subscriber left", async () => {
     const { store } = make();
     const off = store.subscribe(() => undefined);
