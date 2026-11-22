@@ -27,6 +27,14 @@ def die(msg: str, code: int = 1):
     sys.exit(code)
 
 
+def progress(stage: str, pct: float, message: str = "", **extra) -> None:
+    """Machine-readable progress for the Studio app: one `@@progress {json}` line on stderr when VEDIT_PROGRESS=1."""
+    if os.environ.get("VEDIT_PROGRESS") != "1":
+        return
+    row = {"stage": stage, "pct": round(max(0.0, min(100.0, float(pct))), 1), "message": message, **extra}
+    print("@@progress " + json.dumps(row), file=sys.stderr, flush=True)
+
+
 def py_cmd(script: str, *args: str) -> list[str]:
     """argv that runs an engine script with this interpreter, or via `vedit-engine run` when frozen."""
     if getattr(sys, "frozen", False):

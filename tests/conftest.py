@@ -1,5 +1,6 @@
 """Shared fixtures: a tiny synthetic 'talking' video + fake word-level transcript (no Whisper download needed)."""
 import json
+import os
 import shutil
 import subprocess
 import sys
@@ -24,9 +25,9 @@ def ff(*args):
     subprocess.run(["ffmpeg", "-y", "-v", "error", *args], check=True)
 
 
-def run_script(name, *args, check=True):
+def run_script(name, *args, check=True, env: dict | None = None):
     r = subprocess.run([sys.executable, str(SCRIPTS / name), *map(str, args)], capture_output=True, text=True,
-                       encoding="utf-8", errors="replace")  # scripts print UTF-8; Windows default is cp1252
+                       encoding="utf-8", errors="replace", env={**os.environ, **env} if env else None)  # scripts print UTF-8; Windows default is cp1252
     if check and r.returncode != 0:
         raise AssertionError(f"{name} failed:\n{r.stdout}\n{r.stderr}")
     return r
@@ -62,7 +63,19 @@ def talking(tmp_path_factory, ffmpeg_ok):
     data = build(str(d / "raw.mp4"), words, "en", "main", t)
     save_json(data, d / "raw.edit" / "transcript.main.json")
     write_txt(d / "raw.edit" / "transcript.main.txt", data)
+    shutil.copytree(d / "raw.edit", d / "pristine.edit")  # tests like auto.py overwrite raw.edit; keep a clean copy
     return d
+
+
+@pytest.fixture(scope="session")
+def sample_edl(talking):
+    """edl.json cut from the synthetic talking video, rendering to <talking>/prog.mp4."""
+    edl = talking / "pristine.edit" / "edl.sample.json"
+    run_script("autocut.py", talking / "pristine.edit", "--preset", "youtube", "--out", edl)
+    e = json.loads(edl.read_text())
+    e["output"]["path"] = str(talking / "prog.mp4")
+    edl.write_text(json.dumps(e))
+    return edl
 
 
 def probe(path):

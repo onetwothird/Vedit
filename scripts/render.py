@@ -22,7 +22,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent))
 import captions as cap  # noqa: E402
-from common import even, ffmpeg_bin, filter_path, need, ts  # noqa: E402
+from common import even, ffmpeg_bin, filter_path, need, progress, ts  # noqa: E402
 from edl import Timeline  # noqa: E402
 
 
@@ -174,6 +174,8 @@ def render_segments(tl: Timeline, cache: Path, preview: bool, jobs: int) -> list
     print(f"[render] {len(work)} clips ({len(work) - len(todo)} cached), output {tl.out['width']}x"
           f"{tl.out['height']} @ {tl.out['fps']}fps, duration {ts(tl.duration)}", file=sys.stderr)
 
+    progress("render", 0, "Rendering clips")
+
     def one(item):
         c, o = item
         part = o.with_suffix(".part.mkv")
@@ -188,11 +190,13 @@ def render_segments(tl: Timeline, cache: Path, preview: bool, jobs: int) -> list
         for err in ex.map(one, todo):
             done += 1
             print(f"\r[render] segments {done}/{len(todo)}", end="", file=sys.stderr)
+            progress("render", 90 * done / len(todo), f"Rendered clip {done} of {len(todo)}")
             if err:
                 print(f"\nerror: {err}", file=sys.stderr)
                 sys.exit(1)
     if todo:
         print(file=sys.stderr)
+    progress("render", 90, "Joining clips")
     return [o for _, o in work]
 
 
@@ -353,6 +357,7 @@ def render_one(edl: str, aspect: str | None, a) -> Path:
         print(f"[render] {n} caption/text events", file=sys.stderr)
     final_pass(tl, segs, ass, out, a.preview)
     chap = write_chapters(tl, out)
+    progress("render", 100, "Done")
     print(f"\n[render] done -> {out}  ({ts(tl.duration)}, {tl.out['width']}x{tl.out['height']})")
     if Path(out).with_suffix(".srt").exists():
         print(f"[render] subtitles -> {Path(out).with_suffix('.srt')}")

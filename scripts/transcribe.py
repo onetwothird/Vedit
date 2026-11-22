@@ -16,7 +16,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent))
 from common import (FILLER_PHRASES, FILLERS_HARD, FILLERS_SOFT, die, ffmpeg_bin, need, norm_word,  # noqa: E402
-                    run, save_json, ts, workdir_for)
+                    progress, run, save_json, ts, workdir_for)
 
 # Whisper drops disfluencies unless prompted with text that contains them.
 FILLER_PROMPT = "Umm, let me think, like, hmm... Okay, uh, so here's what I'm, you know, thinking."
@@ -102,6 +102,8 @@ def transcribe_words(wav: str, model_name: str, language: str | None, keep_fille
                 for w in s.words or []:
                     words.append({"start": w.start, "end": w.end, "text": w.word.strip(), "p": round(w.probability, 3)})
                 print(f"\r[transcribe] {ts(s.end)}", end="", file=sys.stderr)
+                if info.duration:
+                    progress("transcribe", 100 * s.end / info.duration, "Transcribing")
             print(file=sys.stderr)
             return words, info.language
 

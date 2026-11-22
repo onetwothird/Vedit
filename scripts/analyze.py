@@ -18,7 +18,7 @@ import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent))
-from common import ffmpeg_bin, py_cmd, ffprobe, need, run, save_json, ts, workdir_for  # noqa: E402
+from common import ffmpeg_bin, ffprobe, need, progress, py_cmd, run, save_json, ts, workdir_for  # noqa: E402
 
 
 def loudness(video: str) -> dict:
@@ -85,17 +85,24 @@ def main():
     wd = workdir_for(a.videos[0], a.out)
     from frames import sheets  # noqa: E402
 
-    for video, name in zip(a.videos, names):
+    total = len(a.videos)
+    for n_done, (video, name) in enumerate(zip(a.videos, names)):
         print(f"\n=== {name}: {video}", file=sys.stderr)
+
+        def step(stage, frac, message):  # frac = how far through this video; pct spans all videos
+            progress(stage, 100 * (n_done + frac) / total, message)
         info = ffprobe(video)
         rep = {"name": name, "probe": info}
         if info["has_audio"]:
+            step("audio", 0.05, "Measuring loudness")
             rep["loudness"] = loudness(video)
             mean = rep["loudness"].get("mean_volume_db", -30)
             noise = max(-55.0, min(-28.0, mean - 14))  # adaptive silence threshold
             rep["silence_threshold_db"] = noise
+            step("silences", 0.3, "Finding silences")
             rep["silences"] = silences(video, noise, a.min_silence)
         if info["has_video"]:
+            step("framing", 0.5, "Detecting scene cuts")
             rep["scene_cuts"] = scenes(video, a.scene_threshold)
             dur = info["duration"]
             every = max(2.0, dur / 24)
@@ -104,6 +111,7 @@ def main():
             rep["overview_sheets"] = [str(p) for p in sheets(video, times, wd / "frames", 400, 4, False,
                                                              f"overview_{name}")]
         save_json(rep, wd / f"analysis.{name}.json")
+        step("framing", 0.9, "Saved analysis")
 
         if info["has_audio"] and not a.no_transcribe:
             import subprocess
@@ -124,6 +132,7 @@ def main():
             print(f"[{name}] {len(rep['scene_cuts'])} scene cuts; overview sheets:")
             for p in rep["overview_sheets"]:
                 print("   ", p)
+    progress("framing", 100, "Analysis complete")
     print(f"\nworkdir: {wd}")
 
 
