@@ -10,6 +10,7 @@ import {
   VIDEO_ACCEPT, analyzeBody, baseName, isVideoName, listenNativeDrop, pickVideoNative, toPicked, type PickedFile,
 } from "../lib/native";
 import { getLanguage, getPlatform } from "../lib/prefs";
+import { hasModelStep } from "../lib/modelSeen";
 import { secondsLeft } from "../lib/progress";
 
 const LANGUAGES: Language[] = ["en", "tl", "taglish"];
@@ -66,7 +67,6 @@ export default function Import() {
   const [over, setOver] = useState(false);
   const [missing, setMissing] = useState(false);
   const [loading, setLoading] = useState(!!id && id !== "new");
-  const [sawModel, setSawModel] = useState(false);
   const [now, setNow] = useState(() => Date.now());
   const startedAt = useRef(Date.now());
   const ownedId = useRef<string | null>(null);
@@ -74,6 +74,8 @@ export default function Import() {
 
   const job = useJob(jobId);
   const running = job?.state === "queued" || job?.state === "running";
+  const locked = useRef(false); // read by drop handlers, which outlive a render
+  locked.current = running || busy;
   const failed = job?.state === "failed";
   const cancelled = job?.state === "cancelled";
 
@@ -112,12 +114,8 @@ export default function Import() {
   }, [id]);
 
   useEffect(() => {
-    if (job?.state === "done") navigate(`/p/${job.project_id}/pick`);
-  }, [job?.state, job?.project_id, navigate]);
-
-  useEffect(() => {
-    if (job?.stage === "model") setSawModel(true);
-  }, [job?.stage]);
+    if (job?.state === "done") navigate(`/p/${job.project_id}/pick`, { state: { analyze: job.result } });
+  }, [job?.state, job?.project_id, job?.result, navigate]);
 
   useEffect(() => {
     if (!running) return;
@@ -126,6 +124,7 @@ export default function Import() {
   }, [running]);
 
   function accept(path: string) {
+    if (locked.current) return; // a running analysis is never replaced by a dropped file
     if (!isVideoName(baseName(path))) {
       setError(t("import.unsupported"));
       return;
@@ -189,7 +188,6 @@ export default function Import() {
       const started = await engine.analyze(project, await analyzeBody());
       startedAt.current = Date.now();
       setNow(Date.now());
-      setSawModel(false);
       setJobId(started.id);
     } catch (e) {
       setError(e instanceof EngineError ? e.message : t("import.failed.generic"));
@@ -247,7 +245,7 @@ export default function Import() {
           >
             <i style={{ width: `${pct}%` }} />
           </div>
-          <ProgressStages stage={job.stage} pct={job.pct} hasModel={sawModel} />
+          <ProgressStages stage={job.stage} pct={job.pct} hasModel={hasModelStep(job.id) || job.stage === "model"} />
           {error && <p className="error" role="alert">{error}</p>}
           <button type="button" className="secondary" onClick={cancel}>{t("import.cancel")}</button>
         </section>
