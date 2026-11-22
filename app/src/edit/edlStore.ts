@@ -30,12 +30,9 @@ export interface ClipState {
 
 type ClipEngine = Pick<Engine, "clip" | "patchClip" | "transcript">;
 
-interface Job {
-  ops: Op[];
-  /** History once this job has been confirmed. */
-  past: HistoryEntry[];
-  future: HistoryEntry[];
-}
+type Job =
+  | { kind: "ops"; gen: number; ops: Op[]; past: HistoryEntry[]; future: HistoryEntry[] } // past/future: history once confirmed
+  | { kind: "load"; gen: number; pid: string; hid: string };
 
 /** The wire form of an op: the store's own `prev` bookkeeping stays local. */
 function wire(op: Op): ClipOp {
@@ -47,44 +44,83 @@ function wire(op: Op): ClipOp {
 const message = (e: unknown): string => (e instanceof Error ? e.message : String(e));
 
 export function createClipStore(eng: ClipEngine): UseBoundStore<StoreApi<ClipState>> {
-  let generation = 0; // bumped by load(): replies for an older clip are ignored
+  let generation = 0; // bumped when a different clip is loaded: work for the old clip is dropped
   let transcript: Transcript | null = null;
-  let queue: Job[] = [];
+  let queue: Job[] = []; // everything that talks to the engine (ops, loads) runs here, one at a time
   let running = false;
+  let rollingBack = false;
+  let deferred: (() => void)[] = []; // edits made during a rollback wait for it
   let confirmed: { view: ClipView; past: HistoryEntry[]; future: HistoryEntry[] } | null = null;
 
   return create<ClipState>()((set, get) => {
+    const hasOps = () => queue.some((j) => j.kind === "ops");
+    const sync = () => set({ saving: hasOps() || rollingBack });
+
+    async function runLoad(job: Extract<Job, { kind: "load" }>): Promise<void> {
+      try {
+        const [view, tr] = await Promise.all([eng.clip(job.pid, job.hid), eng.transcript(job.pid).catch(() => null)]);
+        if (job.gen !== generation) return;
+        transcript = tr;
+        confirmed = { view, past: confirmed?.past ?? [], future: confirmed?.future ?? [] };
+        set({ view });
+      } catch (e) {
+        if (job.gen === generation) set({ error: message(e) });
+      }
+    }
+
+    async function runOps(job: Extract<Job, { kind: "ops" }>): Promise<void> {
+      const { pid, hid } = get();
+      let sent = 0;
+      try {
+        let reply: ClipView | undefined;
+        for (const op of job.ops) {
+          reply = await eng.patchClip(pid!, hid!, wire(op));
+          sent++;
+        }
+        if (job.gen !== generation) return;
+        queue.shift();
+        confirmed = { view: reply!, past: job.past, future: job.future };
+        // while ops are still queued the optimistic view is ahead of this reply, so keep it
+        set((s) => ({ view: hasOps() ? s.view : reply! }));
+      } catch (e) {
+        if (job.gen !== generation) return;
+        rollingBack = true;
+        queue = []; // the failed op and everything queued behind it
+        set({ saving: true });
+        let { view, past, future } = confirmed!;
+        if (sent > 0) {
+          // a half-sent multi-op undo: show what the server really has, and start the history over
+          view = await eng.clip(pid!, hid!).catch(() => view);
+          past = [];
+          future = [];
+        }
+        if (job.gen !== generation) return; // another clip was loaded meanwhile
+        confirmed = { view, past, future };
+        rollingBack = false;
+        set({ view, past, future, saving: false, error: message(e) });
+        const waiting = deferred;
+        deferred = [];
+        waiting.forEach((fn) => fn());
+      }
+    }
+
     async function pump(): Promise<void> {
       if (running) return;
       running = true;
-      const gen = generation;
       try {
-        while (queue.length && gen === generation) {
+        while (queue.length) {
           const job = queue[0];
-          const { pid, hid } = get();
-          let sent = 0;
-          try {
-            let reply: ClipView | undefined;
-            for (const op of job.ops) {
-              reply = await eng.patchClip(pid!, hid!, wire(op));
-              sent++;
-              if (gen !== generation) return;
-            }
-            queue.shift();
-            confirmed = { view: reply!, past: job.past, future: job.future };
-            // while ops are still queued the optimistic view is ahead of this reply, so keep it
-            set((s) => ({ view: queue.length ? s.view : reply!, saving: queue.length > 0 }));
-          } catch (e) {
-            if (gen !== generation) return;
-            queue = [];
-            let view = confirmed!.view;
-            if (sent > 0) view = await eng.clip(pid!, hid!).catch(() => view); // a half-sent undo: show what the server has
-            if (gen !== generation) return;
-            set({ view, past: confirmed!.past, future: confirmed!.future, saving: false, error: message(e) });
+          if (job.gen !== generation) { queue.shift(); continue; }
+          if (job.kind === "load") {
+            await runLoad(job);
+            if (queue[0] === job) queue.shift();
+          } else {
+            await runOps(job);
           }
         }
       } finally {
         running = false;
+        if (!rollingBack) sync();
       }
     }
 
@@ -98,57 +134,70 @@ export function createClipStore(eng: ClipEngine): UseBoundStore<StoreApi<ClipSta
         set({ error: message(e) });
         return;
       }
-      queue.push({ ops, past, future });
+      queue.push({ kind: "ops", gen: generation, ops, past, future });
       set({ view: next, past, future, saving: true, error: undefined });
       void pump();
     }
 
+    const whenSettled = (fn: () => void): void => {
+      if (rollingBack) deferred.push(fn);
+      else fn();
+    };
+
     return {
       pid: null, hid: null, view: null, past: [], future: [], saving: false, error: undefined,
 
-      async load(pid, hid) {
-        const gen = ++generation;
-        queue = [];
-        confirmed = null;
-        transcript = null;
-        set({ pid, hid, view: null, past: [], future: [], saving: false, error: undefined });
-        try {
-          const [view, tr] = await Promise.all([eng.clip(pid, hid), eng.transcript(pid).catch(() => null)]);
-          if (gen !== generation) return;
-          transcript = tr;
-          confirmed = { view, past: [], future: [] };
-          set({ view });
-        } catch (e) {
-          if (gen === generation) set({ error: message(e) });
+      load(pid, hid) {
+        const same = get().pid === pid && get().hid === hid;
+        const job: Job = { kind: "load", gen: same ? generation : ++generation, pid, hid };
+        if (same) {
+          queue.push(job); // a refresh behind this clip's pending edits
+        } else {
+          queue = [job]; // the old clip's pending ops are dropped
+          deferred = [];
+          rollingBack = false;
+          transcript = null;
+          confirmed = null;
+          set({ pid, hid, view: null, past: [], future: [], saving: false, error: undefined });
         }
+        const done = new Promise<void>((resolve) => {
+          const poll = () => (queue.includes(job) ? setTimeout(poll, 0) : resolve());
+          poll();
+        });
+        void pump();
+        return done;
       },
 
       apply(op) {
-        const { view, past } = get();
-        if (!view) return;
-        let entry: HistoryEntry;
-        try {
-          entry = withInverse(view.edl, op);
-          applyLocal(view, [op], null); // reject a bad op before it touches history
-        } catch (e) {
-          set({ error: message(e) });
-          return;
-        }
-        enqueue([entry.op], [...past, entry], []);
+        whenSettled(() => {
+          const { view, past } = get();
+          if (!view) return;
+          let entry: HistoryEntry;
+          try {
+            entry = withInverse(view.edl, op);
+            applyLocal(view, [op], null); // reject a bad op before it touches history
+          } catch (e) {
+            set({ error: message(e) });
+            return;
+          }
+          enqueue([entry.op], [...past, entry], []);
+        });
       },
 
       undo() {
-        const { past, future } = get();
-        const entry = past[past.length - 1];
-        if (!entry) return;
-        enqueue(entry.inverse, past.slice(0, -1), [entry, ...future]);
+        whenSettled(() => {
+          const { past, future } = get();
+          const entry = past[past.length - 1];
+          if (entry) enqueue(entry.inverse, past.slice(0, -1), [entry, ...future]);
+        });
       },
 
       redo() {
-        const { past, future } = get();
-        const [entry, ...rest] = future;
-        if (!entry) return;
-        enqueue([entry.op], [...past, entry], rest);
+        whenSettled(() => {
+          const { past, future } = get();
+          const [entry, ...rest] = future;
+          if (entry) enqueue([entry.op], [...past, entry], rest);
+        });
       },
     };
   });
