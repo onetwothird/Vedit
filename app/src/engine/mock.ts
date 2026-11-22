@@ -153,6 +153,7 @@ export function createMockEngine(opts: { tickMs?: number } = {}): MockEngine {
   const timers = new Map<string, ReturnType<typeof setTimeout>>();
   const listeners = new Set<(job: Job) => void>();
   const models: ModelStatus = { small: { installed: true, size_mb: 484 }, "large-v3": { installed: false, size_mb: 3090 } };
+  const failedOnce = new Set<string>(); // projects whose first analyze already failed on purpose
   let seq = 0;
 
   const notFound = (what: string) => new EngineError(404, "not_found", `not found: ${what}`);
@@ -197,12 +198,21 @@ export function createMockEngine(opts: { tickMs?: number } = {}): MockEngine {
     for (const l of [...listeners]) l(snapshot(job));
   }
 
-  function run(job: Job, stages: [name: string, share: number][], finish: (job: Job) => void): Job {
+  function run(
+    job: Job, stages: [name: string, share: number][], finish: (job: Job) => void,
+    failure?: { afterTicks: number; error: string },
+  ): Job {
     emit(job);
-    let s = 0, tick = 0, done = 0;
+    let s = 0, tick = 0, done = 0, total = 0;
     const step = (): void => {
       const cur = jobs.get(job.id)!;
       if (cur.state === "cancelled") return;
+      if (failure && total >= failure.afterTicks) {
+        emit({ ...cur, state: "failed", error: failure.error, message: "" });
+        timers.delete(job.id);
+        return;
+      }
+      total++;
       if (s >= stages.length) {
         finish(cur);
         emit({ ...cur, state: "done", pct: 100, message: "" });
@@ -241,6 +251,9 @@ export function createMockEngine(opts: { tickMs?: number } = {}): MockEngine {
     async analyze(pid, _body?: AnalyzeBody) {
       const p = project(pid); // the AI key in the body is deliberately never read or stored
       const stages: [string, number][] = [["proxy", 0.1], ["analyze", 0.6], ["highlights", 0.15], ["framing", 0.15]];
+      // test trigger: a source file name containing "fail" makes the first analyze of that project fail halfway
+      const failing = /fail/i.test(p.source) && !failedOnce.has(pid);
+      if (failing) failedOnce.add(pid);
       return run(newJob(pid, "analyze"), stages, (job) => {
         const had = p.clips.length;
         if (!had) {
@@ -248,7 +261,7 @@ export function createMockEngine(opts: { tickMs?: number } = {}): MockEngine {
           p.settings = { workdir: "C:/mock/work", proxy: p.source, filmstrip: "C:/mock/work/filmstrip.json" };
         }
         job.result = { clips: p.clips.length, new: p.clips.length - had, reason: null };
-      });
+      }, failing ? { afterTicks: 8, error: "Couldn't read the audio track in this file." } : undefined);
     },
     async transcript(pid) {
       const p = project(pid);
