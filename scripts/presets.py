@@ -35,6 +35,14 @@ def get_preset(name: str) -> dict:
     return PRESETS[name]
 
 
+def make_edl_kwargs(name: str) -> dict:
+    """autocut.make_edl keyword arguments for a preset (the mapping auto.py uses)."""
+    p = get_preset(name)
+    return {"max_gap": p["max_gap"], "keep_fillers": p.get("keep_fillers", False), "punchin": p["punchin"],
+            "aspect": p["aspect"], "captions": p["captions"], "lufs": p["lufs"],
+            "fit": p.get("fit") if p["aspect"] else None}
+
+
 def find_brand(explicit: str | None, near: Path) -> Path | None:
     if explicit:
         p = Path(explicit).expanduser()

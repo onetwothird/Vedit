@@ -14,7 +14,7 @@ import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent))
-from common import die, ffprobe, need, run, ts, workdir_for  # noqa: E402
+from common import die, ffmpeg_bin, ffprobe, need, run, ts, workdir_for  # noqa: E402
 
 try:
     import numpy as np
@@ -28,7 +28,7 @@ _INFO: dict = {}
 def gray(video: str, t: float, w: int = 320) -> "np.ndarray | None":
     info = _INFO.setdefault(video, ffprobe(video))
     h = int(info["height"] * w / info["width"]) // 2 * 2
-    raw = subprocess.run(["ffmpeg", "-v", "error", "-ss", f"{t:.3f}", "-i", video, "-frames:v", "1",
+    raw = subprocess.run([ffmpeg_bin("ffmpeg"), "-v", "error", "-ss", f"{t:.3f}", "-i", video, "-frames:v", "1",
                           "-vf", f"scale={w}:{h}", "-f", "rawvideo", "-pix_fmt", "gray", "-"],
                          capture_output=True).stdout
     return np.frombuffer(raw[: w * h], np.uint8).reshape(h, w).astype(np.float32) if len(raw) >= w * h else None
@@ -91,7 +91,7 @@ def main():
         for old in outdir.glob("candidate_*.jpg"):
             old.unlink()
         for i, (sc, t, parts) in enumerate(picks, 1):
-            run(["ffmpeg", "-y", "-v", "error", "-ss", f"{t:.3f}", "-i", a.video, "-frames:v", "1", "-q:v", "2",
+            run([ffmpeg_bin("ffmpeg"), "-y", "-v", "error", "-ss", f"{t:.3f}", "-i", a.video, "-frames:v", "1", "-q:v", "2",
                  str(outdir / f"candidate_{i}.jpg")])
             print(f"candidate_{i}.jpg  at {ts(t)}  score={sc:.2f} {parts}")
         from frames import sheets
@@ -112,7 +112,7 @@ def main():
               f"drawtext=font='{a.font}':text='{text}':fontsize={fs}:fontcolor=0x{c}:borderw={max(4, fs // 12)}:"
               f"bordercolor=black:x=(w-text_w)/2:y=h*0.80-text_h/2")
         out = outdir / "thumbnail.jpg"
-        run(["ffmpeg", "-y", "-v", "error", "-i", str(src), "-vf", vf, "-frames:v", "1", "-q:v", "2", str(out)])
+        run([ffmpeg_bin("ffmpeg"), "-y", "-v", "error", "-i", str(src), "-vf", vf, "-frames:v", "1", "-q:v", "2", str(out)])
         print(f"thumbnail: {out}")
 
 

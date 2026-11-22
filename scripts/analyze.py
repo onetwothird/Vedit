@@ -18,12 +18,12 @@ import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent))
-from common import ffprobe, need, run, save_json, ts, workdir_for  # noqa: E402
+from common import ffmpeg_bin, ffprobe, need, progress, py_cmd, run, save_json, ts, workdir_for  # noqa: E402
 
 
 def loudness(video: str) -> dict:
     # loudnorm's measurement mode works on FFmpeg 4.x through 7.x (ebur128 options differ between versions)
-    res = run(["ffmpeg", "-hide_banner", "-nostats", "-i", video, "-vn", "-af", "loudnorm=print_format=json",
+    res = run([ffmpeg_bin("ffmpeg"), "-hide_banner", "-nostats", "-i", video, "-vn", "-af", "loudnorm=print_format=json",
                "-f", "null", "-"], capture=True)
     out = {}
     m = re.search(r"\{[^{}]*\"input_i\"[^{}]*\}", res.stderr)
@@ -35,7 +35,7 @@ def loudness(video: str) -> dict:
                 out[key] = float(d[src])
             except (KeyError, ValueError):
                 pass
-    res = run(["ffmpeg", "-hide_banner", "-nostats", "-i", video, "-vn", "-af", "volumedetect", "-f", "null", "-"],
+    res = run([ffmpeg_bin("ffmpeg"), "-hide_banner", "-nostats", "-i", video, "-vn", "-af", "volumedetect", "-f", "null", "-"],
               capture=True)
     for key in ("mean_volume", "max_volume"):
         m = re.search(key + r":\s+(-?[\d.]+) dB", res.stderr)
@@ -45,7 +45,7 @@ def loudness(video: str) -> dict:
 
 
 def silences(video: str, noise_db: float, min_dur: float) -> list[dict]:
-    res = run(["ffmpeg", "-hide_banner", "-nostats", "-i", video, "-vn",
+    res = run([ffmpeg_bin("ffmpeg"), "-hide_banner", "-nostats", "-i", video, "-vn",
                "-af", f"silencedetect=noise={noise_db}dB:d={min_dur}", "-f", "null", "-"], capture=True)
     out, start = [], None
     for line in res.stderr.splitlines():
@@ -62,7 +62,7 @@ def silences(video: str, noise_db: float, min_dur: float) -> list[dict]:
 
 
 def scenes(video: str, threshold: float) -> list[float]:
-    res = run(["ffmpeg", "-hide_banner", "-nostats", "-i", video, "-an", "-vf",
+    res = run([ffmpeg_bin("ffmpeg"), "-hide_banner", "-nostats", "-i", video, "-an", "-vf",
                f"scale=320:-2,select='gt(scene,{threshold})',showinfo", "-f", "null", "-"], capture=True)
     return [round(float(m.group(1)), 3) for m in re.finditer(r"pts_time:([\d.]+)", res.stderr)]
 
@@ -85,8 +85,15 @@ def main():
     wd = workdir_for(a.videos[0], a.out)
     from frames import sheets  # noqa: E402
 
-    for video, name in zip(a.videos, names):
+    total = len(a.videos)
+
+    def step(stage, n_done, frac, message):  # stage-relative: each stage runs 0-100 across all videos
+        progress(stage, 100 * (n_done + frac) / total, message)
+
+    for n_done, (video, name) in enumerate(zip(a.videos, names)):
         print(f"\n=== {name}: {video}", file=sys.stderr)
+        step("audio", n_done, 0, "Measuring loudness")
+        step("silences", n_done, 0, "Finding silences")
         info = ffprobe(video)
         rep = {"name": name, "probe": info}
         if info["has_audio"]:
@@ -95,6 +102,8 @@ def main():
             noise = max(-55.0, min(-28.0, mean - 14))  # adaptive silence threshold
             rep["silence_threshold_db"] = noise
             rep["silences"] = silences(video, noise, a.min_silence)
+        step("audio", n_done, 1, "Loudness measured")
+        step("silences", n_done, 0.5, "Silences found")
         if info["has_video"]:
             rep["scene_cuts"] = scenes(video, a.scene_threshold)
             dur = info["duration"]
@@ -104,11 +113,11 @@ def main():
             rep["overview_sheets"] = [str(p) for p in sheets(video, times, wd / "frames", 400, 4, False,
                                                              f"overview_{name}")]
         save_json(rep, wd / f"analysis.{name}.json")
+        step("silences", n_done, 1, "Saved analysis")
 
         if info["has_audio"] and not a.no_transcribe:
             import subprocess
-            cmd = [sys.executable, str(Path(__file__).parent / "transcribe.py"), video, "--name", name,
-                   "--out", str(wd), "--model", a.model]
+            cmd = py_cmd("transcribe.py", video, "--name", name, "--out", str(wd), "--model", a.model)
             if a.language:
                 cmd += ["--language", a.language]
             if subprocess.call(cmd) != 0:

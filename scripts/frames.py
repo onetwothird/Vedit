@@ -18,7 +18,7 @@ import tempfile
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent))
-from common import ffprobe, need, parse_time, run, ts, workdir_for  # noqa: E402
+from common import ffmpeg_bin, ffprobe, need, parse_time, run, ts, workdir_for  # noqa: E402
 
 PER_SHEET = 12
 # Bundled font for the time labels: without an explicit fontfile, some Windows FFmpeg builds
@@ -35,7 +35,7 @@ def grab(video: str, t: float, out: Path, width: int, grid: bool):
     base = ",".join(vf)
     txt = (f",drawtext=text='{label}':x=8:y=8:fontsize={max(14, width // 22)}:fontcolor=white:"
            f"box=1:boxcolor=black@0.6:boxborderw=4{_FONT}")
-    cmd = ["ffmpeg", "-y", "-v", "error", "-ss", f"{t:.3f}", "-i", video, "-frames:v", "1", "-q:v", "3"]
+    cmd = [ffmpeg_bin("ffmpeg"), "-y", "-v", "error", "-ss", f"{t:.3f}", "-i", video, "-frames:v", "1", "-q:v", "3"]
     if subprocess.run(cmd + ["-vf", base + txt, str(out)], capture_output=True).returncode != 0:
         run(cmd + ["-vf", base, str(out)])  # drawtext unusable here -> frame without the time label
 
@@ -56,7 +56,7 @@ def sheets(video: str, times: list[float], outdir: Path, width: int, cols: int, 
             for k in range(n, r * c):
                 shutil.copy(Path(td) / "f000.jpg", Path(td) / f"f{k:03d}.jpg")
             out = outdir / f"{tag}_{si // PER_SHEET + 1:02d}_{ts(chunk[0]).replace(':', '-')}.jpg"
-            run(["ffmpeg", "-y", "-v", "error", "-framerate", "1", "-i", str(Path(td) / "f%03d.jpg"),
+            run([ffmpeg_bin("ffmpeg"), "-y", "-v", "error", "-framerate", "1", "-i", str(Path(td) / "f%03d.jpg"),
                  "-vf", f"tile={c}x{r}:padding=4:color=black", "-frames:v", "1", "-q:v", "3", str(out)])
             made.append(out)
     return made

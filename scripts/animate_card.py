@@ -24,6 +24,8 @@ import subprocess
 import numpy as np
 from PIL import Image
 
+from common import ffmpeg_bin
+
 try:
     import cv2  # type: ignore
 except ImportError:  # pragma: no cover
@@ -127,10 +129,10 @@ def bg_frame(bg: np.ndarray, tg: float, punch: float, center=(540, 565)) -> np.n
 class VideoFrames:
     """Frames of a video, scaled+cropped to W x H, streamed from ffmpeg (loops when the clip is short)."""
 
-    def __init__(self, path, W: int, H: int, fps: int, start: float, duration: float, ffmpeg: str = "ffmpeg"):
+    def __init__(self, path, W: int, H: int, fps: int, start: float, duration: float, ffmpeg: str | None = None):
         self.W, self.H, self.last = W, H, None
         vf = f"scale={W}:{H}:force_original_aspect_ratio=increase,crop={W}:{H},fps={fps},format=rgb24"
-        cmd = [ffmpeg, "-v", "error", "-stream_loop", "-1", "-ss", f"{start:.3f}", "-i", str(path),
+        cmd = [ffmpeg or ffmpeg_bin("ffmpeg"), "-v", "error", "-stream_loop", "-1", "-ss", f"{start:.3f}", "-i", str(path),
                "-t", f"{duration + 1:.3f}", "-vf", vf, "-an", "-f", "rawvideo", "-pix_fmt", "rgb24", "-"]
         self.proc = subprocess.Popen(cmd, stdout=subprocess.PIPE)
 
@@ -150,7 +152,7 @@ class VideoFrames:
 
 
 def render(card_path, bg_path, out, duration: float, beats=(), t0: float = 0.0, fps: int = 30,
-           stagger: float = 0.13, outro: float = 0.16, crf: int = 17, ffmpeg: str = "ffmpeg",
+           stagger: float = 0.13, outro: float = 0.16, crf: int = 17, ffmpeg: str | None = None,
            video=None, video_in: float = 0.0, card_hold: float | None = None, dim: float = 0.45,
            keep_top: int = 200):
     """video: footage to play behind the card instead of the static background (bg_path is then only used to
@@ -172,7 +174,7 @@ def render(card_path, bg_path, out, duration: float, beats=(), t0: float = 0.0, 
     n = max(1, round(duration * fps))
     hide = min(duration, card_hold) if card_hold else duration  # when the card has fully snapped out
     frames = VideoFrames(video, W, H, fps, video_in, duration, ffmpeg) if video else None
-    cmd = [ffmpeg, "-y", "-v", "error", "-f", "rawvideo", "-pix_fmt", "rgb24", "-s", f"{W}x{H}", "-r", str(fps),
+    cmd = [ffmpeg or ffmpeg_bin("ffmpeg"), "-y", "-v", "error", "-f", "rawvideo", "-pix_fmt", "rgb24", "-s", f"{W}x{H}", "-r", str(fps),
            "-i", "-", "-c:v", "libx264", "-preset", "medium", "-crf", str(crf), "-pix_fmt", "yuv420p",
            "-movflags", "+faststart", str(out)]
     proc = subprocess.Popen(cmd, stdin=subprocess.PIPE)

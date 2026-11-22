@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import json
+import os
 import re
 import shutil
 import subprocess
@@ -26,8 +27,34 @@ def die(msg: str, code: int = 1):
     sys.exit(code)
 
 
+def progress(stage: str, pct: float, message: str = "", **extra) -> None:
+    """Machine-readable progress for the Studio app: one `@@progress {json}` line on stderr when VEDIT_PROGRESS=1."""
+    if os.environ.get("VEDIT_PROGRESS") != "1":
+        return
+    row = {"stage": stage, "pct": round(max(0.0, min(100.0, float(pct))), 1), "message": message, **extra}
+    print("@@progress " + json.dumps(row), file=sys.stderr, flush=True)
+
+
+def py_cmd(script: str, *args: str) -> list[str]:
+    """argv that runs an engine script with this interpreter, or via `vedit-engine run` when frozen."""
+    if getattr(sys, "frozen", False):
+        return [sys.executable, "run", script, *args]
+    return [sys.executable, str(Path(__file__).resolve().parent / script), *args]
+
+
+def ffmpeg_bin(name: str) -> str:
+    """Path of ffmpeg/ffprobe: $VEDIT_FFMPEG_DIR first, then PATH; the bare name if neither has it."""
+    folder = os.environ.get("VEDIT_FFMPEG_DIR")
+    if folder:
+        for candidate in (Path(folder) / f"{name}.exe", Path(folder) / name):
+            if candidate.is_file():
+                return str(candidate)
+    return shutil.which(name) or name
+
+
 def need(binary: str):
-    if not shutil.which(binary):
+    found = ffmpeg_bin(binary) if binary in ("ffmpeg", "ffprobe") else binary
+    if not shutil.which(found):
         die(f"'{binary}' not found on PATH. Install ffmpeg (macOS: brew install ffmpeg, "
             f"Ubuntu: sudo apt install ffmpeg, Windows: winget install ffmpeg).")
 
@@ -44,7 +71,7 @@ def run(cmd: list[str], capture: bool = False, quiet: bool = True) -> subprocess
 
 def ffprobe(path: str | Path) -> dict:
     need("ffprobe")
-    res = run(["ffprobe", "-v", "error", "-print_format", "json", "-show_format", "-show_streams", str(path)],
+    res = run([ffmpeg_bin("ffprobe"), "-v", "error", "-print_format", "json", "-show_format", "-show_streams", str(path)],
               capture=True)
     data = json.loads(res.stdout)
     v = next((s for s in data["streams"] if s["codec_type"] == "video"), None)

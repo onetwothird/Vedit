@@ -15,7 +15,7 @@ import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent))
-from common import ffprobe 
+from common import ffmpeg_bin, ffprobe 
 
 _warned = False
 
@@ -54,7 +54,7 @@ def auto_crop_x(video: str, start: float, end: float, samples: int = 7) -> float
     xs = []
     for k in range(samples):
         t = start + (end - start) * (k + 0.5) / samples
-        raw = subprocess.run(["ffmpeg", "-v", "error", "-ss", f"{t:.3f}", "-i", video, "-frames:v", "1",
+        raw = subprocess.run([ffmpeg_bin("ffmpeg"), "-v", "error", "-ss", f"{t:.3f}", "-i", video, "-frames:v", "1",
                               "-vf", f"scale={sw}:{sh}", "-f", "rawvideo", "-pix_fmt", "gray", "-"],
                              capture_output=True).stdout
         if len(raw) < sw * sh:

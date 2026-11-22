@@ -17,6 +17,7 @@ import argparse
 import re
 import sys
 from pathlib import Path
+from typing import NamedTuple
 
 sys.path.insert(0, str(Path(__file__).parent))
 from common import hex_to_ass, norm_word  # noqa: E402
@@ -108,7 +109,28 @@ def apply_replacements(words, repl: dict):
                 w["text"] = v + trail
 
 
-def build(tl: Timeline):
+def _hex(color, default: str = "#FFFFFF") -> str:
+    """Normalise to uppercase #RRGGBB (same fallback as hex_to_ass for malformed values)."""
+    c = str(color).lstrip("#") if color else ""
+    return "#" + (c if len(c) == 6 else default.lstrip("#")).upper()
+
+
+class _Plan(NamedTuple):
+    cfg: dict
+    W: int
+    H: int
+    style: str
+    upper: bool
+    size: int
+    margin_v: float
+    font: str
+    outline: float
+    act: int
+    groups: list  # [(words, group_end_seconds)]
+
+
+def _plan(tl: Timeline):
+    """Single source of truth for caption look + grouping. Returns (public caption_events dict, _Plan)."""
     cfg = {"enabled": True, "style": "pop", "uppercase": None, "hide_fillers": True, "srt": True,
            **(tl.edl.get("captions") or {})}
     W, H = tl.out["width"], tl.out["height"]
@@ -126,11 +148,61 @@ def build(tl: Timeline):
     margin_v = pos if isinstance(pos, (int, float)) else \
         {"bottom": 0.07, "lower": 0.24 if vertical else 0.14, "middle": 0.45}.get(pos, 0.14)
     font = cfg.get("font", "Arial")
-    col, hi = hex_to_ass(cfg.get("color", "#FFFFFF")), hex_to_ass(cfg.get("highlight", "#FFD400"))
     outline = cfg.get("outline") or max(2, round(size * (0.07 if style != "clean" else 0.06)))
+    act = int(cfg.get("active_scale", 108))  # % size of the word being spoken (100 = no jump)
+
+    groups = []
+    if cfg.get("enabled", True):
+        words = [w for w in tl.output_words() if not (cfg["hide_fillers"] and w["filler"] == "hard")]
+        words = join_hyphen_pieces(words)
+        apply_replacements(words, cfg.get("replace") or {})
+        min_show = float(cfg.get("min_show", 0.7))  # seconds a caption must stay up to be readable
+        raw = merge_fast(group_words(words, max_words, max_chars), max_words, max_chars, min_show)
+        for gi, g in enumerate(raw):
+            g_end = max(g[-1]["oend"] + 0.15, g[0]["ostart"] + min_show)  # hold short ones, if there is room
+            if gi + 1 < len(raw):
+                g_end = min(g_end, raw[gi + 1][0]["ostart"])
+            groups.append((g, g_end))
+
+    box = style == "box"
+    spk = {k: _hex(v) for k, v in (cfg.get("speaker_colors") or {}).items()}
+    events = []
+    for g, g_end in groups:
+        words = []
+        for k, w in enumerate(g):
+            # highlight window = the ASS per-word event: first word from group start, each word until the next
+            # word starts, the last until the group ends
+            words.append({"text": w["text"], "start": w["ostart"], "end": w["oend"],
+                          "hl_start": g[0]["ostart"] if k == 0 else w["ostart"],
+                          "hl_end": g[k + 1]["ostart"] if k + 1 < len(g) else g_end,
+                          "speaker": w.get("speaker")})
+        events.append({"start": g[0]["ostart"], "end": g_end, "words": words})
+    public = {
+        "style": style, "font": font, "size_frac": size / H, "baseline_frac": margin_v, "uppercase": bool(upper),
+        "color": _hex(cfg.get("color", "#FFFFFF")), "highlight": _hex(cfg.get("highlight", "#FFD400")),
+        "outline_frac": outline / H, "active_scale": act,
+        "outline_color": _hex(cfg.get("outline_color"), "#000000"),
+        "shadow": cfg.get("shadow", 0 if box else 1),
+        "back_color": "#000000" if box else None,
+        "back_alpha": round(1 - 0x70 / 255, 4) if box else None,  # ASS &H70 = 44% transparent
+        "speaker_colors": spk,
+        "events": events,
+    }
+    return public, _Plan(cfg, W, H, style, bool(upper), size, margin_v, font, outline, act, groups)
+
+
+def caption_events(tl: Timeline) -> dict:
+    """Caption groups + look for the live preview, on the output timeline. Same grouping/timing build() uses."""
+    return _plan(tl)[0]
+
+
+def build(tl: Timeline):
+    _, x = _plan(tl)
+    cfg, W, H, style, upper, size = x.cfg, x.W, x.H, x.style, x.upper, x.size
+    margin_v, font, outline, act = x.margin_v, x.font, x.outline, x.act
+    col, hi = hex_to_ass(cfg.get("color", "#FFFFFF")), hex_to_ass(cfg.get("highlight", "#FFD400"))
     oc = hex_to_ass(cfg["outline_color"]) if cfg.get("outline_color") else "&H00000000"
     shadow = cfg.get("shadow", 1 if style != "box" else 0)
-    act = int(cfg.get("active_scale", 108))  # % size of the word being spoken (100 = no jump)
     border_style, back = (3, "&H70000000") if style == "box" else (1, "&H80000000")
 
     head = f"""[Script Info]
@@ -151,38 +223,29 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
 """
     spk_colors = {k: hex_to_ass(v) for k, v in (cfg.get("speaker_colors") or {}).items()}
     events, srt = [], []
-    if cfg.get("enabled", True):
-        words = [w for w in tl.output_words() if not (cfg["hide_fillers"] and w["filler"] == "hard")]
-        words = join_hyphen_pieces(words)
-        apply_replacements(words, cfg.get("replace") or {})
-        min_show = float(cfg.get("min_show", 0.7))  # seconds a caption must stay up to be readable
-        groups = merge_fast(group_words(words, max_words, max_chars), max_words, max_chars, min_show)
-        for gi, g in enumerate(groups):
-            g_end = max(g[-1]["oend"] + 0.15, g[0]["ostart"] + min_show)  # hold short ones, if there is room
-            if gi + 1 < len(groups):
-                g_end = min(g_end, groups[gi + 1][0]["ostart"])
-            texts = [esc(w["text"].upper() if upper else w["text"]) for w in g]
-            plain = " ".join(texts)
-            srt.append((g[0]["ostart"], g_end, plain))
-            if style == "clean":
-                sc = spk_colors.get(g[0].get("speaker"))
-                tag = (r"{\c" + sc + "}") if sc else ""
-                events.append(f"Dialogue: 0,{ass_time(g[0]['ostart'])},{ass_time(g_end)},Cap,,0,0,0,,{tag}{plain}")
+    for g, g_end in x.groups:
+        texts = [esc(w["text"].upper() if upper else w["text"]) for w in g]
+        plain = " ".join(texts)
+        srt.append((g[0]["ostart"], g_end, plain))
+        if style == "clean":
+            sc = spk_colors.get(g[0].get("speaker"))
+            tag = (r"{\c" + sc + "}") if sc else ""
+            events.append(f"Dialogue: 0,{ass_time(g[0]['ostart'])},{ass_time(g_end)},Cap,,0,0,0,,{tag}{plain}")
+            continue
+        for k, w in enumerate(g):  # one event per active word, active word highlighted + popped
+            s = w["ostart"] if k else g[0]["ostart"]
+            e = g[k + 1]["ostart"] if k + 1 < len(g) else g_end
+            if e <= s:
                 continue
-            for k, w in enumerate(g):  # one event per active word, active word highlighted + popped
-                s = w["ostart"] if k else g[0]["ostart"]
-                e = g[k + 1]["ostart"] if k + 1 < len(g) else g_end
-                if e <= s:
-                    continue
-                parts = []
-                for j, t in enumerate(texts):
-                    if j == k:
-                        h = spk_colors.get(w.get("speaker"), hi)
-                        parts.append(r"{\c" + h + rf"\fscx{act}\fscy{act}}}" + t + r"{\c" + col + r"\fscx100\fscy100}")
-                    else:
-                        parts.append(t)
-                pop = r"{\fad(0,0)}" if k else r"{\fscx90\fscy90\t(0,80,\fscx100\fscy100)}"
-                events.append(f"Dialogue: 0,{ass_time(s)},{ass_time(e)},Cap,,0,0,0,,{pop}{' '.join(parts)}")
+            parts = []
+            for j, t in enumerate(texts):
+                if j == k:
+                    h = spk_colors.get(w.get("speaker"), hi)
+                    parts.append(r"{\c" + h + rf"\fscx{act}\fscy{act}}}" + t + r"{\c" + col + r"\fscx100\fscy100}")
+                else:
+                    parts.append(t)
+            pop = r"{\fad(0,0)}" if k else r"{\fscx90\fscy90\t(0,80,\fscx100\fscy100)}"
+            events.append(f"Dialogue: 0,{ass_time(s)},{ass_time(e)},Cap,,0,0,0,,{pop}{' '.join(parts)}")
 
     for ov in tl.edl.get("overlays") or []:
         if ov.get("type") != "text":

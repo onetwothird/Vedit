@@ -22,7 +22,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent))
 import captions as cap  # noqa: E402
-from common import even, filter_path, need, ts  # noqa: E402
+from common import even, ffmpeg_bin, filter_path, need, progress, ts  # noqa: E402
 from edl import Timeline  # noqa: E402
 
 
@@ -141,10 +141,10 @@ def seg_cmd(tl: Timeline, c: dict, out: Path, preview: bool) -> list[str]:
     s = tl.sources[c["src"]]
     span = c["dur"] * c["speed"] + 0.25
     if s.get("is_image"):
-        cmd = ["ffmpeg", "-y", "-v", "error", "-loop", "1", "-framerate", str(tl.out["fps"]), "-t", f"{span:.4f}",
+        cmd = [ffmpeg_bin("ffmpeg"), "-y", "-v", "error", "-loop", "1", "-framerate", str(tl.out["fps"]), "-t", f"{span:.4f}",
                "-i", s["path"]]
     else:
-        cmd = ["ffmpeg", "-y", "-v", "error", "-ss", f"{c['vin']:.4f}", "-t", f"{span:.4f}", "-i", s["path"]]
+        cmd = [ffmpeg_bin("ffmpeg"), "-y", "-v", "error", "-ss", f"{c['vin']:.4f}", "-t", f"{span:.4f}", "-i", s["path"]]
     a = tl.sources[c["audio_alias"]]
     if a["info"]["has_audio"] and not c.get("mute"):
         cmd += ["-ss", f"{max(0.0, c['ain']):.4f}", "-t", f"{span:.4f}", "-i", a["path"]]
@@ -174,6 +174,8 @@ def render_segments(tl: Timeline, cache: Path, preview: bool, jobs: int) -> list
     print(f"[render] {len(work)} clips ({len(work) - len(todo)} cached), output {tl.out['width']}x"
           f"{tl.out['height']} @ {tl.out['fps']}fps, duration {ts(tl.duration)}", file=sys.stderr)
 
+    progress("render", 0, "Rendering clips")
+
     def one(item):
         c, o = item
         part = o.with_suffix(".part.mkv")
@@ -188,11 +190,13 @@ def render_segments(tl: Timeline, cache: Path, preview: bool, jobs: int) -> list
         for err in ex.map(one, todo):
             done += 1
             print(f"\r[render] segments {done}/{len(todo)}", end="", file=sys.stderr)
+            progress("render", 90 * done / len(todo), f"Rendered clip {done} of {len(todo)}")
             if err:
                 print(f"\nerror: {err}", file=sys.stderr)
                 sys.exit(1)
     if todo:
         print(file=sys.stderr)
+    progress("render", 90, "Joining clips")
     return [o for _, o in work]
 
 
@@ -294,7 +298,7 @@ def final_pass(tl: Timeline, segs: list[Path], ass: Path | None, out: Path, prev
         fc.append(f"[{alab}]anull[aout]")
 
     q = ["-preset", "veryfast", "-crf", "26"] if preview else ["-preset", tl.out["preset"], "-crf", str(tl.out["crf"])]
-    cmd = ["ffmpeg", "-y", "-v", "error", "-stats", *inputs, "-filter_complex", ";".join(fc),
+    cmd = [ffmpeg_bin("ffmpeg"), "-y", "-v", "error", "-stats", *inputs, "-filter_complex", ";".join(fc),
            "-map", "[vout]", "-map", "[aout]", "-c:v", "libx264", *q, "-pix_fmt", "yuv420p",
            "-r", str(tl.out["fps"]), "-c:a", "aac", "-b:a", "192k", "-movflags", "+faststart",
            "-t", f"{D:.3f}", str(out)]
@@ -353,6 +357,7 @@ def render_one(edl: str, aspect: str | None, a) -> Path:
         print(f"[render] {n} caption/text events", file=sys.stderr)
     final_pass(tl, segs, ass, out, a.preview)
     chap = write_chapters(tl, out)
+    progress("render", 100, "Done")
     print(f"\n[render] done -> {out}  ({ts(tl.duration)}, {tl.out['width']}x{tl.out['height']})")
     if Path(out).with_suffix(".srt").exists():
         print(f"[render] subtitles -> {Path(out).with_suffix('.srt')}")

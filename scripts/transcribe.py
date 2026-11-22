@@ -15,8 +15,8 @@ import tempfile
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent))
-from common import (FILLER_PHRASES, FILLERS_HARD, FILLERS_SOFT, die, need, norm_word, run,  # noqa: E402
-                    save_json, ts, workdir_for)
+from common import (FILLER_PHRASES, FILLERS_HARD, FILLERS_SOFT, die, ffmpeg_bin, need, norm_word,  # noqa: E402
+                    progress, run, save_json, ts, workdir_for)
 
 # Whisper drops disfluencies unless prompted with text that contains them.
 FILLER_PROMPT = "Umm, let me think, like, hmm... Okay, uh, so here's what I'm, you know, thinking."
@@ -60,7 +60,7 @@ def pick_prompt(language: str | None, keep_fillers: bool):
 
 def extract_audio(video: str, wav: str):
     need("ffmpeg")
-    run(["ffmpeg", "-y", "-v", "error", "-i", video, "-vn", "-ac", "1", "-ar", "16000", "-c:a", "pcm_s16le", wav])
+    run([ffmpeg_bin("ffmpeg"), "-y", "-v", "error", "-i", video, "-vn", "-ac", "1", "-ar", "16000", "-c:a", "pcm_s16le", wav])
 
 
 def _load_wav16k(path: str):
@@ -102,6 +102,8 @@ def transcribe_words(wav: str, model_name: str, language: str | None, keep_fille
                 for w in s.words or []:
                     words.append({"start": w.start, "end": w.end, "text": w.word.strip(), "p": round(w.probability, 3)})
                 print(f"\r[transcribe] {ts(s.end)}", end="", file=sys.stderr)
+                if info.duration:
+                    progress("transcribe", 100 * s.end / info.duration, "Transcribing")
             print(file=sys.stderr)
             return words, info.language
 
@@ -228,7 +230,9 @@ def main():
     with tempfile.TemporaryDirectory() as td:
         wav = str(Path(td) / "a.wav")
         extract_audio(a.video, wav)
+        progress("transcribe", 0, "Transcribing")
         words, lang = transcribe_words(wav, a.model, a.language, not a.no_fillers)
+        progress("transcribe", 100, "Transcribed")
     data = build(a.video, words, lang, a.name, info["duration"])
     # what produced this transcript, so auto.py can redo it when the model/language/prompt changes
     data["made_with"] = {"model": a.model, "language": a.language, "version": TRANSCRIBE_VERSION}

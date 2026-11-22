@@ -17,7 +17,7 @@ import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent))
-from common import die, need, save_json, ts  # noqa: E402
+from common import die, ffmpeg_bin, need, save_json, ts  # noqa: E402
 
 try:
     import numpy as np
@@ -27,7 +27,7 @@ except ImportError:
 
 def pcm(path: str, sr: int, start: float = 0.0, dur: float | None = None) -> "np.ndarray":
     need("ffmpeg")
-    cmd = ["ffmpeg", "-v", "error", "-ss", str(max(0.0, start)), "-i", path]
+    cmd = [ffmpeg_bin("ffmpeg"), "-v", "error", "-ss", str(max(0.0, start)), "-i", path]
     if dur:
         cmd += ["-t", str(dur)]
     cmd += ["-vn", "-ac", "1", "-ar", str(sr), "-f", "s16le", "-"]

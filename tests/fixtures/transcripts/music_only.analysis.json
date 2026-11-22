@@ -1,0 +1,11 @@
+{
+ "name": "main",
+ "probe": {
+  "path": "fixtures/music_only.mp4",
+  "duration": 180.0,
+  "has_video": true,
+  "has_audio": true
+ },
+ "silence_threshold_db": -40.0,
+ "silences": []
+}
