@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Find the best 20-90 s moments in a long video, offline (no AI service).
 
-  vedit highlights VIDEO [--max 12] [--json]
+  vedit highlights VIDEO [--max 12] [--json] [--ai anthropic|openai [--ai-model M]]
 
 Needs `vedit analyze VIDEO` first (transcript.main.json + analysis.main.json in the work dir).
 Writes <workdir>/highlights.json and prints a ranked table.
@@ -16,6 +16,7 @@ import argparse
 import bisect
 import json
 import math
+import os
 import re
 import statistics
 import sys
@@ -330,6 +331,22 @@ def find_highlights(wd: Path, max_clips: int = 12, min_len: float = 20,
     return out, None
 
 
+def _apply_ai(wd: Path, hs: list[Highlight], provider: str, model: str | None, max_clips: int,
+              min_len: float, max_len: float) -> tuple[list[Highlight], str | None]:
+    """Optional LLM re-rank. The key comes only from env VEDIT_AI_KEY. Any failure keeps the offline picks."""
+    key = os.environ.get("VEDIT_AI_KEY")
+    if not key:
+        return hs, "ai_failed"
+    try:
+        from highlights_llm import rank_with_llm
+        tp = wd / "transcript.main.json"
+        tr = load_json(tp) if tp.is_file() else {}
+        progress("highlights", 90, "Asking the AI to re-rank")
+        return rank_with_llm(tr, hs, provider, key, model, max_clips=max_clips, min_len=min_len, max_len=max_len)
+    except Exception:  # noqa: BLE001 - never surface details; they could carry the key
+        return hs, "ai_failed"
+
+
 def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("video", help="source video (or its .edit work dir)")
@@ -337,11 +354,16 @@ def main():
     ap.add_argument("--min-len", type=float, default=20, help="shortest clip in seconds (default 20)")
     ap.add_argument("--max-len", type=float, default=90, help="longest clip in seconds (default 90)")
     ap.add_argument("--out", default=None, help="work dir (default: <video>.edit/)")
+    ap.add_argument("--ai", choices=["anthropic", "openai"], default=None,
+                    help="re-rank with your own key (env VEDIT_AI_KEY); only transcript text is sent")
+    ap.add_argument("--ai-model", default=None, help="model name for --ai (default: provider's default)")
     ap.add_argument("--json", action="store_true", help="print the result as JSON")
     a = ap.parse_args()
 
     wd = Path(a.video) if Path(a.video).is_dir() else workdir_for(a.video, a.out)
     hs, why = find_highlights(wd, a.max, a.min_len, a.max_len)
+    if a.ai and hs:
+        hs, why = _apply_ai(wd, hs, a.ai, a.ai_model, a.max, a.min_len, a.max_len)
     save_json({"source": str(Path(a.video).resolve()), "highlights": hs, "reason": why}, wd / "highlights.json")
     if a.json:
         print(json.dumps({"highlights": hs, "reason": why}, ensure_ascii=False, indent=2))
