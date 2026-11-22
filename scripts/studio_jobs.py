@@ -6,6 +6,7 @@ import json
 import os
 import queue
 import subprocess
+import sys
 import threading
 import uuid
 from collections import deque
@@ -38,23 +39,111 @@ class _Entry:
     steps: list[Step]
     env: dict[str, str]
     cancelled: bool = False
-    proc: Optional[subprocess.Popen] = None
+    tree: Optional[_Tree] = None
 
 
-def _kill_tree(proc: subprocess.Popen) -> None:
-    try:
+def _taskkill_exe() -> str:
+    root = os.environ.get("SystemRoot") or r"C:\Windows"
+    path = os.path.join(root, "System32", "taskkill.exe")
+    return path if os.path.isfile(path) else r"C:\Windows\System32\taskkill.exe"
+
+
+class _WinJob:
+    """Windows Job Object that kills every process in it (grandchildren included) when terminated or closed."""
+
+    def __init__(self, pid: int):
+        import ctypes
+        from ctypes import wintypes
+        self._k32 = k32 = ctypes.WinDLL("kernel32", use_last_error=True)
+        k32.CreateJobObjectW.restype = wintypes.HANDLE
+        k32.CreateJobObjectW.argtypes = [wintypes.LPVOID, wintypes.LPCWSTR]
+        k32.SetInformationJobObject.argtypes = [wintypes.HANDLE, ctypes.c_int, wintypes.LPVOID, wintypes.DWORD]
+        k32.OpenProcess.restype = wintypes.HANDLE
+        k32.OpenProcess.argtypes = [wintypes.DWORD, wintypes.BOOL, wintypes.DWORD]
+        k32.AssignProcessToJobObject.argtypes = [wintypes.HANDLE, wintypes.HANDLE]
+        k32.TerminateJobObject.argtypes = [wintypes.HANDLE, wintypes.UINT]
+        k32.CloseHandle.argtypes = [wintypes.HANDLE]
+
+        class BASIC(ctypes.Structure):
+            _fields_ = [("PerProcessUserTimeLimit", ctypes.c_int64), ("PerJobUserTimeLimit", ctypes.c_int64),
+                        ("LimitFlags", wintypes.DWORD), ("MinimumWorkingSetSize", ctypes.c_size_t),
+                        ("MaximumWorkingSetSize", ctypes.c_size_t), ("ActiveProcessLimit", wintypes.DWORD),
+                        ("Affinity", ctypes.c_size_t), ("PriorityClass", wintypes.DWORD),
+                        ("SchedulingClass", wintypes.DWORD)]
+
+        class IOC(ctypes.Structure):
+            _fields_ = [(n, ctypes.c_uint64) for n in ("ReadOps", "WriteOps", "OtherOps", "ReadBytes",
+                                                       "WriteBytes", "OtherBytes")]
+
+        class EXT(ctypes.Structure):
+            _fields_ = [("Basic", BASIC), ("Io", IOC), ("ProcessMemoryLimit", ctypes.c_size_t),
+                        ("JobMemoryLimit", ctypes.c_size_t), ("PeakProcessMemoryUsed", ctypes.c_size_t),
+                        ("PeakJobMemoryUsed", ctypes.c_size_t)]
+
+        self._handle = k32.CreateJobObjectW(None, None)
+        if not self._handle:
+            raise OSError("CreateJobObjectW failed")
+        try:
+            info = EXT()
+            info.Basic.LimitFlags = 0x2000  # JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE
+            if not k32.SetInformationJobObject(self._handle, 9, ctypes.byref(info), ctypes.sizeof(info)):
+                raise OSError("SetInformationJobObject failed")
+            proc = k32.OpenProcess(0x0001 | 0x0100, False, pid)  # PROCESS_TERMINATE | PROCESS_SET_QUOTA
+            if not proc:
+                raise OSError("OpenProcess failed")
+            try:
+                if not k32.AssignProcessToJobObject(self._handle, proc):
+                    raise OSError("AssignProcessToJobObject failed")
+            finally:
+                k32.CloseHandle(proc)
+        except OSError:
+            self.close()
+            raise
+
+    def terminate(self) -> None:
+        if self._handle:
+            self._k32.TerminateJobObject(self._handle, 1)
+
+    def close(self) -> None:
+        if self._handle:
+            self._k32.CloseHandle(self._handle)
+            self._handle = None
+
+
+class _Tree:
+    """Everything a step spawned: kill it all, now or after the direct child has exited."""
+
+    def __init__(self, proc: subprocess.Popen):
+        self.proc = proc
+        self.job: Optional[_WinJob] = None
         if os.name == "nt":
-            subprocess.run(["taskkill", "/T", "/F", "/PID", str(proc.pid)], capture_output=True,
-                           creationflags=subprocess.CREATE_NO_WINDOW)
-        else:
-            import signal
-            os.killpg(proc.pid, signal.SIGKILL)
-    except OSError:
-        pass
-    try:
-        proc.kill()  # fallback for the direct child
-    except OSError:
-        pass
+            try:
+                self.job = _WinJob(proc.pid)
+            except (OSError, AttributeError, ValueError):
+                self.job = None  # fall back to taskkill
+
+    def kill(self) -> None:
+        try:
+            if os.name == "nt":
+                if self.job is not None:
+                    self.job.terminate()
+                else:
+                    subprocess.run([_taskkill_exe(), "/T", "/F", "/PID", str(self.proc.pid)], capture_output=True,
+                                   creationflags=subprocess.CREATE_NO_WINDOW)
+            else:
+                import signal
+                os.killpg(self.proc.pid, signal.SIGKILL)
+        except OSError:
+            pass
+        try:
+            self.proc.kill()
+        except OSError:
+            pass
+
+    def close(self) -> None:
+        if self.job is not None:
+            self.job.close()
+            self.job = None
 
 
 class JobQueue:
@@ -96,8 +185,8 @@ class JobQueue:
                 snap = dataclasses.replace(job)
             elif job.state == "running":
                 entry.cancelled = True
-                if entry.proc is not None:
-                    _kill_tree(entry.proc)
+                if entry.tree is not None:
+                    entry.tree.kill()
         if snap:
             self._emit(snap)
 
@@ -114,8 +203,8 @@ class JobQueue:
                     snaps.append(dataclasses.replace(job))
                 elif job.state == "running":
                     entry.cancelled = True
-                    if entry.proc is not None:
-                        _kill_tree(entry.proc)
+                    if entry.tree is not None:
+                        entry.tree.kill()
         for s in snaps:
             self._emit(s)
         if not already:
@@ -124,9 +213,12 @@ class JobQueue:
         for t in self._threads:
             if t is not threading.current_thread():
                 t.join(timeout=10)
+                if t.is_alive():
+                    print(f"studio_jobs: worker {t.name} did not stop within 10 s of shutdown", file=sys.stderr)
 
     # ---- internals --------------------------------------------------------------------------------------------
     def _emit(self, snap: Job) -> None:
+        """Call on_event, which may therefore be invoked from any thread (submit/cancel callers, workers, readers)."""
         try:
             self._on_event(snap)
         except Exception:
@@ -207,10 +299,13 @@ class JobQueue:
                                         **kwargs)
             except OSError as exc:
                 return -1, [f"could not start step '{stage}': {exc}"]
-            entry.proc = proc
-        drain = threading.Thread(target=lambda: [None for _ in proc.stdout], daemon=True)
-        drain.start()
-        try:
+            tree = entry.tree = _Tree(proc)
+
+        def drain_stdout():
+            for _ in proc.stdout:
+                pass
+
+        def read_stderr():
             for raw in proc.stderr:
                 line = raw.rstrip("\r\n")
                 row = self._parse_progress(line)
@@ -225,11 +320,22 @@ class JobQueue:
                 pct = max(0.0, min(100.0, pct))
                 self._update(entry, pct=(done_share + share * pct / 100.0) * 100.0,
                              message=str(row.get("message", "")))
+
+        readers = [threading.Thread(target=drain_stdout, daemon=True),
+                   threading.Thread(target=read_stderr, daemon=True)]
+        for t in readers:
+            t.start()
+        try:
             code = proc.wait()
+            tree.kill()  # reap leftover grandchildren (they hold the pipes open otherwise)
+            for t in readers:
+                t.join(timeout=2)
         finally:
+            if proc.poll() is None:
+                tree.kill()
             with self._lock:
-                entry.proc = None
-            drain.join(timeout=2)
+                entry.tree = None
+                tree.close()
             for pipe in (proc.stdout, proc.stderr):
                 try:
                     pipe.close()

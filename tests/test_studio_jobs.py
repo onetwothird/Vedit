@@ -159,3 +159,15 @@ def test_missing_executable_fails_cleanly(make_queue):
     job = q.submit("p1", "model", [("a", ["definitely-not-a-real-binary-xyz"], 1.0)])
     assert wait_for(lambda: q.get(job.id).state == "failed")
     assert "could not start" in q.get(job.id).error
+
+
+@pytest.mark.parametrize("code,state", [(0, "done"), (3, "failed")])
+def test_step_exit_reaps_orphaned_grandchild(make_queue, tmp_path, code, state):
+    q, _ = make_queue()
+    pidfile = tmp_path / "gc.pid"
+    job = q.submit("p1", "analyze", [("x", fake("x", 1, 0, code, "", "--grandchild", str(pidfile)), 1.0)])
+    assert wait_for(lambda: q.get(job.id).state == state, 3.0)
+    gc = int(pidfile.read_text())
+    assert wait_for(lambda: not pid_alive(gc), 3.0)
+    follow = q.submit("p1", "analyze", [("y", fake("y", 1, 0), 1.0)])
+    assert wait_for(lambda: q.get(follow.id).state == "done", 3.0)  # queue not blocked
