@@ -212,6 +212,60 @@ def test_analyze_without_body(client, auth, fake_queue, tiny_video):
     assert [s[0] for s in fake_queue.steps] == ["proxy", "analyze", "highlights", "framing"]
 
 
+def test_analyze_max_clips_goes_to_highlights_step(client, auth, fake_queue, tiny_video):
+    pid = client.post("/projects", headers=auth, json={"source": str(tiny_video), "language": "en",
+                                                       "platform": "reels"}).json()["id"]
+    assert client.post(f"/projects/{pid}/analyze", headers=auth, json={"max_clips": 18}).status_code == 200
+    hl = fake_queue.steps[2][1]
+    assert hl[hl.index("--max") + 1] == "18"
+    client.post(f"/projects/{pid}/analyze", headers=auth, json={})
+    assert "--max" not in fake_queue.steps[2][1]
+    client.post(f"/projects/{pid}/analyze", headers=auth, json={"max_clips": None})
+    assert "--max" not in fake_queue.steps[2][1]
+
+
+@pytest.mark.parametrize("bad", [0, -1, 61, 1000])
+def test_analyze_max_clips_out_of_range_is_422(client, auth, fake_queue, tiny_video, bad):
+    pid = client.post("/projects", headers=auth, json={"source": str(tiny_video), "language": "en",
+                                                       "platform": "reels"}).json()["id"]
+    r = client.post(f"/projects/{pid}/analyze", headers=auth, json={"max_clips": bad})
+    assert r.status_code == 422 and r.json()["code"] == "bad_request"
+    assert not fake_queue.submits or fake_queue.submits[-1].get("kind") != "analyze"
+
+
+@pytest.mark.parametrize("ok", [1, 60])
+def test_analyze_max_clips_bounds_accepted(client, auth, fake_queue, tiny_video, ok):
+    pid = client.post("/projects", headers=auth, json={"source": str(tiny_video), "language": "en",
+                                                       "platform": "reels"}).json()["id"]
+    assert client.post(f"/projects/{pid}/analyze", headers=auth, json={"max_clips": ok}).status_code == 200
+
+
+def test_filmstrip_returns_meta_and_image_path(client, auth, analyzed_project):
+    wd = analyzed_project["wd"]
+    meta = {"every": 2.0, "height": 96, "width": 54, "count": 10, "cols": 10, "rows": 1}
+    save_json(meta, wd / "filmstrip.json")
+    (wd / "filmstrip.jpg").write_bytes(b"jpg")
+    r = client.get(f"/projects/{analyzed_project['id']}/filmstrip", headers=auth)
+    assert r.status_code == 200
+    assert r.json() == {**meta, "image": str(wd / "filmstrip.jpg")}
+
+
+def test_filmstrip_missing_is_404_no_filmstrip(client, auth, analyzed_project):
+    wd = analyzed_project["wd"]
+    pid = analyzed_project["id"]
+    for f in ("filmstrip.json", "filmstrip.jpg"):
+        (wd / f).unlink(missing_ok=True)
+    r = client.get(f"/projects/{pid}/filmstrip", headers=auth)
+    assert r.status_code == 404 and r.json()["code"] == "no_filmstrip"
+    save_json({"every": 2.0, "height": 96, "width": 54, "count": 1, "cols": 1, "rows": 1}, wd / "filmstrip.json")
+    r = client.get(f"/projects/{pid}/filmstrip", headers=auth)  # json without the image
+    assert r.status_code == 404 and r.json()["code"] == "no_filmstrip"
+    (wd / "filmstrip.json").unlink()
+    (wd / "filmstrip.jpg").write_bytes(b"jpg")  # image without the json
+    assert client.get(f"/projects/{pid}/filmstrip", headers=auth).json()["code"] == "no_filmstrip"
+    assert client.get("/projects/nope/filmstrip", headers=auth).json()["code"] == "not_found"
+
+
 def test_analyze_done_builds_clips(client, auth, analyzed_project):
     p = client.get(f"/projects/{analyzed_project['id']}", headers=auth).json()
     hs = analyzed_project["highlights"]
