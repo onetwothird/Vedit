@@ -22,7 +22,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent))
 import captions as cap  # noqa: E402
-from common import even, filter_path, need, ts  # noqa: E402
+from common import even, ffmpeg_bin, filter_path, need, ts  # noqa: E402
 from edl import Timeline  # noqa: E402
 
 
@@ -141,10 +141,10 @@ def seg_cmd(tl: Timeline, c: dict, out: Path, preview: bool) -> list[str]:
     s = tl.sources[c["src"]]
     span = c["dur"] * c["speed"] + 0.25
     if s.get("is_image"):
-        cmd = ["ffmpeg", "-y", "-v", "error", "-loop", "1", "-framerate", str(tl.out["fps"]), "-t", f"{span:.4f}",
+        cmd = [ffmpeg_bin("ffmpeg"), "-y", "-v", "error", "-loop", "1", "-framerate", str(tl.out["fps"]), "-t", f"{span:.4f}",
                "-i", s["path"]]
     else:
-        cmd = ["ffmpeg", "-y", "-v", "error", "-ss", f"{c['vin']:.4f}", "-t", f"{span:.4f}", "-i", s["path"]]
+        cmd = [ffmpeg_bin("ffmpeg"), "-y", "-v", "error", "-ss", f"{c['vin']:.4f}", "-t", f"{span:.4f}", "-i", s["path"]]
     a = tl.sources[c["audio_alias"]]
     if a["info"]["has_audio"] and not c.get("mute"):
         cmd += ["-ss", f"{max(0.0, c['ain']):.4f}", "-t", f"{span:.4f}", "-i", a["path"]]
@@ -294,7 +294,7 @@ def final_pass(tl: Timeline, segs: list[Path], ass: Path | None, out: Path, prev
         fc.append(f"[{alab}]anull[aout]")
 
     q = ["-preset", "veryfast", "-crf", "26"] if preview else ["-preset", tl.out["preset"], "-crf", str(tl.out["crf"])]
-    cmd = ["ffmpeg", "-y", "-v", "error", "-stats", *inputs, "-filter_complex", ";".join(fc),
+    cmd = [ffmpeg_bin("ffmpeg"), "-y", "-v", "error", "-stats", *inputs, "-filter_complex", ";".join(fc),
            "-map", "[vout]", "-map", "[aout]", "-c:v", "libx264", *q, "-pix_fmt", "yuv420p",
            "-r", str(tl.out["fps"]), "-c:a", "aac", "-b:a", "192k", "-movflags", "+faststart",
            "-t", f"{D:.3f}", str(out)]

@@ -25,6 +25,9 @@ import subprocess
 import sys
 from pathlib import Path
 
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from common import ffmpeg_bin, py_cmd  # noqa: E402
+
 __version__ = "0.2.0"
 HERE = Path(__file__).resolve().parent
 CMDS = {
@@ -44,11 +47,11 @@ def doctor():
 
     print("required")
     for b in ("ffmpeg", "ffprobe"):
-        good = bool(shutil.which(b))
+        good = bool(shutil.which(ffmpeg_bin(b)))
         ok &= good
         line(b, good, "macOS: brew install ffmpeg | Ubuntu: sudo apt install ffmpeg | Windows: winget install ffmpeg")
-    if shutil.which("ffmpeg"):
-        filt = subprocess.run(["ffmpeg", "-hide_banner", "-filters"], capture_output=True, text=True).stdout
+    if shutil.which(ffmpeg_bin("ffmpeg")):
+        filt = subprocess.run([ffmpeg_bin("ffmpeg"), "-hide_banner", "-filters"], capture_output=True, text=True).stdout
         for f in ("ass", "loudnorm", "zoompan", "sidechaincompress", "drawtext"):
             good = f" {f} " in filt
             if f in ("ass",):
@@ -81,7 +84,7 @@ def main():
     if cmd not in CMDS:
         print(f"unknown command '{cmd}'\n{__doc__}")
         return 2
-    return subprocess.call([sys.executable, str(HERE / CMDS[cmd]), *sys.argv[2:]])
+    return subprocess.call(py_cmd(CMDS[cmd], *sys.argv[2:]))
 
 
 if __name__ == "__main__":

@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import json
+import os
 import re
 import shutil
 import subprocess
@@ -26,8 +27,26 @@ def die(msg: str, code: int = 1):
     sys.exit(code)
 
 
+def py_cmd(script: str, *args: str) -> list[str]:
+    """argv that runs an engine script with this interpreter, or via `vedit-engine run` when frozen."""
+    if getattr(sys, "frozen", False):
+        return [sys.executable, "run", script, *args]
+    return [sys.executable, str(Path(__file__).resolve().parent / script), *args]
+
+
+def ffmpeg_bin(name: str) -> str:
+    """Path of ffmpeg/ffprobe: $VEDIT_FFMPEG_DIR first, then PATH; the bare name if neither has it."""
+    folder = os.environ.get("VEDIT_FFMPEG_DIR")
+    if folder:
+        for candidate in (Path(folder) / f"{name}.exe", Path(folder) / name):
+            if candidate.is_file():
+                return str(candidate)
+    return shutil.which(name) or name
+
+
 def need(binary: str):
-    if not shutil.which(binary):
+    found = ffmpeg_bin(binary) if binary in ("ffmpeg", "ffprobe") else binary
+    if not shutil.which(found):
         die(f"'{binary}' not found on PATH. Install ffmpeg (macOS: brew install ffmpeg, "
             f"Ubuntu: sudo apt install ffmpeg, Windows: winget install ffmpeg).")
 

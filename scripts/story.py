@@ -50,7 +50,7 @@ import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent))
-from common import die, load_json, run, save_json, ts  
+from common import die, ffmpeg_bin, py_cmd, load_json, run, save_json, ts  
 from tts import synth 
 
 SHOT_ZOOM = {"wide": 1.0, "medium": 1.35, "close": 1.8, "extreme": 2.4}
@@ -137,7 +137,7 @@ def cmd_grid(a):
                       f"boxcolor=black@0.5," for k in range(1, 10))
         lab += "".join(f"drawtext=text='{k / 10:.1f}':x=4:y=h*{k / 10}+4:fontsize=h/28:fontcolor=cyan:box=1:"
                        f"boxcolor=black@0.5," for k in range(1, 10))
-        base = ["ffmpeg", "-y", "-v", "error", "-i", str(img), "-frames:v", "1", "-q:v", "3"]
+        base = [ffmpeg_bin("ffmpeg"), "-y", "-v", "error", "-i", str(img), "-frames:v", "1", "-q:v", "3"]
         grid = "scale='min(1280,iw)':-2,drawgrid=w=iw/10:h=ih/10:t=2:c=yellow@0.5"
         try:
             run(base + ["-vf", f"{grid},{lab.rstrip(',')}", str(out)])
@@ -159,7 +159,7 @@ def trim_line(wav: Path, words: list[dict], dur: float, build: Path, tail_keep: 
     out = build / "voice_trim" / f"{Path(wav).stem}_{round(s * 1000)}_{round(e * 1000)}.wav"
     if not out.exists():
         out.parent.mkdir(parents=True, exist_ok=True)
-        run(["ffmpeg", "-y", "-v", "error", "-i", str(wav), "-af",
+        run([ffmpeg_bin("ffmpeg"), "-y", "-v", "error", "-i", str(wav), "-af",
              f"atrim={s:.3f}:{e:.3f},asetpts=PTS-STARTPTS,afade=t=out:st={max(0, e - s - 0.06):.3f}:d=0.06",
              str(out)])
     shifted = [{**w, "start": round(max(0.0, w["start"] - s), 3), "end": round(min(e - s, w["end"] - s), 3)}
@@ -181,7 +181,7 @@ def tighten_pauses(wav: Path, words: list[dict], dur: float, build: Path, max_pa
     import numpy as np
     sr = 48000
     tmp = build / "voice_tmp_raw.pcm"
-    run(["ffmpeg", "-y", "-v", "error", "-i", str(wav), "-f", "s16le", "-ac", "1", "-ar", str(sr), str(tmp)])
+    run([ffmpeg_bin("ffmpeg"), "-y", "-v", "error", "-i", str(wav), "-f", "s16le", "-ac", "1", "-ar", str(sr), str(tmp)])
     x = np.fromfile(tmp, dtype=np.int16)
     tmp.unlink(missing_ok=True)
     cuts = [] 
@@ -266,7 +266,7 @@ def synth_continuous(story: dict, root: Path, build: Path):
         a, b = cuts[n], cuts[n + 1]
         out = sl_dir / f"{Path(wav).stem}_{si}_{round(a * 1000)}_{round(b * 1000)}.wav"
         if not out.exists():
-            run(["ffmpeg", "-y", "-v", "error", "-i", str(wav), "-af",
+            run([ffmpeg_bin("ffmpeg"), "-y", "-v", "error", "-i", str(wav), "-af",
                  f"atrim=start={a:.4f},asetpts=PTS-STARTPTS,apad,atrim=end={b - a:.4f}", "-ar", "48000", str(out)])
         sc = story["scenes"][si]
         disp, beats = [], []
@@ -386,7 +386,7 @@ def transcribe_window(video: Path, start: float, dur: float, build: Path, cfg: d
     from transcribe import build as tbuild
     from transcribe import transcribe_words
     wav = build / f"talk_{key}.wav"
-    run(["ffmpeg", "-y", "-v", "error", "-ss", f"{start:.3f}", "-t", f"{dur:.3f}", "-i", str(video), "-vn",
+    run([ffmpeg_bin("ffmpeg"), "-y", "-v", "error", "-ss", f"{start:.3f}", "-t", f"{dur:.3f}", "-i", str(video), "-vn",
          "-ac", "1", "-ar", "16000", "-c:a", "pcm_s16le", str(wav)])
     print(f"[story] transcribing {video.name} ({dur:.1f}s)")
     words, lang = transcribe_words(str(wav), cfg.get("model", "small"), cfg.get("language"), False)
@@ -418,11 +418,11 @@ def prepare_video(story, sc, si, root, build, video: Path, vin: float, T: float,
         animate(card, plate, silent, T, beats[1:], video=video, video_in=vin, card_hold=hold,
                 fps=int((story.get("output") or {}).get("fps", 30)), keep_top=_header_bottom(root))
     else:
-        run(["ffmpeg", "-y", "-v", "error", "-stream_loop", "-1", "-ss", f"{vin:.3f}", "-i", str(video),
+        run([ffmpeg_bin("ffmpeg"), "-y", "-v", "error", "-stream_loop", "-1", "-ss", f"{vin:.3f}", "-i", str(video),
              "-t", f"{T:.3f}", "-an", "-c:v", "libx264", "-preset", "veryfast", "-crf", "17", "-pix_fmt", "yuv420p",
              str(silent)])
     if sc.get("keep_audio"):
-        run(["ffmpeg", "-y", "-v", "error", "-i", str(silent), "-ss", f"{vin:.3f}", "-t", f"{T:.3f}", "-i", str(video),
+        run([ffmpeg_bin("ffmpeg"), "-y", "-v", "error", "-i", str(silent), "-ss", f"{vin:.3f}", "-t", f"{T:.3f}", "-i", str(video),
              "-map", "0:v", "-map", "1:a:0?", "-c:v", "copy", "-c:a", "aac", "-b:a", "192k", str(out)])
         silent.unlink(missing_ok=True)
     else:
@@ -618,7 +618,7 @@ def main():
     print(f"[story] {len(edl['clips'])} clips -> {ep}")
     if a.no_render:
         return
-    cmd = [sys.executable, str(Path(__file__).parent / "render.py"), str(ep)] + (["--preview"] if a.preview else [])
+    cmd = py_cmd("render.py", str(ep)) + (["--preview"] if a.preview else [])
     sys.exit(subprocess.call(cmd))
 
 

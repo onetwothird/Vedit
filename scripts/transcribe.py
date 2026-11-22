@@ -15,8 +15,8 @@ import tempfile
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent))
-from common import (FILLER_PHRASES, FILLERS_HARD, FILLERS_SOFT, die, need, norm_word, run,  # noqa: E402
-                    save_json, ts, workdir_for)
+from common import (FILLER_PHRASES, FILLERS_HARD, FILLERS_SOFT, die, ffmpeg_bin, need, norm_word,  # noqa: E402
+                    run, save_json, ts, workdir_for)
 
 # Whisper drops disfluencies unless prompted with text that contains them.
 FILLER_PROMPT = "Umm, let me think, like, hmm... Okay, uh, so here's what I'm, you know, thinking."
@@ -60,7 +60,7 @@ def pick_prompt(language: str | None, keep_fillers: bool):
 
 def extract_audio(video: str, wav: str):
     need("ffmpeg")
-    run(["ffmpeg", "-y", "-v", "error", "-i", video, "-vn", "-ac", "1", "-ar", "16000", "-c:a", "pcm_s16le", wav])
+    run([ffmpeg_bin("ffmpeg"), "-y", "-v", "error", "-i", video, "-vn", "-ac", "1", "-ar", "16000", "-c:a", "pcm_s16le", wav])
 
 
 def _load_wav16k(path: str):

@@ -34,7 +34,7 @@ import urllib.request
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent))
-from common import die, ffprobe, run  
+from common import die, ffmpeg_bin, ffprobe, run  
 
 
 def _has(mod: str) -> bool:
@@ -65,13 +65,13 @@ def pick_engine(cfg: dict) -> str:
 
 
 def to_wav(src: str, dst: str):
-    run(["ffmpeg", "-y", "-v", "error", "-i", src, "-ar", "48000", "-ac", "2", "-c:a", "pcm_s16le", dst])
+    run([ffmpeg_bin("ffmpeg"), "-y", "-v", "error", "-i", src, "-ar", "48000", "-ac", "2", "-c:a", "pcm_s16le", dst])
 
 
 def estimate_words(text: str, wav: str) -> list[dict]:
     """Spread words over the voiced part of the clip, weighted by length (+ pause after punctuation)."""
     dur = ffprobe(wav)["duration"]
-    res = run(["ffmpeg", "-hide_banner", "-nostats", "-i", wav, "-af", "silencedetect=noise=-40dB:d=0.15",
+    res = run([ffmpeg_bin("ffmpeg"), "-hide_banner", "-nostats", "-i", wav, "-af", "silencedetect=noise=-40dB:d=0.15",
                "-f", "null", "-"], capture=True)
     starts = [float(x) for x in re.findall(r"silence_start: ([\d.]+)", res.stderr)]
     ends = [float(x) for x in re.findall(r"silence_end: ([\d.]+)", res.stderr)]
@@ -210,7 +210,7 @@ def _system(text, cfg, out_wav):
             raw = str(Path(td) / "s.wav")
             v = cfg.get("voice") if cfg.get("voice") in ("kal", "kal16", "awb", "rms", "slt") else "slt"
             t = text.replace("'", "").replace(":", " ").replace("\\", " ")
-            run(["ffmpeg", "-y", "-v", "error", "-f", "lavfi", "-i", f"flite=text='{t}':voice={v}", raw])
+            run([ffmpeg_bin("ffmpeg"), "-y", "-v", "error", "-f", "lavfi", "-i", f"flite=text='{t}':voice={v}", raw])
         to_wav(raw, out_wav)
     return estimate_words(text, out_wav)
 

@@ -21,14 +21,14 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent))
 from autocut import make_edl  # noqa: E402
-from common import save_json, ts, workdir_for  # noqa: E402
+from common import py_cmd, save_json, ts, workdir_for  # noqa: E402
 from presets import PRESETS, find_brand, get_preset  # noqa: E402
 
 HERE = Path(__file__).parent
 
 
 def step(cmd: list[str]) -> None:
-    r = subprocess.call([sys.executable, *cmd])
+    r = subprocess.call(py_cmd(*cmd))
     if r != 0:
         sys.exit(r)
 
@@ -57,7 +57,7 @@ def process(video: Path, a) -> dict:
     if stale and not a.reanalyze:
         print("[auto] model or language changed since last time: redoing captions", flush=True)
     if not (wd / "analysis.main.json").exists() or a.reanalyze or stale:
-        cmd = [str(HERE / "analyze.py"), str(video), "--model", a.model]
+        cmd = ["analyze.py", str(video), "--model", a.model]
         if a.language:
             cmd += ["--language", a.language]
         if a.no_transcribe:
@@ -74,7 +74,7 @@ def process(video: Path, a) -> dict:
     save_json(edl, ep)
     print(f"[auto] {st['clips']} clips, {ts(st['original'])} -> ~{ts(st['kept'])} "
           f"({100 * (1 - st['kept'] / max(st['original'], 1)):.0f}% cut)  edl: {ep}", flush=True)
-    cmd = [str(HERE / "render.py"), str(ep)]
+    cmd = ["render.py", str(ep)]
     if a.preview:
         cmd.append("--preview")
     if a.formats:

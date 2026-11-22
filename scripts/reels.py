@@ -23,6 +23,7 @@ HERE = Path(__file__).resolve().parent
 TEMPLATE = HERE.parent / "templates" / "fact_reels"
 sys.path.insert(0, str(HERE))
 import brand as brandkit  # noqa: E402
+from common import ffmpeg_bin, py_cmd  # noqa: E402
 
 
 def stories_in(target: Path) -> list[Path]:
@@ -83,7 +84,7 @@ def build_one(sp: Path, a) -> int:
     cards.thumbnail_for_story(sp)
     if a.only == "cards":
         return 0
-    cmd = [sys.executable, str(HERE / "story.py"), "build", str(sp)] + (["--preview"] if a.preview else [])
+    cmd = py_cmd("story.py", "build", str(sp)) + (["--preview"] if a.preview else [])
     return subprocess.call(cmd)
 
 
@@ -117,7 +118,7 @@ def make_demo(folder: Path, quiet=False):
     (folder / "photos").mkdir(parents=True, exist_ok=True)
     (folder / "clips").mkdir(parents=True, exist_ok=True)
     photo, broll, talk = folder / "photos" / "sample.jpg", folder / "clips" / "broll.mp4", folder / "clips" / "talking.mp4"
-    ff = ["ffmpeg", "-y", "-v", "error"]
+    ff = [ffmpeg_bin("ffmpeg"), "-y", "-v", "error"]
     if not photo.exists():
         from PIL import Image, ImageDraw
         im = Image.new("RGB", (1200, 900), "#1d3557")
