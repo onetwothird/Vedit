@@ -49,6 +49,16 @@ describe("engine client", () => {
     expect(getInfo).toHaveBeenCalledTimes(2);
   });
 
+  it("never retries a POST/PATCH/PUT/DELETE after a network error", async () => {
+    const getInfo = vi.fn().mockResolvedValue(INFO);
+    const f = vi.fn().mockRejectedValue(new TypeError("Failed to fetch"));
+    const c = createClient({ getInfo, fetchImpl: f as unknown as typeof fetch });
+    await expect(c.analyze("p1")).rejects.toMatchObject({ status: 0, code: "network" });
+    await expect(c.setKept("p1", "h01", true)).rejects.toMatchObject({ code: "network" });
+    await expect(c.deleteModel("small")).rejects.toMatchObject({ code: "network" });
+    expect(f).toHaveBeenCalledTimes(3);
+  });
+
   it("sends patchClip bodies with the server's field names", async () => {
     const f = vi.fn(async () => json(200, {}));
     const c = createClient({ getInfo: async () => INFO, fetchImpl: f as unknown as typeof fetch });
@@ -163,6 +173,55 @@ describe("job store", () => {
     FakeSocket.all[n - 1].drop();
     await vi.advanceTimersByTimeAsync(10000);
     expect(FakeSocket.all).toHaveLength(n + 1);
+  });
+
+  it("never moves a job backwards when stale snapshots arrive", () => {
+    const { store } = make();
+    store.upsert(job({ pct: 50, stage: "analyze" }));
+    store.upsert(job({ pct: 20, stage: "proxy" })); // lower pct running
+    expect(store.getJob("j1")).toMatchObject({ pct: 50, stage: "analyze" });
+    store.upsert(job({ state: "queued", pct: 0, stage: "" })); // queued after running
+    expect(store.getJob("j1")?.state).toBe("running");
+    store.upsert(job({ pct: 60, stage: "highlights" }));
+    expect(store.getJob("j1")).toMatchObject({ pct: 60, stage: "highlights" });
+    store.upsert(job({ state: "done", pct: 100 }));
+    store.upsert(job({ pct: 70 })); // running after done
+    store.upsert(job({ state: "failed", pct: 100 }), "http"); // HTTP terminal over terminal
+    expect(store.getJob("j1")?.state).toBe("done");
+  });
+
+  it("lets a done snapshot gain its result once", () => {
+    const { store } = make();
+    store.upsert(job({ state: "done", pct: 100, result: null }));
+    store.upsert(job({ state: "done", pct: 100, result: { clips: 3 } }));
+    expect(store.getJob("j1")?.result).toEqual({ clips: 3 });
+    store.upsert(job({ state: "done", pct: 100, result: { clips: 9 } }), "http");
+    expect(store.getJob("j1")?.result).toEqual({ clips: 3 });
+  });
+
+  it("lets a WS terminal replace an HTTP terminal (export with files [] then filled; done then failed)", () => {
+    const { store } = make();
+    store.upsert(job({ kind: "export", state: "done", pct: 100, result: { renders: [], files: [] } }), "http");
+    store.upsert(job({ kind: "export", state: "done", pct: 100, result: { renders: [], files: ["a.mp4"] } }), "ws");
+    expect((store.getJob("j1")?.result as { files: string[] }).files).toEqual(["a.mp4"]);
+    store.upsert(job({ id: "j2", state: "done", pct: 100 }), "http");
+    store.upsert(job({ id: "j2", state: "failed", pct: 100, error: "post-processing failed: x" }), "ws");
+    expect(store.getJob("j2")).toMatchObject({ state: "failed", error: "post-processing failed: x" });
+  });
+
+  it("marks a running job failed/interrupted when resync gets a 404 after an engine restart", async () => {
+    const resync = vi.fn(async (_id: string): Promise<Job> => { throw new EngineError(404, "not_found", "gone"); });
+    const store = createJobStore({ getInfo: async () => INFO, createSocket: (u) => new FakeSocket(u), resync });
+    store.subscribe(() => undefined);
+    await flush();
+    FakeSocket.all[0].open();
+    FakeSocket.all[0].send({ type: "job", job: job() });
+    FakeSocket.all[0].drop();
+    await vi.advanceTimersByTimeAsync(BACKOFF_MS[0]);
+    FakeSocket.all[1].open();
+    await flush();
+    expect(resync).toHaveBeenCalledWith("j1");
+    expect(store.getJob("j1")).toMatchObject({ state: "failed", error: "interrupted" });
   });
 
   it("does not reconnect after the last subscriber left", async () => {

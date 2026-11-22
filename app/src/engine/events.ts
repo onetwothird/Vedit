@@ -26,12 +26,17 @@ export interface JobStoreOptions {
   subscribeSource?: (onJob: (job: Job) => void) => () => void;
 }
 
+export type JobSource = "ws" | "http";
+
 export interface JobStore {
   subscribe(listener: () => void): () => void;
   getJobs(): ReadonlyMap<string, Job>;
   getJob(id: string | undefined): Job | undefined;
-  upsert(job: Job): void;
+  /** `ws` (default): a socket event, authoritative. `http`: a route answer, which may predate finalization. */
+  upsert(job: Job, source?: JobSource): void;
 }
+
+const rank = (j: Job): number => (TERMINAL.includes(j.state) ? 2 : j.state === "running" ? 1 : 0);
 
 const same = (a: Job, b: Job): boolean =>
   a.state === b.state && a.stage === b.stage && a.pct === b.pct && a.message === b.message && a.error === b.error
@@ -46,13 +51,24 @@ export function createJobStore(opts: JobStoreOptions): JobStore {
   let attempt = 0;
   let generation = 0; // bumps on every stop, so a late async step of an old connection does nothing
 
-  function upsert(job: Job): void {
+  function upsert(job: Job, source: JobSource = "ws"): void {
     const old = jobs.get(job.id);
-    if (old && same(old, job)) return;
-    if (old && TERMINAL.includes(old.state) && !TERMINAL.includes(job.state)) return; // a stale answer
-    const next = new Map(jobs);
-    next.set(job.id, job);
-    jobs = next;
+    let next = job;
+    if (old) {
+      const a = rank(old), b = rank(job);
+      if (b < a) return; // a stale snapshot never moves a job backwards
+      if (a === 2) {
+        // terminal: the socket is authoritative; an HTTP answer may predate finalization, so it never replaces
+        if (source === "http") return;
+      } else if (a === 1 && b === 1) {
+        if (job.pct < old.pct) return; // keep the newer stage/message and the higher pct
+        next = { ...job, pct: Math.max(job.pct, old.pct) };
+      }
+      if (same(old, next)) return;
+    }
+    const map = new Map(jobs);
+    map.set(next.id, next);
+    jobs = map;
     listeners.forEach((l) => l());
   }
 
@@ -75,9 +91,14 @@ export function createJobStore(opts: JobStoreOptions): JobStore {
       if (TERMINAL.includes(old.state)) continue;
       resync(old.id).then(
         (fresh) => {
-          if (jobs.get(old.id) === old) upsert(fresh); // skip if a socket event already moved it on
+          if (jobs.get(old.id) === old) upsert(fresh, "http"); // skip if a socket event already moved it on
         },
-        () => undefined,
+        (err: unknown) => {
+          // the engine restarted and forgot the job: it can never finish
+          if ((err as { status?: number } | null)?.status === 404 && jobs.get(old.id) === old) {
+            upsert({ ...old, state: "failed", error: "interrupted" });
+          }
+        },
       );
     }
   }
@@ -177,7 +198,7 @@ export const jobStore: JobStore = createJobStore({
   subscribeSource: isMock() ? (onJob) => mockEngine.onJob(onJob) : undefined,
 });
 
-onJobResult((job) => jobStore.upsert(job));
+onJobResult((job) => jobStore.upsert(job, "http"));
 
 /** Every job the engine has told us about. Re-renders when any job changes. */
 export function useJobs(): ReadonlyMap<string, Job> {

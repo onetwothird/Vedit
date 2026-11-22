@@ -62,10 +62,9 @@ export function createClient(opts: ClientOptions): Engine {
           body: body !== undefined ? JSON.stringify(body) : undefined,
         });
       } catch {
-        if (attempt === 0) {
-          if (current === used) current = null; // the engine may have restarted on a new port
-          continue;
-        }
+        if (current === used) current = null; // the engine may have restarted on a new port
+        // only a GET is retried: a POST/PATCH/PUT/DELETE may have reached the server, and must not run twice
+        if (attempt === 0 && method === "GET") continue;
         throw new EngineError(0, "network", "could not reach the engine");
       }
       if (res.status === 401 && attempt === 0) {
