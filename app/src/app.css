@@ -50,22 +50,6 @@ a.step:hover { color: var(--ink); }
 .note-text { color: var(--body); font-size: 13px; margin-bottom: 8px; }
 
 /* Home */
-.tiles { list-style: none; padding: 0; display: grid; grid-template-columns: repeat(auto-fill, minmax(270px, 1fr)); gap: 12px; }
-.tiles li { display: flex; }
-.tile {
-  position: relative; display: flex; flex-direction: column; gap: 6px; width: 100%; min-height: 128px; padding: 16px 18px;
-  border-radius: 12px; background: var(--bg); border: 1px solid var(--line);
-}
-.tile-title { font: 600 15px var(--sans); color: var(--ink); }
-.tile-desc { font-size: 12.5px; line-height: 1.5; color: var(--body); }
-.tile.active { border-color: var(--line-2); box-shadow: inset 3px 0 0 var(--accent); }
-.tile.active:hover { background: var(--chip); }
-.tile-go { position: absolute; top: 14px; right: 16px; font-family: var(--mono); color: var(--ink); }
-.tile.soon { border-style: dashed; cursor: default; }
-.badge {
-  align-self: flex-start; margin-top: auto; font: 500 10.5px var(--mono); color: var(--body);
-  background: var(--chip); border: 1px solid var(--line); border-radius: 999px; padding: 2px 9px;
-}
 .recent { margin-top: 44px; }
 .recent h2 { font: 600 14px var(--sans); margin-bottom: 10px; }
 .recent-list { list-style: none; padding: 0; display: flex; flex-direction: column; gap: 4px; }
@@ -144,6 +128,25 @@ a.step:hover { color: var(--ink); }
   .top { grid-template-columns: auto 1fr auto; }
   .step { padding-right: 8px; }
   .sep { width: 8px; }
+}
+/* Narrow windows: steps shrink to numbered dots (names stay for screen readers), then to the current step only. */
+@media (max-width: 760px) {
+  .top { gap: 10px; padding: 0 8px 0 12px; }
+  .step { padding: 4px; }
+  .step.on { padding-right: 10px; }
+  .step:not(.on) .step-label {
+    position: absolute; width: 1px; height: 1px; margin: -1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap;
+  }
+  .sep { width: 6px; }
+  .brand .proj, .saved { display: none; }
+}
+@media (max-width: 520px) {
+  .steps { display: none; }
+  .top { grid-template-columns: auto 1fr; }
+  .brand .word { flex: none; }
+  .actions .primary { white-space: nowrap; }
+  .content { padding: 32px 16px 40px; }
+  .title { font-size: 24px; margin-bottom: 20px; }
 }
 
 /* ---------- pick clips ---------- */

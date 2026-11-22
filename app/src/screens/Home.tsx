@@ -5,8 +5,15 @@ import { engine } from "../engine/client";
 import type { Project } from "../engine/types";
 import { t } from "../i18n/t";
 import { baseName } from "../lib/native";
+import { BatchArt, ClipArt, PhotosArt, ReelArt, VlogArt } from "./home/HomeArt";
+import "./home/home.css";
 
-const TILES = ["clip", "vlog", "reel", "photos", "batch"] as const;
+const SOON = [
+  { key: "vlog", Art: VlogArt },
+  { key: "reel", Art: ReelArt },
+  { key: "photos", Art: PhotosArt },
+  { key: "batch", Art: BatchArt },
+] as const;
 
 type Recent = { status: "loading" } | { status: "error" } | { status: "ready"; projects: Project[] };
 
@@ -34,28 +41,34 @@ export default function Home() {
   return (
     <Screen>
       <h1 className="title">{t("home.title")}</h1>
-      <ul className="tiles" aria-label={t("home.tiles.label")}>
-        {TILES.map((key) => {
-          const title = t(`home.tile.${key}.title`);
-          const desc = t(`home.tile.${key}.desc`);
-          return (
-            <li key={key}>
-              {key === "clip" ? (
-                <Link className="tile active" to="/p/new/import" data-tile>
-                  <span className="tile-title">{title}</span>
-                  <span className="tile-desc">{desc}</span>
-                  <span className="tile-go" aria-hidden="true">→</span>
-                </Link>
-              ) : (
-                <div className="tile soon" role="group" aria-disabled="true" aria-label={title} data-tile>
-                  <span className="tile-title">{title}</span>
-                  <span className="tile-desc">{desc}</span>
-                  <span className="badge">{t("home.soon")}</span>
-                </div>
-              )}
-            </li>
-          );
-        })}
+      <ul className="home-modes" aria-label={t("home.tiles.label")}>
+        <li>
+          <Link className="mode-hero" to="/p/new/import" data-tile>
+            <span>
+              <span className="m-title">{t("home.tile.clip.title")}</span>
+              <span className="m-desc">{t("home.tile.clip.desc")}</span>
+              <span className="m-cta">{t("home.tile.clip.cta")}</span>
+            </span>
+            <ClipArt />
+          </Link>
+        </li>
+        <li>
+          <ul className="mode-soon-row">
+            {SOON.map(({ key, Art }) => {
+              const title = t(`home.tile.${key}.title`);
+              return (
+                <li key={key}>
+                  <div className="mode-soon" role="group" aria-disabled="true" aria-label={title} data-tile>
+                    <Art />
+                    <span className="m-title">{title}</span>
+                    <span className="m-desc">{t(`home.tile.${key}.desc`)}</span>
+                    <span className="m-soon">{t("home.soon")}</span>
+                  </div>
+                </li>
+              );
+            })}
+          </ul>
+        </li>
       </ul>
 
       <section className="recent" aria-labelledby="recent-h">

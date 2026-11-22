@@ -36,12 +36,12 @@ export default function Steps({ current, editHid }: StepsProps) {
             {done && hasProject ? (
               <Link className="step done" to={target(n)}>
                 <span className="dot" aria-hidden="true">✓</span>
-                {label}
+                <span className="step-label">{label}</span>
               </Link>
             ) : (
               <span className={`step${on ? " on" : done ? " done" : ""}`} aria-current={on ? "step" : undefined}>
                 <span className="dot" aria-hidden="true">{done ? "✓" : n}</span>
-                {label}
+                <span className="step-label">{label}</span>
               </span>
             )}
           </Fragment>
