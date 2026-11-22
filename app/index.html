@@ -5,14 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <meta name="color-scheme" content="dark" />
     <title>vedit Studio</title>
-    <script>
-      try {
-        if (localStorage.getItem("vedit.theme") === "light") {
-          document.documentElement.classList.add("light");
-          document.querySelector('meta[name="color-scheme"]').setAttribute("content", "light");
-        }
-      } catch (e) {}
-    </script>
+    <script src="./theme-init.js"></script>
   </head>
   <body>
     <div id="root"></div>
