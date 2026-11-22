@@ -26,9 +26,9 @@ def is_image(path: str, info: dict) -> bool:
 def word_range(W: list[dict] | None, a: int, b: int, pad, alias: str = "main") -> tuple[float, float]:
     """Source-time span of words a..b with the clip pad applied, clamped to the midpoint of the neighbouring gaps."""
     if not W:
-        die(f"clip uses 'words' but no transcript for '{alias}' (run analyze.py/transcribe.py)")
+        raise ValueError(f"clip uses 'words' but no transcript for '{alias}' (run analyze.py/transcribe.py)")
     if not (0 <= a <= b < len(W)):
-        die(f"word range [{a},{b}] out of bounds for '{alias}' (0..{len(W) - 1})")
+        raise ValueError(f"word range [{a},{b}] out of bounds for '{alias}' (0..{len(W) - 1})")
     p0, p1 = pad
     start = W[a]["start"] - p0
     if a > 0:
@@ -37,6 +37,15 @@ def word_range(W: list[dict] | None, a: int, b: int, pad, alias: str = "main") -
     if b + 1 < len(W):
         end = min(end, (W[b]["end"] + W[b + 1]["start"]) / 2)
     return max(0.0, start), end
+
+
+def clip_span(tin: float, tout: float, speed: float, fps: int | float) -> tuple[float, float]:
+    """(output duration, source end) of a clip once its length is snapped to whole output frames."""
+    if tout <= tin:
+        raise ValueError(f"out ({tout}) <= in ({tin})")
+    frames = max(1, round((tout - tin) / speed * fps))
+    dur = frames / fps
+    return dur, tin + dur * speed
 
 
 class Timeline:
@@ -117,7 +126,10 @@ class Timeline:
 
     # ---------- clips ----------
     def _word_range(self, alias: str, a: int, b: int, pad) -> tuple[float, float]:
-        return word_range(self.words_for(alias), a, b, pad, alias)
+        try:
+            return word_range(self.words_for(alias), a, b, pad, alias)
+        except ValueError as e:
+            die(str(e))
 
     def _resolve_clips(self):
         raw = list(self.edl.get("clips") or [])
@@ -146,11 +158,11 @@ class Timeline:
                     tout = tin + float(c.get("duration", 3.0))
                 else:
                     tout = s["info"]["duration"] - (s["offset"] if s["synced"] else 0)
-            if tout <= tin:
-                die(f"clip {i}: out ({tout}) <= in ({tin})")
             speed = float(c.get("speed", 1.0))
-            frames = max(1, round((tout - tin) / speed * fps))
-            dur = frames / fps
+            try:
+                dur, _ = clip_span(tin, tout, speed, fps)
+            except ValueError as e:
+                die(f"clip {i}: {e}")
             # video source time
             vin = tin + (s["offset"] if s["synced"] else 0.0)
             # audio source

@@ -121,10 +121,9 @@ def test_kept_ranges_match_timeline(pipeline_workdir):
     tl = Timeline(wd / "edl.json")
     got = kept_ranges(edl, tr)
     assert len(got) == len(tl.clips)
-    tol = 1 / tl.out["fps"] + 1e-6   # Timeline snaps clip length to whole frames
     for (a, b), c in zip(got, tl.clips):
         assert a == pytest.approx(c["tin"], abs=1e-6)
-        assert b == pytest.approx(c["tout"], abs=tol)
+        assert b == pytest.approx(c["tout"], abs=1e-6)
 
 
 def test_kept_ranges_pad_and_time_clips(pipeline_workdir):
@@ -132,8 +131,9 @@ def test_kept_ranges_pad_and_time_clips(pipeline_workdir):
     W = tr["words"]
     e = {"pad": [0, 0], "clips": [{"src": "main", "in": 1.0, "out": 2.5}, {"src": "main", "words": [2, 3]}]}
     got = kept_ranges(e, tr)
-    assert got[0] == (1.0, 2.5)
-    assert got[1] == (max(0.0, W[2]["start"]), W[3]["end"])
+    assert got[0] == (1.0, pytest.approx(2.5))   # 1.5 s = exactly 45 frames at the default 30 fps
+    assert got[1][0] == max(0.0, W[2]["start"])
+    assert got[1][1] == pytest.approx(W[3]["end"], abs=1 / 30)
 
 
 def test_clip_edl_stays_inside_highlight(en_podcast_wd):
@@ -168,3 +168,33 @@ def test_clip_edl_silence_mode_cuts_by_time(tmp_path):
     assert all("in" in c for c in e["clips"])
     assert e["clips"][0]["in"] == 5.0 and e["clips"][-1]["out"] == 30.0
     assert all(5.0 <= c["in"] < c["out"] <= 30.0 for c in e["clips"])
+
+
+@pytest.mark.parametrize("w0,w1", [(7, 5), (-1, 3), (2, -1)])
+def test_invalid_ranges_raise(w0, w1):
+    for op in (cut_words, restore_words, trim):
+        with pytest.raises(ValueError):
+            op(E, w0, w1)
+
+
+def test_kept_ranges_raise_value_error_not_systemexit():
+    tr = {"words": [{"start": 0.0, "end": 0.5}, {"start": 0.6, "end": 1.0}], "duration": 2.0}
+    for e in ({"clips": [{"words": [0, 5]}]}, {"clips": [{"in": 3, "out": 2}]}):
+        with pytest.raises(ValueError):
+            kept_ranges(e, tr)
+    with pytest.raises(ValueError):
+        kept_ranges({"clips": [{"words": [0, 1]}]}, {})
+
+
+def test_kept_ranges_snap_to_frames_with_speed():
+    tr = {"words": [], "duration": 10.0}
+    got = kept_ranges({"output": {"fps": 10}, "clips": [{"in": 0, "out": 1.04, "speed": 2.0}]}, tr)
+    assert got == [(0.0, pytest.approx(1.0))]   # 1.04/2*10 = 5.2 -> 5 frames -> 0.5 s * 2
+
+
+def test_clip_edl_no_clips_raises(tmp_path):
+    save_json({"name": "main", "probe": {"path": "x.mp4", "duration": 60.0, "fps": 30},
+               "silences": [{"start": 4.0, "end": 50.0}]}, tmp_path / "analysis.main.json")
+    h = {"id": "h1", "start": 10.0, "end": 30.0, "w0": 0, "w1": 0, "score": 1, "title": "t", "features": {}}
+    with pytest.raises(ValueError):
+        clip_edl(tmp_path, h, "youtube", None, None)
