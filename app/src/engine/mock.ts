@@ -4,7 +4,7 @@
 import {
   EngineError,
   type AnalyzeBody, type CaptionTrack, type ClipOp, type ClipView, type Doctor, type Edl, type EdlClip, type Engine,
-  type ExportBody, type Health, type Highlight, type Job, type ModelStatus, type NewProjectBody, type Project,
+  type ExportBody, type FilmstripInfo, type Health, type Highlight, type Job, type ModelStatus, type NewProjectBody, type Project,
   type ProjectClip, type RenderPlanEntry, type Transcript, type TranscriptWord,
 } from "./types";
 
@@ -16,6 +16,14 @@ const CLIPS: [title: string, score: number, kept: boolean][] = [
   ["Long story about my laptop", 52, false], ["Rambling about coffee", 41, false],
   ["Mic check and intro", 22, false], ["Outro and thank yous", 18, false],
 ];
+
+// What "Find more clips" adds: the next six, found when analyze runs again with a larger max_clips.
+const EXTRA_CLIPS: [title: string, score: number, kept: boolean][] = [
+  ["What I charge now versus then", 64, true], ["The client who ghosted me", 61, true],
+  ["Three mistakes in my first edit", 58, true], ["Why I film in the morning", 55, true],
+  ["A tip about audio nobody uses", 49, true], ["Closing thoughts on freelancing", 44, true],
+];
+const ALL_CLIPS = [...CLIPS, ...EXTRA_CLIPS];
 
 // The mockup's passage; each clip gets its own copy so every clip has words of its own.
 const PASSAGE = ("Nobody um tells you this when you start. The first year is uh, like, brutal. "
@@ -29,7 +37,7 @@ const SOFT_FILLERS = new Set([13, 23, 24]); // like, you know
 
 function seedTranscript(): Transcript {
   const words: TranscriptWord[] = [];
-  CLIPS.forEach((_, c) => {
+  ALL_CLIPS.forEach((_, c) => {
     PASSAGE.forEach((text, i) => {
       const start = c * CLIP_SPAN_SEC + i * WORD_SEC;
       words.push({
@@ -39,11 +47,24 @@ function seedTranscript(): Transcript {
       });
     });
   });
-  return { words, duration: CLIPS.length * CLIP_SPAN_SEC };
+  return { words, duration: ALL_CLIPS.length * CLIP_SPAN_SEC };
 }
 
 const round = (n: number): number => Math.round(n * 1000) / 1000;
 const copy = <T>(x: T): T => JSON.parse(JSON.stringify(x)) as T;
+
+// A small coloured sprite grid standing in for the real thumbnails: one numbered frame per 5 seconds.
+function mockFilmstrip(): FilmstripInfo {
+  const every = 5, width = 64, height = 36, count = 120, cols = 20, rows = 6;
+  let cells = "";
+  for (let i = 0; i < count; i++) {
+    const x = (i % cols) * width, y = Math.floor(i / cols) * height;
+    cells += `<rect x="${x}" y="${y}" width="${width}" height="${height}" fill="hsl(${(i * 37) % 360} 22% ${22 + (i % 4) * 4}%)"/>`
+      + `<circle cx="${x + 32}" cy="${y + 15}" r="6" fill="#9a9ba0"/><rect x="${x + 22}" y="${y + 24}" width="20" height="14" rx="7" fill="#7b7c81"/>`;
+  }
+  const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${cols * width}" height="${rows * height}">${cells}</svg>`;
+  return { every, height, width, count, cols, rows, image: `data:image/svg+xml;utf8,${encodeURIComponent(svg)}` };
+}
 
 // ---- word-range edit logic ------------------------------------------------------------------------------------
 
@@ -158,8 +179,10 @@ export function createMockEngine(opts: { tickMs?: number } = {}): MockEngine {
 
   const notFound = (what: string) => new EngineError(404, "not_found", `not found: ${what}`);
 
-  function seedClips(pid: string): ProjectClip[] {
-    return CLIPS.map(([title, score, kept], i) => {
+  /** Clips `from` up to (not including) `to` of the full list, with an edit file each. */
+  function seedClips(pid: string, from = 0, to = CLIPS.length): ProjectClip[] {
+    return ALL_CLIPS.slice(from, to).map(([title, score, kept], k) => {
+      const i = from + k;
       const w0 = i * PASSAGE_LEN, w1 = w0 + PASSAGE_LEN - 1;
       const id = `h${String(i + 1).padStart(2, "0")}`;
       const highlight: Highlight = {
@@ -248,7 +271,12 @@ export function createMockEngine(opts: { tickMs?: number } = {}): MockEngine {
       return snapshot(newProject(body.source, body.language, body.platform, false));
     },
     async getProject(pid) { return snapshot(project(pid)); },
-    async analyze(pid, _body?: AnalyzeBody) {
+    async filmstrip(pid) {
+      const p = project(pid);
+      if (!p.clips.length) throw new EngineError(404, "no_filmstrip", "this project has no thumbnails yet");
+      return mockFilmstrip();
+    },
+    async analyze(pid, body?: AnalyzeBody) {
       const p = project(pid); // the AI key in the body is deliberately never read or stored
       const stages: [string, number][] = [["proxy", 0.1], ["analyze", 0.6], ["highlights", 0.15], ["framing", 0.15]];
       // test trigger: a source file name containing "fail" makes the first analyze of that project fail halfway
@@ -256,9 +284,17 @@ export function createMockEngine(opts: { tickMs?: number } = {}): MockEngine {
       if (failing) failedOnce.add(pid);
       return run(newJob(pid, "analyze"), stages, (job) => {
         const had = p.clips.length;
+        // test trigger: a source file name containing "silent" has no speech to find clips in
+        if (!had && /silent/i.test(p.source)) {
+          job.result = { clips: 0, new: 0, reason: "no_speech" };
+          return;
+        }
         if (!had) {
           p.clips = seedClips(pid);
           p.settings = { workdir: "C:/mock/work", proxy: p.source, filmstrip: "C:/mock/work/filmstrip.json" };
+        } else if (body?.max_clips !== undefined && body.max_clips > had && had < ALL_CLIPS.length) {
+          // a larger max_clips finds six more; the existing clips and their edits stay
+          p.clips.push(...seedClips(pid, had, Math.min(had + 6, ALL_CLIPS.length)));
         }
         job.result = { clips: p.clips.length, new: p.clips.length - had, reason: null };
       }, failing ? { afterTicks: 8, error: "Couldn't read the audio track in this file." } : undefined);

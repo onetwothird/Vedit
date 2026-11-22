@@ -32,8 +32,7 @@ test("picking a file runs the stages and lands on Pick clips", async ({ page }) 
   await expect(page.getByText("Downloading the language model")).toHaveCount(0);
 
   await expect(page).toHaveURL(/#\/p\/[^/]+\/pick/);
-  await expect(page.getByRole("heading", { name: "Pick clips" })).toBeVisible();
-  await expect(page.getByText("12 clips found")).toBeVisible();
+  await expect(page.getByRole("heading", { name: "12 clips found · 8 kept" })).toBeVisible();
 });
 
 test("cancel returns to Import with Cancelled", async ({ page }) => {
