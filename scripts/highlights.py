@@ -30,13 +30,14 @@ from common import (ffmpeg_bin, load_json, norm_word, progress, run, save_json, 
 WEIGHTS: dict[str, float] = {
     "energy": 1.0,          # mean loudness of the window above the video's median
     "energy_var": 0.5,      # loudness swings (emphasis, reactions)
-    "speech_rate": 0.6,     # words/s against the video's median window
+    "speech_rate": 0.6,     # words per spoken second (pauses excluded) against the video's median window
     "laughter": 0.8,        # loud hops with nobody speaking
     "hook": 1.5,            # first 3 s has a question, a number or a hook word
     "direct": 0.6,          # talks to the viewer: you / ikaw / kayo / mo
     "complete": 1.0,        # does not stop on a dangling conjunction
     "filler_density": -0.8,  # um/uh (and half-weight soft fillers) per word
-    "face": 0.4,            # a face is on screen (wd/framing.json, else 0.5)
+    "face": 0.4,            # a face is on screen; constant 0.5 until framing runs before scoring
+    "length_fit": 0.6,      # 30-60 s is the Reels sweet spot; 0.3 at 20 s and at 90 s
 }
 
 HOOK_WORDS = {"nobody", "never", "secret", "mistake", "truth", "why", "how", "stop", "best", "worst",
@@ -112,28 +113,6 @@ def _load_energy(wd: Path, tr: dict, ana: dict, hop: float = 0.5) -> list[float]
         return None
 
 
-# --- face (from a later framing pass) -------------------------------------------------------------------------
-
-def _face_spans(wd: Path) -> list[tuple[float, float, float]]:
-    """(start, end, face 0/1) for previous highlights that framing.json has looked at."""
-    fp, hp = wd / "framing.json", wd / "highlights.json"
-    if not fp.is_file() or not hp.is_file():
-        return []
-    framing, prev = load_json(fp), load_json(hp)
-    prev = prev.get("highlights", []) if isinstance(prev, dict) else prev
-    return [(h["start"], h["end"], 1.0 if framing[h["id"]].get("face") else 0.0)
-            for h in prev if h.get("id") in framing]
-
-
-def _face(spans, start: float, end: float) -> float:
-    best, val = 0.0, 0.5
-    for s, e, f in spans:
-        ov = min(end, e) - max(start, s)
-        if ov > best:
-            best, val = ov, f
-    return val if best >= 0.5 * (end - start) else 0.5
-
-
 # --- titles ---------------------------------------------------------------------------------------------------
 
 def make_title(words: list[dict]) -> str:
@@ -172,6 +151,14 @@ def _hook(words: list[dict], w0: int, t0: float) -> float:
         return 1.0
     joined = " " + " ".join(toks) + " "
     return 1.0 if any(f" {p} " in joined for p in HOOK_PHRASES) else 0.0
+
+
+def _length_fit(length: float) -> float:
+    if length < 30:
+        return _clamp(0.3 + 0.7 * (length - 20) / 10)
+    if length > 60:
+        return _clamp(1.0 - 0.7 * (length - 60) / 30)
+    return 1.0
 
 
 def _prefix(vals) -> list[float]:
@@ -222,14 +209,15 @@ def find_highlights(wd: Path, max_clips: int = 12, min_len: float = 20,
     if real < MIN_SPEECH_WORDS or not sents:
         progress("highlights", 100, "No speech found")
         return [], "no_speech"
-    duration = float((ana.get("probe") or ana.get("info") or {}).get("duration") or tr.get("duration")
-                     or sents[-1]["end"])
-
-    if sents[-1]["end"] - sents[0]["start"] < min_len:  # the whole thing is shorter than one clip
+    duration = float((ana.get("probe") or {}).get("duration") or (ana.get("info") or {}).get("duration")
+                     or words[-1]["end"])
+    short = duration < min_len  # the whole video is shorter than one clip: it is the clip
+    if short:
         spans = [(0, len(sents) - 1)]
     else:
         bar = _barriers(sents, ana.get("silences") or [], duration)
-        spans = _candidates(sents, bar, min_len, max_len) or _candidates(sents, bar, 0, max_len)
+        spans = (_candidates(sents, bar, min_len, max_len) or _candidates(sents, bar, 0, max_len)
+                 or [(i, i) for i in range(len(sents))])
     progress("highlights", 20, f"{len(spans)} candidate windows")
 
     hop = 0.5
@@ -238,46 +226,54 @@ def find_highlights(wd: Path, max_clips: int = 12, min_len: float = 20,
 
     # per-word prefix sums: direct address, filler weight
     p_direct = _prefix(1.0 if norm_word(w["text"]) in DIRECT_WORDS else 0.0 for w in words)
+    p_spoken = _prefix(max(0.0, w["end"] - w["start"]) for w in words)
     p_fill = _prefix(1.0 if w.get("filler") == "hard" else 0.5 if w.get("filler") else 0.0 for w in words)
     hooks = [_hook(words, s["w0"], s["start"]) for s in sents]
     complete = [0.0 if norm_word(words[s["w1"]]["text"]) in DANGLING else 1.0 for s in sents]
 
     if energy:
-        voiced = [d for d in energy if d > SILENT_DB + 1] or [SILENT_DB]
-        med_db = statistics.median(voiced)
+        is_voiced = [d > SILENT_DB + 1 for d in energy]
+        voiced = [d for d, v in zip(energy, is_voiced) if v]
+        med_db = statistics.median(voiced) if voiced else SILENT_DB
         covered = [False] * len(energy)
         for w in words:
             for k in range(int(w["start"] / hop), min(len(energy), int(w["end"] / hop) + 1)):
                 covered[k] = True
-        p_db = _prefix(energy)
-        p_db2 = _prefix(d * d for d in energy)
+        p_nv = _prefix(1.0 if v else 0.0 for v in is_voiced)  # silent hops stay out of the mean and variance
+        p_db = _prefix(d if v else 0.0 for d, v in zip(energy, is_voiced))
+        p_db2 = _prefix(d * d if v else 0.0 for d, v in zip(energy, is_voiced))
         p_laugh = _prefix(1.0 if d > med_db + 6 and not covered[k] else 0.0 for k, d in enumerate(energy))
 
-    face_spans = _face_spans(wd)
-    rates = [(sents[j]["w1"] - sents[i]["w0"] + 1) / max(0.5, sents[j]["end"] - sents[i]["start"])
+    rates = [(sents[j]["w1"] - sents[i]["w0"] + 1) / max(0.5, p_spoken[sents[j]["w1"] + 1] - p_spoken[sents[i]["w0"]])
              for i, j in spans]
-    med_rate = statistics.median(rates) or 1.0
+    med_rate = (statistics.median(rates) if rates else 0.0) or 1.0
     pos = sum(w for w in WEIGHTS.values() if w > 0)
 
     scored = []
     for (i, j), rate in zip(spans, rates):
         a, b = sents[i], sents[j]
         w0, w1, start, end = a["w0"], b["w1"], a["start"], b["end"]
+        if short:
+            start, end = 0.0, duration
         n = w1 - w0 + 1
         f = {"speech_rate": _clamp(0.5 + (rate / med_rate - 1)),
              "hook": hooks[i],
              "direct": _clamp(10 * (p_direct[w1 + 1] - p_direct[w0]) / n),
              "complete": complete[j],
              "filler_density": _clamp(10 * (p_fill[w1 + 1] - p_fill[w0]) / n),
-             "face": _face(face_spans, start, end)}
+             "face": 0.5,
+             "length_fit": _length_fit(end - start)}
         if energy:
             h0 = min(len(energy) - 1, int(start / hop))
             h1 = min(len(energy), max(h0 + 1, math.ceil(end / hop)))
-            m = h1 - h0
-            mean = (p_db[h1] - p_db[h0]) / m
-            var = max(0.0, (p_db2[h1] - p_db2[h0]) / m - mean * mean)
-            f["energy"] = _clamp(0.5 + (mean - med_db) / 12)
-            f["energy_var"] = _clamp(math.sqrt(var) / 8)
+            m = p_nv[h1] - p_nv[h0]
+            if m:
+                mean = (p_db[h1] - p_db[h0]) / m
+                var = max(0.0, (p_db2[h1] - p_db2[h0]) / m - mean * mean)
+                f["energy"] = _clamp(0.5 + (mean - med_db) / 12)
+                f["energy_var"] = _clamp(math.sqrt(var) / 8)
+            else:
+                f["energy"] = f["energy_var"] = 0.0
             f["laughter"] = _clamp((p_laugh[h1] - p_laugh[h0]) * hop / 3)
         else:
             f["energy"] = f["energy_var"] = f["laughter"] = 0.5
@@ -300,8 +296,8 @@ def find_highlights(wd: Path, max_clips: int = 12, min_len: float = 20,
     out: list[Highlight] = []
     for n, (raw, start, end, i, j, f) in enumerate(picked, 1):
         s = sents[i]
-        out.append({"id": f"h{n:02d}", "start": round(start, 3), "end": round(end, 3), "w0": s["w0"],
-                    "w1": sents[j]["w1"], "score": int(max(0, min(100, round(100 * raw)))),
+        out.append({"id": f"h{n:02d}", "start": round(start, 3), "end": round(end, 3),
+                    "w0": 0 if short else s["w0"], "w1": len(words) - 1 if short else sents[j]["w1"], "score": int(max(0, min(100, round(100 * raw)))),
                     "title": make_title(words[s["w0"]:s["w1"] + 1]),
                     "features": {k: round(f[k], 3) for k in WEIGHTS}})
     progress("highlights", 100, f"{len(out)} highlights")

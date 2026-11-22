@@ -54,14 +54,22 @@ def music_only_wd(tmp_path_factory):
     return _wd_from(tmp_path_factory, "music_only")
 
 
+SHORT_TALK = [
+    ("Quick tip for today before you head out.", 2.5, 0.5),
+    ("Always back up your footage twice.", 2.5, 0.5),
+    ("One copy on a drive and one in the cloud.", 2.5, 0.4),
+    ("That's it, see you tomorrow.", 2.5, 0.0),
+]
+
+
 @pytest.fixture(scope="module")
 def short_wd(tmp_path_factory):
-    return _synthetic_wd(tmp_path_factory.mktemp("short"), [
-        ("Quick tip for today before you head out.", 2.5, 0.5),
-        ("Always back up your footage twice.", 2.5, 0.5),
-        ("One copy on a drive and one in the cloud.", 2.5, 0.4),
-        ("That's it, see you tomorrow.", 2.5, 0.0),
-    ])
+    return _synthetic_wd(tmp_path_factory.mktemp("short"), SHORT_TALK, duration=15.0)
+
+
+@pytest.fixture(scope="module")
+def short_speech_long_video_wd(tmp_path_factory):
+    return _synthetic_wd(tmp_path_factory.mktemp("shortlong"), SHORT_TALK, duration=120.0)
 
 
 VOCAB = ("we went to the market and talked about money and work and family and the new place "
@@ -124,9 +132,21 @@ def test_music_only_returns_reason(music_only_wd):
     assert find_highlights(music_only_wd) == ([], "no_speech")
 
 
-def test_short_video_is_one_clip(short_wd):                      # 14 s of speech
+def test_short_video_is_one_clip(short_wd):                      # 14 s of speech in a 15 s video
     hs, _ = find_highlights(short_wd)
     assert len(hs) == 1 and hs[0]["start"] == 0 and hs[0]["w1"] == last_word_index(short_wd)
+    assert hs[0]["end"] == 15.0 and hs[0]["w0"] == 0
+
+
+def test_short_speech_in_long_video_uses_windows(short_speech_long_video_wd):
+    tr = load_json(short_speech_long_video_wd / "transcript.main.json")
+    starts = {s["w0"] for s in tr["sentences"]}
+    ends = {s["w1"]: s["end"] for s in tr["sentences"]}
+    hs, why = find_highlights(short_speech_long_video_wd)
+    assert why is None and len(hs) >= 2                           # old speech-span rule gave one forced clip
+    for h in hs:                                                  # sentence-bounded, not [0, duration]
+        assert h["w0"] in starts and h["w1"] in ends and h["end"] == round(ends[h["w1"]], 3)
+        assert h["end"] < 120.0
 
 
 def test_three_hour_video_fast_and_spread(long_wd):              # synthetic 3 h transcript, no audio
@@ -155,6 +175,12 @@ def test_no_window_spans_long_silence(en_podcast_wd):
         assert not any(h["start"] < s["start"] and s["end"] < h["end"] for s in long_sil)
 
 
+def test_favours_30_to_60_s_clips(en_podcast_wd):
+    hs, _ = find_highlights(en_podcast_wd)
+    long_ones = [h for h in hs if h["end"] - h["start"] >= 30]
+    assert len(long_ones) * 3 >= len(hs), [round(h["end"] - h["start"]) for h in hs]
+
+
 def test_spacing_between_clips(en_podcast_wd):
     hs, _ = find_highlights(en_podcast_wd, max_clips=3)   # plenty of room: 30 s gap must hold
     spans = sorted((h["start"], h["end"]) for h in hs)
@@ -178,15 +204,13 @@ def test_title_rules():
     assert title == "The biggest mistake I made was chasing trends"
 
 
-def test_framing_file_sets_face(tmp_path, taglish_wd):
+def test_face_is_constant_until_framing_runs_before_scoring(tmp_path, taglish_wd):
     for f in taglish_wd.glob("*.json"):
         shutil.copy(f, tmp_path / f.name)
     hs, _ = find_highlights(tmp_path)
-    save_json({"highlights": hs}, tmp_path / "highlights.json")
+    save_json({"highlights": hs}, tmp_path / "highlights.json")   # a stale run plus framing keyed by its ids
     save_json({h["id"]: {"crop_x": 0.5, "face": h["id"] == "h02"} for h in hs}, tmp_path / "framing.json")
-    again = {(h["start"], h["end"]): h["features"]["face"] for h in find_highlights(tmp_path)[0]}
-    assert again[(hs[1]["start"], hs[1]["end"])] == 1.0
-    assert again[(hs[0]["start"], hs[0]["end"])] == 0.0
+    assert all(h["features"]["face"] == 0.5 for h in find_highlights(tmp_path)[0])
 
 
 def test_energy_profile_and_cache(tmp_path, ffmpeg_ok):
