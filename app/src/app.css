@@ -1,6 +1,9 @@
 /* Layout and components, taken from the approved editor mockup (editor-v2-geist.html). Tokens live in theme/tokens.css. */
 
-.app { height: 100vh; display: grid; grid-template-columns: 1fr; grid-template-rows: 56px 1fr; gap: 8px; padding: 8px; }
+.app { height: 100vh; display: grid; grid-template-columns: 1fr; grid-template-rows: 56px 1fr; background: var(--panel); }
+/* One surface: the top bar is a strip with a hairline under it, the screen scrolls below it edge to edge. */
+.app > .top, .app > .screen { background: none; border: 0; border-radius: 0; }
+.app > .top { border-bottom: 1px solid var(--line); padding: 0 16px 0 20px; }
 .pane { background: var(--panel); border: 1px solid var(--line); border-radius: 12px; min-height: 0; min-width: 0; }
 .sr-only {
   position: absolute; width: 1px; height: 1px; margin: -1px; padding: 0; overflow: hidden;
@@ -25,11 +28,33 @@ a { color: inherit; text-decoration: none; }
 .step.on { background: var(--chip); color: var(--ink); }
 .step.on .dot { background: var(--accent); color: var(--accent-ink); border-color: transparent; }
 a.step:hover { color: var(--ink); }
-.sep { width: 18px; height: 1px; background: var(--line-2); }
+.sep { position: relative; width: 18px; height: 1px; background: var(--line-2); overflow: hidden; }
+/* Progress: the line into the current step fills with the accent as the screen opens; earlier lines stay filled. */
+.sep::after { content: ""; position: absolute; inset: 0; background: var(--accent); transform: scaleX(0); transform-origin: left; }
+.sep.done::after { transform: none; }
+.sep.into::after { animation: sep-fill .5s cubic-bezier(.4, 0, .2, 1) .1s forwards; }
+.step.on { animation: step-in .35s ease-out both; }
+.step.on .dot { animation: dot-pop .45s cubic-bezier(.3, 1.6, .5, 1) .25s both; }
+@keyframes sep-fill { to { transform: none; } }
+@keyframes step-in { from { background-color: transparent; } }
+@keyframes dot-pop { from { transform: scale(.4); } }
 .actions { display: flex; align-items: center; justify-content: flex-end; gap: 6px; }
-.icon { width: 32px; height: 32px; border-radius: 8px; display: grid; place-items: center; color: var(--body); }
+.icon {
+  width: 34px; height: 34px; border-radius: 9px; display: grid; place-items: center; color: var(--body);
+  border: 1px solid transparent; transition: background-color .15s, color .15s, border-color .15s;
+}
 .icon:hover { background: var(--chip); color: var(--ink); }
-.icon svg { width: 16px; height: 16px; }
+.icon:active { transform: translateY(1px); }
+.icon[aria-current="page"] { background: var(--chip); border-color: var(--line-2); color: var(--ink); }
+.icon svg { width: 18px; height: 18px; grid-area: 1 / 1; }
+.icon .gear { transition: transform .5s cubic-bezier(.3, 1.4, .5, 1); }
+.icon:hover .gear { transform: rotate(60deg); }
+/* Theme toggle: the sun shows in dark mode (click for light), the moon in light mode; they swap with a turn. */
+.theme-toggle .sun, .theme-toggle .moon { transition: transform .45s cubic-bezier(.3, 1.3, .5, 1), opacity .25s; }
+.theme-toggle .moon { opacity: 0; transform: rotate(-90deg) scale(.5); }
+html.light .theme-toggle .sun { opacity: 0; transform: rotate(90deg) scale(.5); }
+html.light .theme-toggle .moon { opacity: 1; transform: none; }
+html.theme-fade, html.theme-fade * { transition: background-color .3s ease, border-color .3s ease, color .3s ease, outline-color .3s ease !important; }
 .divider { width: 1px; height: 22px; background: var(--line-2); margin: 0 4px; }
 .primary {
   display: inline-flex; align-items: center; gap: 8px; height: 36px; padding: 0 16px; border-radius: 9px;
@@ -125,6 +150,10 @@ a.step:hover { color: var(--ink); }
 @keyframes pulse { 50% { opacity: .35; } }
 @media (prefers-reduced-motion: reduce) {
   .stage-row.current .mark i { animation: none; }
+  .sep.into::after { animation: none; transform: none; }
+  .step.on, .step.on .dot { animation: none; }
+  .icon .gear, .theme-toggle .sun, .theme-toggle .moon { transition: none; }
+  html.theme-fade, html.theme-fade * { transition: none !important; }
   .meter i, .stage-row .bar i { transition: none; }
 }
 
@@ -135,7 +164,7 @@ a.step:hover { color: var(--ink); }
 }
 /* Narrow windows: steps shrink to numbered dots (names stay for screen readers), then to the current step only. */
 @media (max-width: 760px) {
-  .top { gap: 10px; padding: 0 8px 0 12px; }
+  .app > .top { gap: 10px; padding: 0 10px 0 14px; }
   .step { padding: 4px; }
   .step.on { padding-right: 10px; }
   .step:not(.on) .step-label {

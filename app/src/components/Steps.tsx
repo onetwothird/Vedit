@@ -32,7 +32,7 @@ export default function Steps({ current, editHid }: StepsProps) {
         const label = t(key);
         return (
           <Fragment key={n}>
-            {i > 0 && <span className="sep" aria-hidden="true" />}
+            {i > 0 && <span className={`sep${current !== undefined && n < current ? " done" : n === current ? " into" : ""}`} aria-hidden="true" />}
             {done && hasProject ? (
               <Link className="step done" to={target(n)}>
                 <span className="dot" aria-hidden="true">✓</span>
