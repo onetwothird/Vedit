@@ -2,20 +2,21 @@
 //!
 //! The bearer token goes only through env VEDIT_ENGINE_TOKEN (argv is readable by other processes). On Windows the
 //! engine is put in a Job Object with KILL_ON_JOB_CLOSE held for the app's lifetime, so even a crash or a forced kill
-//! of the app takes the engine and everything under it down. With VEDIT_DEV_ENGINE=1 the system Python runs
-//! scripts/engine_entry.py from the repo instead of the bundled sidecar.
+//! of the app takes the engine and everything under it down. In debug builds, VEDIT_DEV_ENGINE=1 runs
+//! scripts/engine_entry.py from the repo with the system Python instead of the bundled sidecar.
 
 use std::collections::VecDeque;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::Mutex;
+use std::future::Future;
+use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use serde::Serialize;
 use tauri::{AppHandle, Manager};
 use tauri_plugin_shell::process::{CommandChild, CommandEvent};
 use tauri_plugin_shell::ShellExt;
-use tokio::sync::{mpsc::Receiver, OnceCell};
+use tokio::sync::mpsc::Receiver;
 
 pub const START_FAILED: &str = "engine_start_failed";
 const READY_TIMEOUT: Duration = Duration::from_secs(30);
@@ -26,6 +27,13 @@ const ENGINE_SCRIPT: &str = "scripts/engine_entry.py";
 pub struct EngineInfo {
     pub port: u16,
     pub token: String,
+}
+
+/// Debug without the token, so it can never reach a log through `{:?}`.
+impl std::fmt::Debug for EngineInfo {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("EngineInfo").field("port", &self.port).field("token", &"<redacted>").finish()
+    }
 }
 
 /// Arguments after the executable (sidecar) or after the script path (dev). No secrets here.
@@ -65,8 +73,9 @@ pub fn find_repo_root(start: &Path) -> Option<PathBuf> {
     start.ancestors().find(|d| d.join(ENGINE_SCRIPT).is_file()).map(Path::to_path_buf)
 }
 
+/// VEDIT_DEV_ENGINE=1 (system Python on the repo's scripts) is honoured only in debug builds.
 fn dev_engine_enabled() -> bool {
-    std::env::var("VEDIT_DEV_ENGINE").is_ok_and(|v| v == "1")
+    cfg!(debug_assertions) && std::env::var("VEDIT_DEV_ENGINE").is_ok_and(|v| v == "1")
 }
 
 fn dev_repo_root() -> Option<PathBuf> {
@@ -74,8 +83,15 @@ fn dev_repo_root() -> Option<PathBuf> {
         .or_else(|| std::env::current_exe().ok().and_then(|exe| find_repo_root(&exe)))
 }
 
+/// An engine that printed `@@ready`. `alive` is cleared once its process exits.
+pub struct Started {
+    pub info: EngineInfo,
+    pub alive: Arc<AtomicBool>,
+}
+
 pub struct Engine {
-    info: OnceCell<Result<EngineInfo, ()>>,
+    /// Held across a start, so concurrent callers share one. Holds only a successful start.
+    running: tokio::sync::Mutex<Option<Started>>,
     child: Mutex<Option<CommandChild>>,
     stopping: AtomicBool,
     #[cfg(windows)]
@@ -85,7 +101,7 @@ pub struct Engine {
 impl Engine {
     pub fn new() -> Self {
         Engine {
-            info: OnceCell::new(),
+            running: tokio::sync::Mutex::new(None),
             child: Mutex::new(None),
             stopping: AtomicBool::new(false),
             #[cfg(windows)]
@@ -95,20 +111,36 @@ impl Engine {
         }
     }
 
-    /// Port and token of the running engine. Concurrent callers share one start; the outcome (including
-    /// failure) is kept for the app's lifetime, so a failed start needs an app restart.
+    /// Port and token of the running engine, starting it if needed. A failed start is not kept (the next call
+    /// starts fresh) and an engine that died after ready is restarted.
     pub async fn info(&self, app: &AppHandle) -> Result<EngineInfo, String> {
-        self.info
-            .get_or_init(|| self.start(app))
-            .await
-            .clone()
-            .map_err(|()| START_FAILED.to_string())
+        self.ensure(|| self.start(app)).await
     }
 
-    async fn start(&self, app: &AppHandle) -> Result<EngineInfo, ()> {
-        if self.stopping.load(Ordering::SeqCst) {
-            return Err(());
+    async fn ensure<F, Fut>(&self, start: F) -> Result<EngineInfo, String>
+    where
+        F: FnOnce() -> Fut,
+        Fut: Future<Output = Result<Started, ()>>,
+    {
+        let mut running = self.running.lock().await;
+        if let Some(current) = running.as_ref() {
+            if current.alive.load(Ordering::SeqCst) {
+                return Ok(current.info.clone());
+            }
+            eprintln!("[vedit] engine is no longer running; restarting it");
+            *running = None;
+            self.kill_child();
         }
+        if self.stopping.load(Ordering::SeqCst) {
+            return Err(START_FAILED.to_string());
+        }
+        let started = start().await.map_err(|()| START_FAILED.to_string())?;
+        let info = started.info.clone();
+        *running = Some(started);
+        Ok(info)
+    }
+
+    async fn start(&self, app: &AppHandle) -> Result<Started, ()> {
         let token = new_token().map_err(|e| eprintln!("[vedit] engine token: {e}"))?;
         let ffmpeg_dir = app.path().resource_dir().ok().map(|d| d.join("bin")).filter(|d| d.is_dir());
 
@@ -139,20 +171,25 @@ impl Engine {
         }
         *self.child.lock().unwrap_or_else(|e| e.into_inner()) = Some(child);
         if self.stopping.load(Ordering::SeqCst) {
-            self.shutdown();
+            self.kill_child();
             return Err(());
         }
 
-        let port = wait_ready(rx).await;
-        if port.is_err() {
-            self.shutdown();
+        match wait_ready(rx).await {
+            Ok((port, rx)) => {
+                let alive = Arc::new(AtomicBool::new(true));
+                tauri::async_runtime::spawn(drain(rx, alive.clone()));
+                Ok(Started { info: EngineInfo { port, token }, alive })
+            }
+            Err(()) => {
+                self.kill_child();
+                Err(())
+            }
         }
-        port.map(|port| EngineInfo { port, token })
     }
 
-    /// Kill the engine and its whole tree. Idempotent; called on main-window close and on RunEvent::Exit.
-    pub fn shutdown(&self) {
-        self.stopping.store(true, Ordering::SeqCst);
+    /// Kill the current engine and its whole tree; later starts stay allowed.
+    fn kill_child(&self) {
         if let Some(child) = self.child.lock().unwrap_or_else(|e| e.into_inner()).take() {
             let pid = child.pid();
             match child.kill() {
@@ -165,10 +202,16 @@ impl Engine {
             job.terminate();
         }
     }
+
+    /// Kill the engine for good. Idempotent; called on main-window close and on RunEvent::Exit.
+    pub fn shutdown(&self) {
+        self.stopping.store(true, Ordering::SeqCst);
+        self.kill_child();
+    }
 }
 
 /// Reads engine output until `@@ready`, exit, or the 30 s timeout. Stderr is kept as a tail for the log only.
-async fn wait_ready(mut rx: Receiver<CommandEvent>) -> Result<u16, ()> {
+async fn wait_ready(mut rx: Receiver<CommandEvent>) -> Result<(u16, Receiver<CommandEvent>), ()> {
     let deadline = tokio::time::Instant::now() + READY_TIMEOUT;
     let mut tail: VecDeque<String> = VecDeque::new();
     let log_tail = |why: &str, tail: &VecDeque<String>| {
@@ -195,8 +238,7 @@ async fn wait_ready(mut rx: Receiver<CommandEvent>) -> Result<u16, ()> {
                 let line = String::from_utf8_lossy(&bytes);
                 if let Some(port) = parse_ready(&line) {
                     eprintln!("[vedit] engine ready on port {port}");
-                    tauri::async_runtime::spawn(drain(rx));
-                    return Ok(port);
+                    return Ok((port, rx));
                 }
                 eprintln!("[engine] {}", line.trim_end());
             }
@@ -212,17 +254,21 @@ async fn wait_ready(mut rx: Receiver<CommandEvent>) -> Result<u16, ()> {
     }
 }
 
-/// After ready: keep the engine's output flowing into the app log until it exits.
-async fn drain(mut rx: Receiver<CommandEvent>) {
+/// After ready: keep the engine's output flowing into the app log; clear `alive` when it exits.
+async fn drain(mut rx: Receiver<CommandEvent>, alive: Arc<AtomicBool>) {
     while let Some(event) = rx.recv().await {
         match event {
             CommandEvent::Stdout(b) | CommandEvent::Stderr(b) => {
                 eprintln!("[engine] {}", String::from_utf8_lossy(&b).trim_end())
             }
-            CommandEvent::Terminated(t) => eprintln!("[vedit] engine exited (code {:?})", t.code),
+            CommandEvent::Terminated(t) => {
+                alive.store(false, Ordering::SeqCst);
+                eprintln!("[vedit] engine exited (code {:?})", t.code)
+            }
             _ => {}
         }
     }
+    alive.store(false, Ordering::SeqCst);
 }
 
 #[cfg(windows)]
@@ -352,6 +398,7 @@ mod job {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::sync::atomic::AtomicUsize;
 
     #[test]
     fn parse_ready_reads_the_port() {
@@ -411,6 +458,75 @@ mod tests {
         let root = find_repo_root(Path::new(env!("CARGO_MANIFEST_DIR"))).unwrap();
         assert!(root.join(ENGINE_SCRIPT).is_file());
         assert!(find_repo_root(Path::new(env!("CARGO_MANIFEST_DIR")).join("src").as_path()).is_some());
+    }
+
+    fn started(port: u16) -> Started {
+        Started { info: EngineInfo { port, token: format!("t{port}") }, alive: Arc::new(AtomicBool::new(true)) }
+    }
+
+    #[tokio::test]
+    async fn failed_start_is_not_kept_and_the_next_call_retries() {
+        let engine = Engine::new();
+        assert_eq!(engine.ensure(|| async { Err(()) }).await.unwrap_err(), START_FAILED);
+        let info = engine.ensure(|| async { Ok(started(4100)) }).await.unwrap();
+        assert_eq!(info.port, 4100);
+        // Running now: a further call reuses it instead of starting.
+        let again = engine.ensure(|| async { panic!("must not start again") }).await.unwrap();
+        assert_eq!((again.port, again.token), (4100, "t4100".to_string()));
+    }
+
+    #[tokio::test]
+    async fn concurrent_calls_share_one_start() {
+        let engine = Engine::new();
+        let starts = AtomicUsize::new(0);
+        let start = || async {
+            starts.fetch_add(1, Ordering::SeqCst);
+            tokio::time::sleep(Duration::from_millis(50)).await;
+            Ok(started(4200))
+        };
+        let (a, b, c) = tokio::join!(engine.ensure(start), engine.ensure(start), engine.ensure(start));
+        assert_eq!(starts.load(Ordering::SeqCst), 1);
+        for info in [a, b, c] {
+            assert_eq!(info.unwrap().port, 4200);
+        }
+    }
+
+    #[tokio::test]
+    async fn a_caller_waiting_on_a_failed_start_starts_fresh() {
+        let engine = Engine::new();
+        let starts = AtomicUsize::new(0);
+        let start = || async {
+            let n = starts.fetch_add(1, Ordering::SeqCst);
+            tokio::time::sleep(Duration::from_millis(20)).await;
+            if n == 0 {
+                Err(())
+            } else {
+                Ok(started(4300))
+            }
+        };
+        let (a, b) = tokio::join!(engine.ensure(start), engine.ensure(start));
+        assert_eq!(a.unwrap_err(), START_FAILED);
+        assert_eq!(b.unwrap().port, 4300);
+        assert_eq!(starts.load(Ordering::SeqCst), 2);
+    }
+
+    #[tokio::test]
+    async fn a_dead_engine_is_restarted() {
+        let engine = Engine::new();
+        let first = started(4400);
+        let alive = first.alive.clone();
+        engine.ensure(|| async { Ok(first) }).await.unwrap();
+        alive.store(false, Ordering::SeqCst);
+        let info = engine.ensure(|| async { Ok(started(4401)) }).await.unwrap();
+        assert_eq!(info.port, 4401);
+    }
+
+    #[tokio::test]
+    async fn no_start_after_shutdown() {
+        let engine = Engine::new();
+        engine.shutdown();
+        let result = engine.ensure(|| async { panic!("must not start after shutdown") }).await;
+        assert_eq!(result.unwrap_err(), START_FAILED);
     }
 
     #[test]

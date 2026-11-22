@@ -31,19 +31,23 @@ async fn delete_ai_key(provider: String) -> Result<(), String> {
     secrets::delete_key(&provider)
 }
 
-/// `explorer.exe /select,<path>` for an existing file or folder. No shell is involved.
+/// `explorer.exe /select,<path>` for an existing absolute local file or folder. No shell is involved.
 #[tauri::command]
 async fn show_in_folder(path: String) -> Result<(), String> {
-    let path = existing_path(&path)?;
+    let path = local_existing_path(&path)?;
     open_in_file_manager(path).map_err(|e| {
         eprintln!("[vedit] show_in_folder: {e}");
         "show_in_folder_failed".to_string()
     })
 }
 
-fn existing_path(path: &str) -> Result<&Path, String> {
+/// Only absolute local paths that exist: no relative paths, no UNC/network or `\\?\` device paths.
+fn local_existing_path(path: &str) -> Result<&Path, String> {
     let p = Path::new(path);
-    if path.is_empty() || !p.exists() {
+    if path.starts_with("\\\\") || path.starts_with("//") || !p.is_absolute() {
+        return Err("invalid_path".into());
+    }
+    if !p.exists() {
         return Err("path_not_found".into());
     }
     Ok(p)
@@ -119,15 +123,44 @@ mod tests {
 
     #[test]
     fn missing_paths_are_rejected() {
-        assert_eq!(existing_path("").unwrap_err(), "path_not_found");
-        assert_eq!(existing_path(r"C:\definitely\not\here\x.mp4").unwrap_err(), "path_not_found");
+        assert_eq!(local_existing_path(r"C:\definitely\not\here\x.mp4").unwrap_err(), "path_not_found");
     }
 
     #[test]
-    fn existing_paths_are_accepted() {
+    fn relative_paths_are_rejected_even_if_they_exist() {
+        // cargo runs tests from the manifest dir, so these exist relative to the cwd.
+        assert!(Path::new("Cargo.toml").exists());
+        for p in ["", "Cargo.toml", "./Cargo.toml", "src", r"..\src-tauri\Cargo.toml"] {
+            assert_eq!(local_existing_path(p).unwrap_err(), "invalid_path", "{p:?}");
+        }
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn drive_relative_and_rooted_paths_are_rejected() {
+        for p in [r"C:Cargo.toml", r"\Windows", "/Windows"] {
+            assert_eq!(local_existing_path(p).unwrap_err(), "invalid_path", "{p:?}");
+        }
+    }
+
+    #[test]
+    fn unc_and_device_paths_are_rejected() {
         let here = env!("CARGO_MANIFEST_DIR");
-        assert!(existing_path(here).is_ok());
-        assert!(existing_path(&format!("{here}/Cargo.toml")).is_ok());
+        for p in [
+            r"\\server\share\x.mp4".to_string(),
+            "//server/share/x.mp4".to_string(),
+            r"\\localhost\C$\Windows".to_string(),
+            format!(r"\\?\{here}"),
+        ] {
+            assert_eq!(local_existing_path(&p).unwrap_err(), "invalid_path", "{p:?}");
+        }
+    }
+
+    #[test]
+    fn existing_absolute_paths_are_accepted() {
+        let here = env!("CARGO_MANIFEST_DIR");
+        assert!(local_existing_path(here).is_ok());
+        assert!(local_existing_path(&format!("{here}/Cargo.toml")).is_ok());
     }
 
     #[cfg(windows)]

@@ -1,14 +1,10 @@
 {
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "default",
-  "description": "Main window: engine sidecar, open dialog, exit/restart, updater. Nothing else.",
+  "description": "Main window: open dialog, exit/restart, updater. No shell access: Rust spawns the engine.",
   "windows": ["main"],
   "permissions": [
     "core:default",
-    {
-      "identifier": "shell:allow-execute",
-      "allow": [{ "name": "bin/vedit-engine", "sidecar": true }]
-    },
     "dialog:allow-open",
     "process:allow-exit",
     "process:allow-restart",
