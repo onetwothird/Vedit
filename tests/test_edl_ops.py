@@ -198,3 +198,25 @@ def test_clip_edl_no_clips_raises(tmp_path):
     h = {"id": "h1", "start": 10.0, "end": 30.0, "w0": 0, "w1": 0, "score": 1, "title": "t", "features": {}}
     with pytest.raises(ValueError):
         clip_edl(tmp_path, h, "youtube", None, None)
+
+
+def test_fix_word_same_removes_key():
+    e = fix_word({"clips": [], "captions": {"replace": {"teh": "the", "x": "y"}}}, "teh", "teh")
+    assert e["captions"]["replace"] == {"x": "y"}
+    assert fix_word({"clips": []}, "a", "a")["captions"]["replace"] == {}  # absent key is fine
+
+
+@pytest.mark.parametrize("section", ["captions", "audio", "color"])
+def test_patch_section_null_removes_key(section):
+    e = {"clips": [], section: {"a": 1, "b": 2}}
+    out = patch_section(e, section, {"a": None, "c": None, "b": 3})
+    assert out[section] == {"b": 3}
+    assert patch_section({"clips": []}, section, {"a": None})[section] == {}
+
+
+def test_patch_section_framing_null_removes_keys():
+    e = {"fit": "blur", "clips": [{"words": [0, 1], "crop_x": 0.3, "zoom": 1.2}, {"in": 1, "out": 2, "crop_x": 0.5}]}
+    out = patch_section(e, "framing", {"crop_x": None, "zoom": None, "fit": None})
+    assert "fit" not in out
+    assert all("crop_x" not in c and "zoom" not in c for c in out["clips"])
+    assert out["clips"][0]["words"] == [0, 1] and "fit" not in patch_section({"clips": []}, "framing", {"fit": None})
