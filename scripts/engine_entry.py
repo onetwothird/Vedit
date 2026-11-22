@@ -1,4 +1,8 @@
-"""Entry point for the frozen engine: `vedit-engine run <script.py> [args...]` runs a bundled script."""
+"""Entry point for the frozen engine.
+
+  vedit-engine run <script.py> [args...]      run a bundled script
+  vedit-engine serve --port N --token T      local Studio API on 127.0.0.1 (port 0 = any free port)
+"""
 from __future__ import annotations
 
 import runpy
@@ -27,10 +31,23 @@ def _run(script: str, args: list[str]) -> int:
     return 0
 
 
+def _serve(args: list[str]) -> int:
+    import argparse
+    ap = argparse.ArgumentParser(prog="vedit-engine serve")
+    ap.add_argument("--port", type=int, default=0)
+    ap.add_argument("--token", required=True)
+    a = ap.parse_args(args)
+    from studio_server import serve
+    serve(a.port, a.token)
+    return 0
+
+
 def main(argv: list[str]) -> int:
     if len(argv) >= 2 and argv[0] == "run":
         return _run(argv[1], argv[2:])
-    print("usage: vedit-engine run <script.py> [args...]", file=sys.stderr)
+    if argv and argv[0] == "serve":
+        return _serve(argv[1:])
+    print("usage: vedit-engine run <script.py> [args...] | vedit-engine serve --port N --token T", file=sys.stderr)
     return 2
 
 

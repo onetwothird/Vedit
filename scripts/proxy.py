@@ -1,13 +1,19 @@
-"""Preview proxies and filmstrip thumbnails for the Studio player and timeline."""
+"""Preview proxies and filmstrip thumbnails for the Studio player and timeline.
+
+  python proxy.py VIDEO    -> <workdir>/proxy.mp4 (only when needed) + filmstrip.jpg/.json
+"""
 from __future__ import annotations
 
+import argparse
 import json
 import math
 import os
 import subprocess
+import sys
 from pathlib import Path
 
-from common import die, ffmpeg_bin, load_json, need, progress, save_json
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from common import die, ffmpeg_bin, load_json, need, progress, save_json, workdir_for  # noqa: E402
 
 PROXY_SHORT_SIDE = 540
 MAX_DIRECT_SECONDS = 1800
@@ -160,3 +166,20 @@ def filmstrip(video: Path, wd: Path, every: float = 2.0, height: int = 96) -> Pa
     save_json({"every": every, "height": height, "width": sprite_w // cols, "count": count, "cols": cols,
                "rows": rows}, wd / "filmstrip.json")
     return out
+
+
+def main():
+    ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    ap.add_argument("video")
+    a = ap.parse_args()
+    video = Path(a.video).resolve()
+    wd = workdir_for(video)
+    preview = make_proxy(video, wd)
+    progress("proxy", 95, "Building filmstrip")
+    strip = filmstrip(video, wd)
+    print(f"[proxy] preview -> {preview}")
+    print(f"[proxy] filmstrip -> {strip}")
+
+
+if __name__ == "__main__":
+    main()
