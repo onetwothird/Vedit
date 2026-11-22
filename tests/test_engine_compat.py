@@ -70,5 +70,11 @@ def test_no_raw_ffmpeg_literals_in_argv():
     # list element or first argument of run()/subprocess calls; need("ffmpeg") and hint strings do not match
     pattern = re.compile(r"(?:\[|(?:run|call|Popen|check_call|check_output)\()\s*[\"'](ffmpeg|ffprobe)[\"']")
     offenders = [p.name for p in SCRIPTS.glob("*.py")
-                 if p.name != "common.py" and pattern.search(p.read_text("utf-8"))]
+                 if pattern.search(p.read_text("utf-8"))]
     assert offenders == []
+
+
+def test_ffmpeg_bin_bare_name_when_nothing_found(monkeypatch):
+    monkeypatch.delenv("VEDIT_FFMPEG_DIR", raising=False)
+    monkeypatch.setattr(shutil, "which", lambda name, *a, **k: None)
+    assert common.ffmpeg_bin("ffmpeg") == "ffmpeg"
