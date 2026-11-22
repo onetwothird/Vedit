@@ -62,3 +62,37 @@ test("a captions group shows while playing", async ({ page }) => {
   await page.keyboard.press("Space");
   await expect(page.locator("[data-caption]")).toBeVisible();
 });
+
+test("plays to the end, stops there paused, and does not keep seeking", async ({ page }) => {
+  test.setTimeout(30_000);
+  await page.evaluate(() => {
+    const v = document.querySelector("video")!;
+    const w = window as unknown as { __seeks: number; __arrived: number | null };
+    w.__seeks = 0;
+    w.__arrived = null;
+    v.addEventListener("seeking", () => { if (w.__arrived !== null) w.__seeks++; });
+  });
+  await page.getByRole("button", { name: "Play", exact: true }).click();
+  await expect(page.getByRole("button", { name: "Play", exact: true })).toBeVisible({ timeout: 20_000 });
+  await page.evaluate(() => { (window as unknown as { __arrived: number }).__arrived = 1; });
+  await page.waitForTimeout(1000);
+  const s = await page.evaluate(() => {
+    const v = document.querySelector("video")!;
+    return { paused: v.paused, seeks: (window as unknown as { __seeks: number }).__seeks, t: v.currentTime };
+  });
+  expect(s.paused).toBe(true);
+  expect(s.seeks).toBeLessThanOrEqual(1);
+  expect(s.t).toBeGreaterThan(11); // the last mock range ends at the sample's 12 s
+});
+
+test("the Pick screen with the player has no horizontal overflow at 375px", async ({ page }) => {
+  await page.setViewportSize({ width: 375, height: 812 });
+  await page.reload();
+  await expect(page.locator(".pv video")).toBeVisible();
+  const m = await page.evaluate(() => ({
+    doc: document.documentElement.scrollWidth, inner: window.innerWidth,
+    stage: document.querySelector(".stage")!.scrollWidth, stageClient: document.querySelector(".stage")!.clientWidth,
+  }));
+  expect(m.doc).toBe(m.inner);
+  expect(m.stage).toBeLessThanOrEqual(m.stageClient);
+});

@@ -63,6 +63,7 @@ export default function Player({ view, src, aspect, fit = { width: 360, height: 
   const total = outputLength(ranges);
 
   const outRef = useRef(0);
+  const atEnd = useRef(false); // arrived at the end of the last range and already stopped there
   const idxRef = useRef(0); // the range being played; output time alone is ambiguous at a range boundary
   const [out, setOut] = useState(0);
   const [playing, setPlaying] = useState(false);
@@ -84,6 +85,7 @@ export default function Player({ view, src, aspect, fit = { width: 360, height: 
     const to = Math.min(Math.max(t, 0), outputLength(R));
     const { idx, srcT } = locate(R, to);
     idxRef.current = idx;
+    atEnd.current = false;
     v.playbackRate = speedOf(R[idx]);
     v.currentTime = srcT;
     outRef.current = to;
@@ -126,14 +128,18 @@ export default function Player({ view, src, aspect, fit = { width: 360, height: 
       if (a.kind === "stay") publish(a.out);
       else if (a.kind === "jump") {
         idxRef.current = a.idx;
+        atEnd.current = false;
         v.playbackRate = speedOf(R[a.idx]);
         v.currentTime = a.srcT;
         publish(outputStart(R, a.idx));
         return true;
       } else {
-        v.pause();
-        idxRef.current = R.length - 1;
-        v.currentTime = R[R.length - 1][1];
+        if (!atEnd.current) { // once per arrival: re-seeking on every presented frame would be an idle seek loop
+          atEnd.current = true;
+          v.pause();
+          idxRef.current = R.length - 1;
+          v.currentTime = R[R.length - 1][1];
+        }
         publish(a.out);
       }
       return false;
