@@ -8,6 +8,7 @@ __pycache__/
 *.mp3
 !examples/**
 !app/public/mock/sample.mp4
+!app/src/screens/home/podcast.mp4
 .pytest_cache/
 .ruff_cache/
 *.egg-info/
