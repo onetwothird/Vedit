@@ -2,23 +2,13 @@
 import random
 import shutil
 import time
-from pathlib import Path
 
 import pytest
 
 from common import load_json, save_json
-from conftest import ff, run_script
+from conftest import _wd_from, ff, run_script
 from highlights import WEIGHTS, energy_profile, find_highlights, make_title
 from transcribe import build
-
-FIX = Path(__file__).resolve().parent / "fixtures" / "transcripts"
-
-
-def _wd_from(tmp_path_factory, name):
-    d = tmp_path_factory.mktemp(name)
-    shutil.copy(FIX / f"{name}.json", d / "transcript.main.json")
-    shutil.copy(FIX / f"{name}.analysis.json", d / "analysis.main.json")
-    return d
 
 
 def _synthetic_wd(d, lines_and_gaps, duration=None):
@@ -37,11 +27,6 @@ def _synthetic_wd(d, lines_and_gaps, duration=None):
     save_json(data, d / "transcript.main.json")
     save_json({"name": "main", "probe": {"duration": duration or t}, "silences": sil}, d / "analysis.main.json")
     return d
-
-
-@pytest.fixture(scope="module")
-def en_podcast_wd(tmp_path_factory):
-    return _wd_from(tmp_path_factory, "en_podcast")
 
 
 @pytest.fixture(scope="module")

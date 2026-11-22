@@ -23,6 +23,22 @@ def is_image(path: str, info: dict) -> bool:
                                                       and info.get("duration", 0) < 0.5)
 
 
+def word_range(W: list[dict] | None, a: int, b: int, pad, alias: str = "main") -> tuple[float, float]:
+    """Source-time span of words a..b with the clip pad applied, clamped to the midpoint of the neighbouring gaps."""
+    if not W:
+        die(f"clip uses 'words' but no transcript for '{alias}' (run analyze.py/transcribe.py)")
+    if not (0 <= a <= b < len(W)):
+        die(f"word range [{a},{b}] out of bounds for '{alias}' (0..{len(W) - 1})")
+    p0, p1 = pad
+    start = W[a]["start"] - p0
+    if a > 0:
+        start = max(start, (W[a - 1]["end"] + W[a]["start"]) / 2)
+    end = W[b]["end"] + p1
+    if b + 1 < len(W):
+        end = min(end, (W[b]["end"] + W[b + 1]["start"]) / 2)
+    return max(0.0, start), end
+
+
 class Timeline:
     def __init__(self, edl_path: str | Path, aspect: str | None = None):
         self.path = Path(edl_path).resolve()
@@ -101,19 +117,7 @@ class Timeline:
 
     # ---------- clips ----------
     def _word_range(self, alias: str, a: int, b: int, pad) -> tuple[float, float]:
-        W = self.words_for(alias)
-        if not W:
-            die(f"clip uses 'words' but no transcript for '{alias}' (run analyze.py/transcribe.py)")
-        if not (0 <= a <= b < len(W)):
-            die(f"word range [{a},{b}] out of bounds for '{alias}' (0..{len(W) - 1})")
-        p0, p1 = pad
-        start = W[a]["start"] - p0
-        if a > 0:
-            start = max(start, (W[a - 1]["end"] + W[a]["start"]) / 2)
-        end = W[b]["end"] + p1
-        if b + 1 < len(W):
-            end = min(end, (W[b]["end"] + W[b + 1]["start"]) / 2)
-        return max(0.0, start), end
+        return word_range(self.words_for(alias), a, b, pad, alias)
 
     def _resolve_clips(self):
         raw = list(self.edl.get("clips") or [])

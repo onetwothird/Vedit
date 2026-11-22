@@ -11,6 +11,21 @@ import pytest
 SCRIPTS = Path(__file__).resolve().parent.parent / "scripts"
 sys.path.insert(0, str(SCRIPTS))
 
+FIX = Path(__file__).resolve().parent / "fixtures" / "transcripts"
+
+
+def _wd_from(tmp_path_factory, name):
+    d = tmp_path_factory.mktemp(name)
+    shutil.copy(FIX / f"{name}.json", d / "transcript.main.json")
+    shutil.copy(FIX / f"{name}.analysis.json", d / "analysis.main.json")
+    return d
+
+
+@pytest.fixture(scope="module")
+def en_podcast_wd(tmp_path_factory):
+    return _wd_from(tmp_path_factory, "en_podcast")
+
+
 # (text, seconds of speech, seconds of silence after)
 SCRIPT = [
     ("Hello everyone, welcome back.", 1.6, 1.2),

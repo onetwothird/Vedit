@@ -22,7 +22,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).parent))
 from autocut import make_edl  # noqa: E402
 from common import py_cmd, save_json, ts, workdir_for  # noqa: E402
-from presets import PRESETS, find_brand, get_preset  # noqa: E402
+from presets import PRESETS, find_brand, get_preset, make_edl_kwargs  # noqa: E402
 
 HERE = Path(__file__).parent
 
@@ -66,9 +66,9 @@ def process(video: Path, a) -> dict:
     else:
         print("[auto] using cached analysis (--reanalyze to redo)", flush=True)
     aspect = a.aspect or p.get("aspect")
-    edl, st = make_edl(wd, "main", None, max_gap=p["max_gap"], keep_fillers=p.get("keep_fillers", False),
-                       punchin=p["punchin"], aspect=aspect, captions=a.captions or p["captions"], lufs=p["lufs"],
-                       fit=p.get("fit") if aspect else None, brand=find_brand(a.brand, video.parent),
+    kw = {**make_edl_kwargs(a.preset), "aspect": aspect, "fit": p.get("fit") if aspect else None}
+    kw["captions"] = a.captions or kw["captions"]
+    edl, st = make_edl(wd, "main", None, brand=find_brand(a.brand, video.parent), **kw,
                        out_path=str(video.with_name(f"{video.stem}_{a.preset}.mp4")))
     ep = wd / f"edl.{a.preset}.json"
     save_json(edl, ep)
