@@ -1,10 +1,12 @@
 """Entry point for the frozen engine.
 
   vedit-engine run <script.py> [args...]      run a bundled script
-  vedit-engine serve --port N --token T      local Studio API on 127.0.0.1 (port 0 = any free port)
+  vedit-engine serve --port N                local Studio API on 127.0.0.1 (port 0 = any free port);
+                                             bearer token from env VEDIT_ENGINE_TOKEN
 """
 from __future__ import annotations
 
+import os
 import runpy
 import sys
 from pathlib import Path
@@ -33,12 +35,18 @@ def _run(script: str, args: list[str]) -> int:
 
 def _serve(args: list[str]) -> int:
     import argparse
-    ap = argparse.ArgumentParser(prog="vedit-engine serve")
-    ap.add_argument("--port", type=int, default=0)
-    ap.add_argument("--token", required=True)
+    ap = argparse.ArgumentParser(prog="vedit-engine serve",
+                                 description="Local Studio API on 127.0.0.1; the bearer token comes from env "
+                                             "VEDIT_ENGINE_TOKEN (never argv, which other processes can read).")
+    ap.add_argument("--port", type=int, default=0, help="port to listen on (0 = any free port)")
     a = ap.parse_args(args)
+    token = os.environ.pop("VEDIT_ENGINE_TOKEN", "")  # popped: job steps inherit os.environ, they must not see it
+    if not token.strip():
+        print("error: VEDIT_ENGINE_TOKEN is not set; the engine needs a bearer token in that environment variable",
+              file=sys.stderr)
+        return 2
     from studio_server import serve
-    serve(a.port, a.token)
+    serve(a.port, token)
     return 0
 
 
@@ -47,7 +55,7 @@ def main(argv: list[str]) -> int:
         return _run(argv[1], argv[2:])
     if argv and argv[0] == "serve":
         return _serve(argv[1:])
-    print("usage: vedit-engine run <script.py> [args...] | vedit-engine serve --port N --token T", file=sys.stderr)
+    print("usage: vedit-engine run <script.py> [args...] | vedit-engine serve --port N", file=sys.stderr)
     return 2
 
 

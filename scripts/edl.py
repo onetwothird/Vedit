@@ -49,7 +49,8 @@ def clip_span(tin: float, tout: float, speed: float, fps: int | float) -> tuple[
 
 
 class Timeline:
-    def __init__(self, edl_path: str | Path, aspect: str | None = None):
+    def __init__(self, edl_path: str | Path, aspect: str | None = None, probe=None):
+        self._probe = probe or ffprobe  # callers that rebuild timelines often (Studio server) pass a cached probe
         self.path = Path(edl_path).resolve()
         self.dir = self.path.parent
         self.edl = load_json(self.path)
@@ -82,7 +83,7 @@ class Timeline:
             s["path"] = self._abs(s["path"])
             if not Path(s["path"]).exists():
                 die(f"source '{alias}' not found: {s['path']}")
-            s["info"] = ffprobe(s["path"])
+            s["info"] = self._probe(s["path"])
             s["is_image"] = is_image(s["path"], s["info"])
             s["synced"] = "offset" in s and alias != self.ref_alias(srcs)
             s["offset"] = float(s.get("offset", 0.0))
@@ -185,7 +186,7 @@ class Timeline:
     def _as_clip(self, v) -> dict:
         v = {"path": v} if isinstance(v, str) else dict(v)
         alias = f"_bumper{len(self.sources)}"
-        info = ffprobe(self._abs(v["path"]))
+        info = self._probe(self._abs(v["path"]))
         self.sources[alias] = {"path": self._abs(v["path"]), "info": info, "synced": False, "offset": 0.0,
                                "transcript": None, "is_image": is_image(v["path"], info)}
         return {"src": alias, "in": v.get("in", 0), **({"out": v["out"]} if "out" in v else {}),

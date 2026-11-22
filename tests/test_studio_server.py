@@ -361,9 +361,10 @@ def test_interrupted_job_marked_failed_on_start(tmp_path, monkeypatch):
 
 
 def test_serve_prints_ready_line(tmp_path):
-    env = {**os.environ, "VEDIT_HOME": str(tmp_path / "home"), "PYTHONIOENCODING": "utf-8"}
-    proc = subprocess.Popen([sys.executable, str(SCRIPTS / "engine_entry.py"), "serve", "--port", "0", "--token",
-                             TOKEN], stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, env=env)
+    env = {**os.environ, "VEDIT_HOME": str(tmp_path / "home"), "PYTHONIOENCODING": "utf-8",
+           "VEDIT_ENGINE_TOKEN": TOKEN}
+    proc = subprocess.Popen([sys.executable, str(SCRIPTS / "engine_entry.py"), "serve", "--port", "0"],
+                            stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, env=env)
     lines = []
     reader = threading.Thread(target=lambda: lines.append(proc.stdout.readline()), daemon=True)
     reader.start()
@@ -381,6 +382,44 @@ def test_serve_prints_ready_line(tmp_path):
         proc.stdout.close()
         proc.stderr.close()
     assert out.strip() == ""  # exactly one stdout line
+
+
+@pytest.mark.parametrize("value", [None, "", "  "])
+def test_serve_requires_token_env(tmp_path, value):
+    env = {k: v for k, v in os.environ.items() if k != "VEDIT_ENGINE_TOKEN"}
+    env.update({"VEDIT_HOME": str(tmp_path / "home"), **({"VEDIT_ENGINE_TOKEN": value} if value is not None else {})})
+    r = subprocess.run([sys.executable, str(SCRIPTS / "engine_entry.py"), "serve", "--port", "0"],
+                       capture_output=True, text=True, env=env, timeout=30)
+    assert r.returncode == 2 and "VEDIT_ENGINE_TOKEN" in r.stderr and r.stdout == ""
+    r = subprocess.run([sys.executable, str(SCRIPTS / "engine_entry.py"), "serve", "--token", TOKEN],
+                       capture_output=True, text=True, env=env, timeout=30)
+    assert r.returncode == 2 and "--token" in r.stderr  # argv token is not accepted
+
+
+def test_unexpected_keyerror_is_500(app, auth, monkeypatch):
+    import studio_server
+
+    def boom(*_a, **_k):
+        raise KeyError("internal")
+    monkeypatch.setattr(studio_server, "list_recent", boom)
+    r = TestClient(app, raise_server_exceptions=False).get("/projects/recent", headers=auth)
+    assert r.status_code == 500
+
+
+def test_clip_edits_probe_source_once(client, auth, analyzed_project, monkeypatch):
+    import studio_server
+    studio_server._probe_cache.clear()
+    calls = []
+    real = studio_server.ffprobe
+    monkeypatch.setattr(studio_server, "ffprobe", lambda path: (calls.append(path), real(path))[1])
+    import edl
+    monkeypatch.setattr(edl, "ffprobe", lambda path: pytest.fail("Timeline probed without the cache"))
+    pid, hid = analyzed_project["id"], analyzed_project["highlights"][0]["id"]
+    url = f"/projects/{pid}/clips/{hid}"
+    a, _ = client.get(url, headers=auth).json()["edl"]["clips"][0]["words"]
+    assert client.patch(url, headers=auth, json={"op": "cut", "w0": a, "w1": a}).status_code == 200
+    assert client.patch(url, headers=auth, json={"op": "restore", "w0": a, "w1": a}).status_code == 200
+    assert len(calls) <= 1
 
 
 # ---- engine CLIs added for the server -------------------------------------------------------------------------

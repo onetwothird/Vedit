@@ -33,7 +33,7 @@ from pydantic import BaseModel  # noqa: E402
 
 import vedit  # noqa: E402
 from captions import caption_events  # noqa: E402
-from common import ffmpeg_bin, load_json, py_cmd, save_json, workdir_for  # noqa: E402
+from common import ffmpeg_bin, ffprobe, load_json, py_cmd, save_json, workdir_for  # noqa: E402
 from edl import Timeline  # noqa: E402
 from edl_ops import clip_edl, cut_words, fix_word, kept_ranges, patch_section, restore_words, trim  # noqa: E402
 from studio_jobs import Job, JobQueue  # noqa: E402
@@ -84,17 +84,45 @@ def _job_dict(j: Job) -> dict:
     return dataclasses.asdict(j)
 
 
+class NotFound(Exception):
+    """An explicit lookup (project, clip, job, transcript) found nothing: the API answers 404."""
+
+
+def _project(pid: str) -> Project:
+    try:
+        return load_project(pid)
+    except KeyError:
+        raise NotFound(f"project {pid}") from None
+
+
 def _find_clip(p: Project, hid: str) -> ProjectClip:
     for c in p.clips:
         if c.highlight["id"] == hid:
             return c
-    raise KeyError(hid)
+    raise NotFound(f"clip {hid}")
+
+
+_probe_cache: dict[tuple[str, int, int], dict] = {}
+_probe_lock = threading.Lock()
+
+
+def cached_probe(path: str | Path) -> dict:
+    """common.ffprobe, memoised per (path, size, mtime) so clip edits never re-probe an unchanged source."""
+    st = os.stat(path)
+    key = (os.path.normcase(str(Path(path).resolve())), st.st_size, st.st_mtime_ns)
+    with _probe_lock:
+        hit = _probe_cache.get(key)
+    if hit is None:
+        hit = ffprobe(path)
+        with _probe_lock:
+            _probe_cache[key] = hit
+    return json.loads(json.dumps(hit))  # callers may mutate their copy
 
 
 def _timeline(edl_path: Path) -> Timeline:
-    """edl.Timeline, with its die() (SystemExit) turned into a ValueError the API reports as 400."""
+    """edl.Timeline (cached probes), with its die() (SystemExit) turned into a ValueError the API reports as 400."""
     try:
-        return Timeline(edl_path)
+        return Timeline(edl_path, probe=cached_probe)
     except SystemExit as e:
         raise ValueError(f"the edit could not be resolved ({e.code})") from None
 
@@ -368,9 +396,9 @@ def create_app(token: str, queue: JobQueue | None = None) -> FastAPI:
     app.add_middleware(CORSMiddleware, allow_origins=list(ALLOWED_ORIGINS), allow_methods=["*"],
                        allow_headers=["*"])
 
-    @app.exception_handler(KeyError)
-    async def not_found(_request: Request, exc: KeyError):
-        return JSONResponse({"detail": f"not found: {exc.args[0] if exc.args else ''}"}, status_code=404)
+    @app.exception_handler(NotFound)
+    async def not_found(_request: Request, exc: NotFound):
+        return JSONResponse({"detail": f"not found: {exc}"}, status_code=404)
 
     @app.exception_handler(ValueError)
     async def bad_request(_request: Request, exc: ValueError):
@@ -404,11 +432,11 @@ def create_app(token: str, queue: JobQueue | None = None) -> FastAPI:
 
     @app.get("/projects/{pid}")
     def get_project(pid: str):
-        return _project_dict(load_project(pid))
+        return _project_dict(_project(pid))
 
     @app.post("/projects/{pid}/analyze")
     def analyze(pid: str, body: Optional[AnalyzeBody] = None):
-        p = load_project(pid)
+        p = _project(pid)
         lang, model = LANG_MODEL[p.language]
         src = str(Path(p.source))
         hl_args = []
@@ -425,22 +453,22 @@ def create_app(token: str, queue: JobQueue | None = None) -> FastAPI:
 
     @app.get("/projects/{pid}/transcript")
     def transcript(pid: str):
-        p = load_project(pid)
+        p = _project(pid)
         tp = workdir_for(p.source) / "transcript.main.json"
         if not tp.is_file():
-            raise KeyError("transcript")
+            raise NotFound("transcript")
         return load_json(tp)
 
     @app.get("/projects/{pid}/clips/{hid}")
     def get_clip(pid: str, hid: str):
-        p = load_project(pid)
+        p = _project(pid)
         wd = workdir_for(p.source)
         return _clip_view(wd, wd / _find_clip(p, hid).edl_file)
 
     @app.patch("/projects/{pid}/clips/{hid}")
     def patch_clip(pid: str, hid: str, body: dict = Body(...)):
         with engine.lock_for(pid):
-            p = load_project(pid)
+            p = _project(pid)
             wd = workdir_for(p.source)
             path = wd / _find_clip(p, hid).edl_file
             new = _apply_op(load_json(path), body)
@@ -458,7 +486,7 @@ def create_app(token: str, queue: JobQueue | None = None) -> FastAPI:
     @app.put("/projects/{pid}/clips/{hid}/kept")
     def set_kept(pid: str, hid: str, body: KeptBody):
         with engine.lock_for(pid):
-            p = load_project(pid)
+            p = _project(pid)
             _find_clip(p, hid).kept = body.kept
             save_project(p)
             return _project_dict(p)
@@ -471,7 +499,7 @@ def create_app(token: str, queue: JobQueue | None = None) -> FastAPI:
         if bad:
             raise ValueError(f"unsupported formats: {bad}")
         with engine.lock_for(pid):
-            p = load_project(pid)
+            p = _project(pid)
             wd = workdir_for(p.source)
             out_dir = output_dir(Path(p.source))
             plan = []
@@ -498,7 +526,10 @@ def create_app(token: str, queue: JobQueue | None = None) -> FastAPI:
 
     @app.post("/jobs/{job_id}/cancel")
     def cancel(job_id: str):
-        engine.queue.cancel(job_id)
+        try:
+            engine.queue.cancel(job_id)
+        except KeyError:
+            raise NotFound(f"job {job_id}") from None
         return _job_dict(engine.job_snapshot(job_id))
 
     @app.websocket("/events")
