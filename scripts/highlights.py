@@ -161,6 +161,14 @@ def _length_fit(length: float) -> float:
     return 1.0
 
 
+def _padded(start: float, end: float, min_len: float, lo: float, hi: float) -> tuple[float, float]:
+    """Grow [start, end] evenly toward min_len, inside [lo, hi] (the neighbouring speech or the video edges)."""
+    half = max(0.0, min_len - (end - start)) / 2
+    a, b = max(lo, start - half), min(hi, end + half)
+    lost_a, lost_b = a - (start - half), (end + half) - b  # whatever one side could not take goes to the other
+    return max(lo, a - lost_b), min(hi, b + lost_a)
+
+
 def _prefix(vals) -> list[float]:
     out = [0.0]
     for v in vals:
@@ -211,13 +219,20 @@ def find_highlights(wd: Path, max_clips: int = 12, min_len: float = 20,
         return [], "no_speech"
     duration = float((ana.get("probe") or {}).get("duration") or (ana.get("info") or {}).get("duration")
                      or words[-1]["end"])
-    short = duration < min_len  # the whole video is shorter than one clip: it is the clip
-    if short:
-        spans = [(0, len(sents) - 1)]
+    whole = None  # (start, end) when one clip must cover all the speech
+    spans = []
+    if duration < min_len:  # the whole video is shorter than one clip: it is the clip
+        whole = (0.0, duration)
     else:
         bar = _barriers(sents, ana.get("silences") or [], duration)
-        spans = (_candidates(sents, bar, min_len, max_len) or _candidates(sents, bar, 0, max_len)
-                 or [(i, i) for i in range(len(sents))])
+        spans = _candidates(sents, bar, min_len, max_len)
+        if not spans and words[-1]["end"] - words[0]["start"] <= max_len:
+            whole = _padded(words[0]["start"], words[-1]["end"], min_len, 0.0, duration)
+        elif not spans:  # sparse speech spread wider than a clip: let windows cross the long silences
+            spans = (_candidates(sents, [False] * len(sents), min_len, max_len)
+                     or [(i, i) for i in range(len(sents))])
+    if whole:
+        spans = [(0, len(sents) - 1)]
     progress("highlights", 20, f"{len(spans)} candidate windows")
 
     hop = 0.5
@@ -244,8 +259,8 @@ def find_highlights(wd: Path, max_clips: int = 12, min_len: float = 20,
         p_db2 = _prefix(d * d if v else 0.0 for d, v in zip(energy, is_voiced))
         p_laugh = _prefix(1.0 if d > med_db + 6 and not covered[k] else 0.0 for k, d in enumerate(energy))
 
-    rates = [(sents[j]["w1"] - sents[i]["w0"] + 1) / max(0.5, p_spoken[sents[j]["w1"] + 1] - p_spoken[sents[i]["w0"]])
-             for i, j in spans]
+    rates = [(sents[j]["w1"] - sents[i]["w0"] + 1)
+             / max(0.5, p_spoken[sents[j]["w1"] + 1] - p_spoken[sents[i]["w0"]]) for i, j in spans]
     med_rate = (statistics.median(rates) if rates else 0.0) or 1.0
     pos = sum(w for w in WEIGHTS.values() if w > 0)
 
@@ -253,8 +268,8 @@ def find_highlights(wd: Path, max_clips: int = 12, min_len: float = 20,
     for (i, j), rate in zip(spans, rates):
         a, b = sents[i], sents[j]
         w0, w1, start, end = a["w0"], b["w1"], a["start"], b["end"]
-        if short:
-            start, end = 0.0, duration
+        if whole:
+            start, end = whole
         n = w1 - w0 + 1
         f = {"speech_rate": _clamp(0.5 + (rate / med_rate - 1)),
              "hook": hooks[i],
@@ -297,7 +312,8 @@ def find_highlights(wd: Path, max_clips: int = 12, min_len: float = 20,
     for n, (raw, start, end, i, j, f) in enumerate(picked, 1):
         s = sents[i]
         out.append({"id": f"h{n:02d}", "start": round(start, 3), "end": round(end, 3),
-                    "w0": 0 if short else s["w0"], "w1": len(words) - 1 if short else sents[j]["w1"], "score": int(max(0, min(100, round(100 * raw)))),
+                    "w0": 0 if whole else s["w0"], "w1": len(words) - 1 if whole else sents[j]["w1"],
+                    "score": int(max(0, min(100, round(100 * raw)))),
                     "title": make_title(words[s["w0"]:s["w1"] + 1]),
                     "features": {k: round(f[k], 3) for k in WEIGHTS}})
     progress("highlights", 100, f"{len(out)} highlights")

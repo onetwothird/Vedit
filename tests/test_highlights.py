@@ -138,15 +138,23 @@ def test_short_video_is_one_clip(short_wd):                      # 14 s of speec
     assert hs[0]["end"] == 15.0 and hs[0]["w0"] == 0
 
 
-def test_short_speech_in_long_video_uses_windows(short_speech_long_video_wd):
-    tr = load_json(short_speech_long_video_wd / "transcript.main.json")
-    starts = {s["w0"] for s in tr["sentences"]}
-    ends = {s["w1"]: s["end"] for s in tr["sentences"]}
-    hs, why = find_highlights(short_speech_long_video_wd)
-    assert why is None and len(hs) >= 2                           # old speech-span rule gave one forced clip
-    for h in hs:                                                  # sentence-bounded, not [0, duration]
-        assert h["w0"] in starts and h["w1"] in ends and h["end"] == round(ends[h["w1"]], 3)
-        assert h["end"] < 120.0
+def test_short_speech_in_long_video_is_one_padded_clip(short_speech_long_video_wd):
+    words = load_json(short_speech_long_video_wd / "transcript.main.json")["words"]
+    hs, why = find_highlights(short_speech_long_video_wd)          # ~13 s of speech in a 120 s video
+    assert why is None and len(hs) == 1
+    h = hs[0]
+    assert h["w0"] == 0 and h["w1"] == len(words) - 1
+    assert h["start"] <= words[0]["start"] and h["end"] >= words[-1]["end"]
+    assert 0 <= h["start"] and h["end"] <= 120.0 and h["end"] - h["start"] >= min(20, 120.0) - 1e-6
+
+
+def test_padding_is_even_and_clamped():
+    from highlights import _padded
+    assert _padded(10, 20, 20, 0, 100) == (5, 25)
+    assert _padded(2, 12, 20, 0, 100) == (0, 20)
+    assert _padded(2, 12, 40, 0, 30) == (0, 30)                    # both sides clamped: the whole video                  # start side clamped, end takes the rest
+    assert _padded(90, 98, 20, 0, 100) == (80, 100)               # end side clamped, start takes the rest
+
 
 
 def test_three_hour_video_fast_and_spread(long_wd):              # synthetic 3 h transcript, no audio
