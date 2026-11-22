@@ -111,3 +111,31 @@ def pipeline_workdir_9x16(talking, sample_edl, tmp_path_factory):
     e["captions"] = {**(e.get("captions") or {}), "style": "pop"}
     p.write_text(json.dumps(e))
     return d
+
+
+def _variant(base, tmp_path_factory, name, captions, speakers=False):
+    """Copy of a pipeline workdir with a captions block (and optionally speaker-tagged words)."""
+    d = tmp_path_factory.mktemp(name)
+    for f in base.glob("*.json"):
+        shutil.copy(f, d / f.name)
+    e = json.loads((d / "edl.json").read_text())
+    e["captions"] = {**(e.get("captions") or {}), **captions}
+    (d / "edl.json").write_text(json.dumps(e))
+    if speakers:
+        tp = d / "transcript.main.json"
+        t = json.loads(tp.read_text())
+        for i, w in enumerate(t["words"]):
+            w["speaker"] = "maria" if (i // 4) % 2 == 0 else "narrator"
+        tp.write_text(json.dumps(t))
+    return d
+
+
+@pytest.fixture(scope="session")
+def pipeline_workdir_box(pipeline_workdir, tmp_path_factory):
+    return _variant(pipeline_workdir, tmp_path_factory, "wdbox", {"style": "box"})
+
+
+@pytest.fixture(scope="session")
+def pipeline_workdir_speakers(pipeline_workdir, tmp_path_factory):
+    return _variant(pipeline_workdir, tmp_path_factory, "wdspk", {
+        "style": "pop", "speaker_colors": {"maria": "#ff6fb5", "narrator": "#ffd400"}}, speakers=True)
