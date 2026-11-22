@@ -51,12 +51,16 @@ def test_status_empty(mdir):
                                "large-v3": {"installed": False, "size_mb": 3090}}
 
 
-def test_installed_needs_both_files(mdir):
+def test_installed_needs_sentinel_and_files(mdir):
     (mdir / "small").mkdir(parents=True)
     (mdir / "small" / "model.bin").write_bytes(b"x")
     assert not models.is_installed("small")
     (mdir / "small" / "config.json").write_text("{}")
+    assert not models.is_installed("small")  # both files but no sentinel: an interrupted download
+    models._mark_complete("small")
     assert models.is_installed("small") and models.status()["small"]["installed"]
+    (mdir / "small" / "model.bin").unlink()
+    assert not models.is_installed("small")
 
 
 def test_download_emits_progress_ending_at_100(mdir, monkeypatch, capsys):
@@ -86,6 +90,26 @@ def test_download_failure_propagates_without_100(mdir, monkeypatch, capsys):
     with pytest.raises(RuntimeError):
         models.download("small")
     assert all(r["pct"] < 100 for r in pcts(capsys))
+
+
+def test_interrupted_download_is_not_installed(mdir, monkeypatch):
+    def partial(repo, local_dir=None, **kw):
+        (Path(local_dir) / "model.bin").write_bytes(b"x")
+        (Path(local_dir) / "config.json").write_text("{}")
+        raise ConnectionError("dropped midway")
+    install_fake_hub(monkeypatch, partial)
+    with pytest.raises(ConnectionError):
+        models.download("small")
+    assert not models.is_installed("small") and not (mdir / "small" / models.SENTINEL).exists()
+
+
+def test_download_writes_sentinel_and_delete_removes_it(mdir, monkeypatch):
+    install_fake_hub(monkeypatch, fake_snapshot())
+    models.download("small")
+    meta = json.loads((mdir / "small" / models.SENTINEL).read_text())
+    assert meta["repo"] == models.MODELS["small"]["repo"] and meta["finished"]
+    models.delete("small")
+    assert not (mdir / "small").exists() and not models.is_installed("small")
 
 
 def test_unknown_name_rejected(mdir):
@@ -133,6 +157,7 @@ def test_transcribe_loads_local_folder_when_installed(mdir, monkeypatch):
     (mdir / "small").mkdir()
     for f in models.REQUIRED_FILES:
         (mdir / "small" / f).write_bytes(b"x")
+    models._mark_complete("small")
     attempt()
     assert seen[0][0] == "small" and seen[0][1]["download_root"] == str(mdir)
     assert seen[-1][0] == str(mdir / "small") and "download_root" not in seen[-1][1]

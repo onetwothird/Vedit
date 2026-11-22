@@ -16,6 +16,7 @@ import os
 import shutil
 import sys
 import threading
+from datetime import datetime, timezone
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent))
@@ -26,6 +27,7 @@ MODELS = {
     "large-v3": {"repo": "Systran/faster-whisper-large-v3", "size_mb": 3090, "for": ["tl", "taglish"]},
 }
 REQUIRED_FILES = ("model.bin", "config.json")
+SENTINEL = ".vedit-complete"  # written only after a download finished; a partial folder never has it
 POLL_SECONDS = 0.5
 
 
@@ -44,7 +46,12 @@ def _check(name: str) -> None:
 
 def is_installed(name: str) -> bool:
     folder = model_dir() / name
-    return name in MODELS and all((folder / f).is_file() for f in REQUIRED_FILES)
+    return name in MODELS and (folder / SENTINEL).is_file() and all((folder / f).is_file() for f in REQUIRED_FILES)
+
+
+def _mark_complete(name: str) -> None:
+    row = {"repo": MODELS[name]["repo"], "finished": datetime.now(timezone.utc).isoformat()}
+    (model_dir() / name / SENTINEL).write_text(json.dumps(row), encoding="utf-8")
 
 
 def status() -> dict[str, dict]:
@@ -84,6 +91,7 @@ def download(name: str) -> Path:
     finally:
         stop.set()
         t.join()
+    _mark_complete(name)
     progress("model", 100, f"{name} ready")
     return target
 

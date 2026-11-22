@@ -6,6 +6,7 @@ import shutil
 import subprocess
 import sys
 import threading
+import time
 from pathlib import Path
 
 import pytest
@@ -458,14 +459,42 @@ def test_ai_key_never_persisted(client, auth, app, fake_queue, analyzed_project,
     assert not any(KEY in p.read_text(errors="ignore") for p in all_files(tmp_path))
 
 
+def ws_receive(ws, timeout=5.0):
+    """receive_json with a deadline: a stuck server fails the test instead of hanging it."""
+    box = {}
+
+    def go():
+        try:
+            box["msg"] = ws.receive_json()
+        except BaseException as e:  # noqa: BLE001 - re-raised in the test thread
+            box["err"] = e
+
+    t = threading.Thread(target=go, daemon=True)
+    t.start()
+    t.join(timeout)
+    assert not t.is_alive(), f"no websocket message within {timeout}s"
+    if "err" in box:
+        raise box["err"]
+    return box["msg"]
+
+
+def wait_clients(engine, n, timeout=5.0):
+    deadline = time.monotonic() + timeout
+    while len(engine._clients) < n:
+        assert time.monotonic() < deadline, "server never registered the websocket client"
+        time.sleep(0.01)
+
+
 def test_events_websocket(client, auth, app, fake_queue, analyzed_project):
+    engine = app.state.engine
     with client.websocket_connect(f"/events?token={TOKEN}") as ws:
+        wait_clients(engine, 1)  # registered before the event is triggered
         job = client.post(f"/projects/{analyzed_project['id']}/analyze", headers=auth, json={}).json()
-        app.state.engine.wait_idle()
-        msg = ws.receive_json()
+        engine.wait_idle()
+        msg = ws_receive(ws)
         assert msg["type"] == "job" and msg["job"]["id"] == job["id"] and msg["job"]["state"] == "queued"
     with client.websocket_connect(f"/events?token={TOKEN}") as ws:  # reconnect: snapshot of what is active
-        msg = ws.receive_json()
+        msg = ws_receive(ws)
         assert msg["job"]["id"] == job["id"] and msg["job"]["state"] == "queued"
     fake_queue.emit(job["id"], state="cancelled")
     app.state.engine.wait_idle()
@@ -655,6 +684,7 @@ def test_model_delete_and_busy(client, auth, app, fake_queue, tmp_path, monkeypa
     (tmp_path / "m" / "small").mkdir(parents=True)
     for f in models.REQUIRED_FILES:
         (tmp_path / "m" / "small" / f).write_bytes(b"x")
+    models._mark_complete("small")
     job = client.post("/models/large-v3/download", headers=auth).json()
     app.state.engine.wait_idle()
     busy = client.delete("/models/small", headers=auth)
