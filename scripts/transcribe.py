@@ -15,6 +15,7 @@ import tempfile
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent))
+import models  # noqa: E402
 from common import (FILLER_PHRASES, FILLERS_HARD, FILLERS_SOFT, die, ffmpeg_bin, need, norm_word,  # noqa: E402
                     progress, run, save_json, ts, workdir_for)
 
@@ -91,7 +92,11 @@ def transcribe_words(wav: str, model_name: str, language: str | None, keep_fille
 
         def run(device, compute):
             print(f"[transcribe] faster-whisper model={model_name} device={device}", file=sys.stderr)
-            model = WhisperModel(model_name, device=device, compute_type=compute)
+            if models.is_installed(model_name):  # managed download (Studio): load the local folder
+                model = WhisperModel(str(models.model_dir() / model_name), device=device, compute_type=compute)
+            else:  # plain CLI: faster-whisper downloads into the same managed folder
+                model = WhisperModel(model_name, device=device, compute_type=compute,
+                                     download_root=str(models.model_dir()))
             segs, info = model.transcribe(audio if audio is not None else wav, language=language, word_timestamps=True,
                                           initial_prompt=prompt, vad_filter=False, condition_on_previous_text=False, beam_size=5)
             words = []

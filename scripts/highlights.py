@@ -2,6 +2,7 @@
 """Find the best 20-90 s moments in a long video, offline (no AI service).
 
   vedit highlights VIDEO [--max 12] [--json] [--ai anthropic|openai [--ai-model M]]
+  vedit highlights VIDEO --framing     subject crop per highlight -> <workdir>/framing.json
 
 Needs `vedit analyze VIDEO` first (transcript.main.json + analysis.main.json in the work dir).
 Writes <workdir>/highlights.json and prints a ranked table.
@@ -347,6 +348,24 @@ def _apply_ai(wd: Path, hs: list[Highlight], provider: str, model: str | None, m
         return hs, "ai_failed"
 
 
+def write_framing(video: Path, wd: Path) -> dict:
+    """reframe.detect_crop_x for every highlight in wd/highlights.json -> wd/framing.json {id: {crop_x, face}}."""
+    from reframe import detect_crop_x
+    hp = wd / "highlights.json"
+    data = load_json(hp) if hp.is_file() else {}
+    hs = data.get("highlights") or []
+    src = str(data.get("source") or video)
+    out: dict[str, dict] = {}
+    progress("framing", 0, "Finding faces")
+    for n, h in enumerate(hs, 1):
+        crop_x, face = detect_crop_x(src, float(h["start"]), float(h["end"]))
+        out[h["id"]] = {"crop_x": float(crop_x), "face": bool(face)}
+        progress("framing", 100 * n / len(hs), f"Framed {n}/{len(hs)}")
+    save_json(out, wd / "framing.json")
+    progress("framing", 100, f"{len(out)} clips framed")
+    return out
+
+
 def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("video", help="source video (or its .edit work dir)")
@@ -358,9 +377,15 @@ def main():
                     help="re-rank with your own key (env VEDIT_AI_KEY); only transcript text is sent")
     ap.add_argument("--ai-model", default=None, help="model name for --ai (default: provider's default)")
     ap.add_argument("--json", action="store_true", help="print the result as JSON")
+    ap.add_argument("--framing", action="store_true",
+                    help="instead of ranking: find the subject crop for each highlight in highlights.json")
     a = ap.parse_args()
 
     wd = Path(a.video) if Path(a.video).is_dir() else workdir_for(a.video, a.out)
+    if a.framing:
+        fr = write_framing(Path(a.video), wd)
+        print(f"[highlights] framed {len(fr)} clips -> {wd / 'framing.json'}")
+        return
     hs, why = find_highlights(wd, a.max, a.min_len, a.max_len)
     if a.ai and hs:
         hs, why = _apply_ai(wd, hs, a.ai, a.ai_model, a.max, a.min_len, a.max_len)

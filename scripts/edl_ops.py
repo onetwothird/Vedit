@@ -13,7 +13,7 @@ from typing import Literal
 sys.path.insert(0, str(Path(__file__).parent))
 from autocut import make_edl  # noqa: E402
 from common import load_json, parse_time  # noqa: E402
-from edl import DEFAULT_PAD, word_range  # noqa: E402
+from edl import DEFAULT_PAD, clip_span, word_range  # noqa: E402
 from highlights import Highlight  # noqa: E402
 from presets import make_edl_kwargs  # noqa: E402
 
@@ -27,8 +27,9 @@ def clip_edl(wd: Path, h: Highlight, preset: str, language: str | None, brand: P
     if (wd / "transcript.main.json").exists():
         edl["clips"] = _clamp_words(edl["clips"], h["w0"], h["w1"])
     else:
-        edl["clips"] = _clamp_time(edl["clips"], h["start"], h["end"]) or [
-            {"src": "main", "in": h["start"], "out": h["end"]}]
+        edl["clips"] = _clamp_time(edl["clips"], h["start"], h["end"])
+    if not edl["clips"]:
+        raise ValueError(f"highlight {h['id']} has no speech left after cuts")
     edl["output"]["path"] = ""
     if language is not None:
         edl["captions"]["language"] = language
@@ -76,8 +77,14 @@ def _split_words(clips: list[dict], w0: int, w1: int) -> list[dict]:
     return out
 
 
+def _check_range(w0: int, w1: int) -> None:
+    if w0 < 0 or w1 < 0 or w0 > w1:
+        raise ValueError(f"invalid word range [{w0},{w1}]")
+
+
 def cut_words(edl: dict, w0: int, w1: int) -> dict:
-    """Remove words w0..w1 (inclusive) from the edit."""
+    """Remove words w0..w1 (inclusive) from the edit. Raises ValueError for a negative or reversed range."""
+    _check_range(w0, w1)
     e = deepcopy(edl)
     e["clips"] = _split_words(e["clips"], w0, w1)
     return e
@@ -85,6 +92,7 @@ def cut_words(edl: dict, w0: int, w1: int) -> dict:
 
 def restore_words(edl: dict, w0: int, w1: int) -> dict:
     """Put words w0..w1 back as a words clip in source order, merging neighbours that become contiguous."""
+    _check_range(w0, w1)
     e = deepcopy(edl)
     clips = e["clips"]
     words = [(i, c) for i, c in enumerate(clips) if "words" in c]
@@ -109,7 +117,8 @@ def restore_words(edl: dict, w0: int, w1: int) -> dict:
 
 
 def trim(edl: dict, w_first: int, w_last: int) -> dict:
-    """Keep only words w_first..w_last (inclusive)."""
+    """Keep only words w_first..w_last (inclusive). Raises ValueError for a negative or reversed range."""
+    _check_range(w_first, w_last)
     e = deepcopy(edl)
     e["clips"] = [c for c in e["clips"] if "words" not in c or (c["words"][1] >= w_first and c["words"][0] <= w_last)]
     e["clips"] = [{**c, "words": [max(c["words"][0], w_first), min(c["words"][1], w_last)]} if "words" in c else c
@@ -143,17 +152,17 @@ def patch_section(edl: dict, section: Section, patch: dict) -> dict:
 
 
 def kept_ranges(edl: dict, transcript: dict) -> list[tuple[float, float]]:
-    """Source-time (start, end) of each clip in play order, with the edl's pad applied as edl.Timeline does.
-
-    Timeline additionally snaps each clip's length to whole output frames; that is not applied here.
-    """
+    """Source-time (start, end) of each clip in play order, exactly as edl.Timeline resolves them (pad applied, clip
+    length snapped to whole frames of edl["output"]["fps"], default 30). Raises ValueError where Timeline would die."""
     W = transcript.get("words")
+    fps = (edl.get("output") or {}).get("fps", 30)
     out = []
     for c in edl.get("clips", []):
         if "words" in c:
             pad = tuple(c.get("pad", edl.get("pad", DEFAULT_PAD)))
-            out.append(word_range(W, int(c["words"][0]), int(c["words"][1]), pad, c.get("src", "main")))
+            tin, tout = word_range(W, int(c["words"][0]), int(c["words"][1]), pad, c.get("src", "main"))
         else:
             tin = parse_time(c.get("in", 0))
-            out.append((tin, parse_time(c["out"]) if "out" in c else float(transcript.get("duration", tin))))
+            tout = parse_time(c["out"]) if "out" in c else float(transcript.get("duration", tin))
+        out.append((tin, clip_span(tin, tout, float(c.get("speed", 1.0)), fps)[1]))
     return out

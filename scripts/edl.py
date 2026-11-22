@@ -26,9 +26,9 @@ def is_image(path: str, info: dict) -> bool:
 def word_range(W: list[dict] | None, a: int, b: int, pad, alias: str = "main") -> tuple[float, float]:
     """Source-time span of words a..b with the clip pad applied, clamped to the midpoint of the neighbouring gaps."""
     if not W:
-        die(f"clip uses 'words' but no transcript for '{alias}' (run analyze.py/transcribe.py)")
+        raise ValueError(f"clip uses 'words' but no transcript for '{alias}' (run analyze.py/transcribe.py)")
     if not (0 <= a <= b < len(W)):
-        die(f"word range [{a},{b}] out of bounds for '{alias}' (0..{len(W) - 1})")
+        raise ValueError(f"word range [{a},{b}] out of bounds for '{alias}' (0..{len(W) - 1})")
     p0, p1 = pad
     start = W[a]["start"] - p0
     if a > 0:
@@ -39,8 +39,18 @@ def word_range(W: list[dict] | None, a: int, b: int, pad, alias: str = "main") -
     return max(0.0, start), end
 
 
+def clip_span(tin: float, tout: float, speed: float, fps: int | float) -> tuple[float, float]:
+    """(output duration, source end) of a clip once its length is snapped to whole output frames."""
+    if tout <= tin:
+        raise ValueError(f"out ({tout}) <= in ({tin})")
+    frames = max(1, round((tout - tin) / speed * fps))
+    dur = frames / fps
+    return dur, tin + dur * speed
+
+
 class Timeline:
-    def __init__(self, edl_path: str | Path, aspect: str | None = None):
+    def __init__(self, edl_path: str | Path, aspect: str | None = None, probe=None):
+        self._probe = probe or ffprobe  # callers that rebuild timelines often (Studio server) pass a cached probe
         self.path = Path(edl_path).resolve()
         self.dir = self.path.parent
         self.edl = load_json(self.path)
@@ -73,7 +83,7 @@ class Timeline:
             s["path"] = self._abs(s["path"])
             if not Path(s["path"]).exists():
                 die(f"source '{alias}' not found: {s['path']}")
-            s["info"] = ffprobe(s["path"])
+            s["info"] = self._probe(s["path"])
             s["is_image"] = is_image(s["path"], s["info"])
             s["synced"] = "offset" in s and alias != self.ref_alias(srcs)
             s["offset"] = float(s.get("offset", 0.0))
@@ -117,7 +127,10 @@ class Timeline:
 
     # ---------- clips ----------
     def _word_range(self, alias: str, a: int, b: int, pad) -> tuple[float, float]:
-        return word_range(self.words_for(alias), a, b, pad, alias)
+        try:
+            return word_range(self.words_for(alias), a, b, pad, alias)
+        except ValueError as e:
+            die(str(e))
 
     def _resolve_clips(self):
         raw = list(self.edl.get("clips") or [])
@@ -146,11 +159,11 @@ class Timeline:
                     tout = tin + float(c.get("duration", 3.0))
                 else:
                     tout = s["info"]["duration"] - (s["offset"] if s["synced"] else 0)
-            if tout <= tin:
-                die(f"clip {i}: out ({tout}) <= in ({tin})")
             speed = float(c.get("speed", 1.0))
-            frames = max(1, round((tout - tin) / speed * fps))
-            dur = frames / fps
+            try:
+                dur, _ = clip_span(tin, tout, speed, fps)
+            except ValueError as e:
+                die(f"clip {i}: {e}")
             # video source time
             vin = tin + (s["offset"] if s["synced"] else 0.0)
             # audio source
@@ -173,7 +186,7 @@ class Timeline:
     def _as_clip(self, v) -> dict:
         v = {"path": v} if isinstance(v, str) else dict(v)
         alias = f"_bumper{len(self.sources)}"
-        info = ffprobe(self._abs(v["path"]))
+        info = self._probe(self._abs(v["path"]))
         self.sources[alias] = {"path": self._abs(v["path"]), "info": info, "synced": False, "offset": 0.0,
                                "transcript": None, "is_image": is_image(v["path"], info)}
         return {"src": alias, "in": v.get("in", 0), **({"out": v["out"]} if "out" in v else {}),

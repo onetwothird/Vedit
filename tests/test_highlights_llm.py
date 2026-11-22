@@ -63,6 +63,14 @@ def test_reranks_and_snaps_to_words():
     assert 20 <= h["end"] - h["start"] <= 90
 
 
+def test_unsafe_ids_are_skipped():
+    clips = [{"id": "../../x", "title": "evil", "start": 61.5, "end": 98.5},
+             {"id": "a" * 33, "title": "long", "start": 61.5, "end": 98.5},
+             {"id": "h01", "title": "ok", "start": 0.0, "end": 30.0}]
+    out, err = rank_with_llm(_transcript(), _cands(), "openai", "k", http=_client(lambda r: _openai_reply(clips)))
+    assert err is None and [h["id"] for h in out] == ["h01"]
+
+
 def test_scores_are_rescaled_by_rank():
     clips = [{"id": "h03", "title": "a", "start": 61.5, "end": 98.5},
              {"id": "h01", "title": "b", "start": 0.0, "end": 30.0}]

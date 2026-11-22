@@ -15,21 +15,21 @@ import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent))
-from common import ffmpeg_bin, ffprobe 
+from common import ffmpeg_bin, ffprobe
 
 _warned = False
 
 
 def _detector():
     try:
-        import cv2 
-        import numpy 
+        import cv2
+        import numpy  # noqa: F401 - only checking it is installed
     except ImportError:
         return None, None
     base = getattr(getattr(cv2, "data", None), "haarcascades", "") or ""
     for name in ("haarcascade_frontalface_default.xml", "haarcascade_frontalface_alt2.xml"):
         p = Path(base) / name
-        if p.exists() and hasattr(cv2, "CascadeClassifier"): 
+        if p.exists() and hasattr(cv2, "CascadeClassifier"):
             try:
                 return cv2, cv2.CascadeClassifier(str(p))
             except Exception:
@@ -38,6 +38,11 @@ def _detector():
 
 
 def auto_crop_x(video: str, start: float, end: float, samples: int = 7) -> float:
+    return detect_crop_x(video, start, end, samples)[0]
+
+
+def detect_crop_x(video: str, start: float, end: float, samples: int = 7) -> tuple[float, bool]:
+    """(crop_x, face): the subject's horizontal centre 0..1, and whether a face was actually seen."""
     global _warned
     cv2, det = _detector()
     if det is None:
@@ -45,7 +50,7 @@ def auto_crop_x(video: str, start: float, end: float, samples: int = 7) -> float
             print("[reframe] OpenCV face detector unavailable -> crop_x=0.5 (pip install opencv-python)",
                   file=sys.stderr)
             _warned = True
-        return 0.5
+        return 0.5, False
     import numpy as np
     info = ffprobe(video)
     w, h = info["width"], info["height"]
@@ -64,7 +69,7 @@ def auto_crop_x(video: str, start: float, end: float, samples: int = 7) -> float
         if len(faces):
             x, y, fw, fh = max(faces, key=lambda f: f[2] * f[3])
             xs.append((x + fw / 2) / sw)
-    return round(float(np.median(xs)), 3) if xs else 0.5
+    return (round(float(np.median(xs)), 3), True) if xs else (0.5, False)
 
 
 def main():

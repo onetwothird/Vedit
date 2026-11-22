@@ -5,6 +5,7 @@
   python render.py edl.json --preview    # half-res, fast — use while iterating
   python render.py edl.json --clips 0-12 # only part of the timeline (quick checks)
   python render.py edl.json --formats 9:16,1:1   # same edit, extra aspect ratios (face-tracked crops)
+  python render.py edl.json --crf 18     # higher quality final encode
 
 Pass 1 renders every clip to a cached segment (re-renders only clips you changed).
 Pass 2 joins them and applies overlays/b-roll, captions, music ducking, voice polish and loudness.
@@ -333,6 +334,8 @@ def write_chapters(tl: Timeline, out: Path) -> Path | None:
 
 def render_one(edl: str, aspect: str | None, a) -> Path:
     tl = Timeline(edl, aspect=aspect)
+    if getattr(a, "crf", None) is not None:
+        tl.out["crf"] = a.crf
     if a.preview:
         tl.out["width"], tl.out["height"] = even(tl.out["width"] / 2), even(tl.out["height"] / 2)
     if a.clips:
@@ -373,6 +376,7 @@ def main():
     ap.add_argument("--clips", help="render only a clip range, e.g. 0-12")
     ap.add_argument("--formats", help="also export other aspect ratios from the same edit, e.g. 9:16,1:1")
     ap.add_argument("--out", help="override output path")
+    ap.add_argument("--crf", type=int, default=None, help="final x264 quality (lower = better; default from the edl, 20)")
     ap.add_argument("--jobs", type=int, default=max(1, (os.cpu_count() or 2) // 2))
     a = ap.parse_args()
     need("ffmpeg")

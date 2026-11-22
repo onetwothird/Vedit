@@ -17,6 +17,7 @@ from highlights import Highlight  # noqa: E402
 
 DEFAULT_MODELS = {"anthropic": "claude-sonnet-5-5", "openai": "gpt-5"}
 TIMEOUT = 30.0
+HID_RE = re.compile(r"[A-Za-z0-9_-]{1,32}")  # highlight ids are used in file names
 TITLE_MAX = 120
 AI_FAILED = "ai_failed"
 
@@ -134,6 +135,8 @@ def rank_with_llm(transcript: dict, candidates: list[Highlight], provider: Liter
             if any(start < tb and ta < end for ta, tb in taken):
                 continue
             cid = str(c.get("id") or "")
+            if cid and not HID_RE.fullmatch(cid):  # ids become file names: never trust the model's
+                continue
             if cid in used or not cid:
                 cid = ""
             base = by_id.get(cid)
