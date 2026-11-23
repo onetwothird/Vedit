@@ -21,6 +21,12 @@
 }
 
 :root {
+  /* One corner scale for every screen: surfaces (cards, drop zone, stage), media (video, thumbnails, tile art),
+     controls (buttons, segmented pickers, icon buttons), chips (small labels, segmented options). */
+  --r-surface: 14px;
+  --r-media: 10px;
+  --r-control: 9px;
+  --r-chip: 6px;
   --page: #111;
   --panel: #17181b;
   --bg: #121315;

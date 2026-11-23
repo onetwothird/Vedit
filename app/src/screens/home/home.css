@@ -5,15 +5,15 @@
 /* Hero tile: the whole card is one link (one tab stop). */
 .mode-hero {
   display: grid; grid-template-columns: minmax(230px, 1fr) minmax(0, 680px); align-items: center; gap: 28px;
-  padding: 28px 28px 22px 30px; border-radius: 16px; border: 1px solid var(--line-2);
+  padding: 28px 28px 22px 30px; border-radius: var(--r-surface); border: 1px solid var(--line-2);
 }
 .mode-hero:hover { border-color: color-mix(in srgb, var(--accent) 45%, var(--line-2)); }
-.mode-hero:focus-visible { border-radius: 16px; }
+.mode-hero:focus-visible { border-radius: var(--r-surface); }
 .mode-hero .m-title, .mode-hero .m-desc { display: block; }
 .mode-hero .m-title { font: 600 22px/1.2 var(--sans); letter-spacing: -0.01em; color: var(--ink); }
 .mode-hero .m-desc { margin-top: 10px; max-width: 44ch; font-size: 13.5px; line-height: 1.55; color: var(--body); }
 .m-cta {
-  display: inline-block; margin-top: 22px; padding: 9px 16px; border-radius: 9px;
+  display: inline-flex; align-items: center; height: 36px; margin-top: 22px; padding: 0 16px; border-radius: var(--r-control);
   background: var(--accent); color: var(--accent-ink); font: 600 13px var(--sans);
 }
 .mode-hero:hover .m-cta { filter: brightness(1.08); }
@@ -78,7 +78,7 @@ html.light .art-bar.on { fill: #22a35a; }
 .art-time { font-family: var(--mono) !important; font-size: 10px; fill: var(--muted); }
 
 /* Coming-soon art: real photos, each tile composed around what that mode does. */
-.sa { container-type: inline-size; position: relative; height: 132px; margin-bottom: 12px; border-radius: 9px; overflow: hidden; background: var(--chip); }
+.sa { container-type: inline-size; position: relative; height: 132px; margin-bottom: 12px; border-radius: var(--r-media); overflow: hidden; background: var(--chip); }
 .sa img { display: block; width: 100%; height: 100%; object-fit: cover; }
 .sa-chip { position: absolute; top: 8px; right: 8px; padding: 1px 6px; border-radius: 4px; background: #000000b3; color: #fff; font-size: 10px; }
 
@@ -166,6 +166,3 @@ html.light .art-bar.on { fill: #22a35a; }
 }
 
 /* Big screens: give Home more room so the four tiles are not squeezed. */
-@media (min-width: 1400px) {
-  .content:has(> .home-modes), .content:has(.home-modes) { max-width: 1160px; }
-}
