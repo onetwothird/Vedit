@@ -48,14 +48,15 @@ export default function Home() {
       <h1 className="title">{t("home.title")}</h1>
       <ul className="home-modes" aria-label={t("home.tiles.label")}>
         <li>
-          <Link className="mode-hero" to="/p/new/import" data-tile>
-            <span>
+          {/* the whole card opens Import (the link stretches over it); the sound button sits on top of it */}
+          <div className="mode-hero">
+            <Link className="m-link" to="/p/new/import" data-tile>
               <span className="m-title">{t("home.tile.clip.title")}</span>
               <span className="m-desc">{t("home.tile.clip.desc")}</span>
               <span className="m-cta">{t("home.tile.clip.cta")}</span>
-            </span>
+            </Link>
             <ClipArt />
-          </Link>
+          </div>
         </li>
         <li>
           <ul className="mode-soon-row">

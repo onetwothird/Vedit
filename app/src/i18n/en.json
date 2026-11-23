@@ -447,5 +447,10 @@
   "topbar.demo.title": "This demo plays a sample clip, not your videos. To edit your own, start the real app: VEDIT_DEV_ENGINE=1 npm run tauri dev",
   "edit.frame.zoom.soft": "This video has no pixels to spare at this shape, so any zoom makes it softer. Automatic punch-ins are left out to keep it sharp.",
   "edit.frame.zoom.sharp": "Stays sharp up to {n}×. Automatic punch-ins stop there.",
-  "edit.frame.zoom.over": "Past {n}× this video starts to look soft."
+  "edit.frame.zoom.over": "Past {n}× this video starts to look soft.",
+  "home.sound": "Sound",
+  "home.sound.on": "Turn the sound on",
+  "home.sound.off": "Turn the sound off",
+  "home.sound.on.label": "Sound on",
+  "home.sound.off.label": "Play with sound"
 }
