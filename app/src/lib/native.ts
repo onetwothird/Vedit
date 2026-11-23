@@ -29,6 +29,16 @@ export async function pickVideoNative(): Promise<string | null> {
   return typeof res === "string" ? res : null;
 }
 
+export const AUDIO_EXTENSIONS = ["mp3", "m4a", "aac", "wav", "flac", "ogg", "opus"];
+export const AUDIO_ACCEPT = ["audio/*", ...AUDIO_EXTENSIONS.map((e) => `.${e}`)].join(",");
+
+/** The desktop file dialog for a music file. Resolves null when cancelled. Only call inside Tauri. */
+export async function pickAudioNative(): Promise<string | null> {
+  const { open } = await import("@tauri-apps/plugin-dialog");
+  const res = await open({ multiple: false, filters: [{ name: "Audio", extensions: AUDIO_EXTENSIONS }] });
+  return typeof res === "string" ? res : null;
+}
+
 export interface DropHandlers {
   onOver(over: boolean): void;
   onDrop(paths: string[]): void;

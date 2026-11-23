@@ -1,4 +1,5 @@
 import { HashRouter, Navigate, Route, Routes } from "react-router-dom";
+import Edit from "./screens/Edit";
 import Home from "./screens/Home";
 import Import from "./screens/Import";
 import Pick from "./screens/Pick";
@@ -12,7 +13,7 @@ export default function AppRouter() {
         <Route path="/" element={<Home />} />
         <Route path="/p/:id/import" element={<Import />} />
         <Route path="/p/:id/pick" element={<Pick />} />
-        <Route path="/p/:id/edit/:hid" element={<Placeholder titleKey="placeholder.edit" step={3} />} />
+        <Route path="/p/:id/edit/:hid" element={<Edit />} />
         <Route path="/p/:id/export" element={<Placeholder titleKey="placeholder.export" step={4} />} />
         <Route path="/settings" element={<Placeholder titleKey="placeholder.settings" />} />
         <Route path="*" element={<Navigate to="/" replace />} />

@@ -7,6 +7,7 @@ import {
   type ExportBody, type FilmstripInfo, type Health, type Highlight, type Job, type ModelStatus, type NewProjectBody, type Project,
   type ProjectClip, type RenderPlanEntry, type Transcript, type TranscriptWord,
 } from "./types";
+import { spelledAs } from "../edit/spelling";
 import { fixWord, patchSection } from "../edit/timeline";
 
 const CLIPS: [title: string, score: number, kept: boolean][] = [
@@ -127,29 +128,20 @@ function applyOp(edl: Edl, op: ClipOp): Edl {
 
 const SAMPLE_SEC = 12; // public/mock/sample.mp4 is this long; every mock clip plays from its start
 
-function clipView(edl: Edl, tr: Transcript): ClipView {
-  const ranges = wordRanges(edl);
-  // the mock source is one short sample, so a clip's times are made relative to its first word and held inside it
-  const base = ranges.length ? Math.floor(ranges[0][0] / PASSAGE_LEN) * CLIP_SPAN_SEC : 0;
-  const replace = ((edl.captions ?? {}) as { replace?: Record<string, string> }).replace ?? {};
-  const kept_ranges = ranges
-    .map(([a, b]) => [(tr.words[a]?.start ?? 0) - base, Math.min((tr.words[b]?.end ?? 0) - base, SAMPLE_SEC)] as [number, number])
-    .filter(([a, b]) => b > a);
-  const spoken: { text: string; start: number; end: number; speaker: string | null }[] = [];
-  let t = 0;
-  for (const [a, b] of ranges) {
-    for (let i = a; i <= b && i < tr.words.length; i++) {
-      const w = tr.words[i];
-      const dur = w.end - w.start;
-      if (w.filler !== "hard") {
-        spoken.push({ text: replace[w.text] ?? w.text, start: round(t), end: round(t + dur), speaker: w.speaker ?? null });
-        t += dur;
-      }
-    }
-  }
+/** The caption look and grouping the edl asks for, as scripts/captions.py _plan reads edl.captions. */
+function captionTrack(edl: Edl, spoken: { text: string; start: number; end: number; speaker: string | null }[]): CaptionTrack {
+  const cfg: Record<string, unknown> = { style: "pop", hide_fillers: true, ...((edl.captions ?? {}) as Record<string, unknown>) };
+  const style = String(cfg.style);
+  const clean = style === "clean";
+  const box = style === "box";
+  const aspect = String((edl.output as { aspect?: string } | undefined)?.aspect ?? "9:16");
+  const vertical = aspect === "9:16" || aspect === "4:5";
+  const maxWords = Number(cfg.max_words ?? (clean ? 10 : 3));
+  const pos = cfg.position ?? (clean ? "bottom" : "lower");
+  const baseline = typeof pos === "number" ? pos : ({ bottom: 0.07, lower: vertical ? 0.24 : 0.14, middle: 0.45 } as Record<string, number>)[String(pos)] ?? 0.14;
   const events = [];
-  for (let i = 0; i < spoken.length; i += 3) {
-    const g = spoken.slice(i, i + 3);
+  for (let i = 0; i < spoken.length; i += maxWords) {
+    const g = spoken.slice(i, i + maxWords);
     const end = g[g.length - 1].end + 0.15;
     events.push({
       start: g[0].start, end,
@@ -158,12 +150,39 @@ function clipView(edl: Edl, tr: Transcript): ClipView {
       })),
     });
   }
-  const captions: CaptionTrack = {
-    style: "pop", font: "Arial", size_frac: 0.0479, baseline_frac: 0.24, uppercase: true, color: "#FFFFFF",
-    highlight: "#FFD400", outline_frac: 0.0031, active_scale: 108, outline_color: "#000000", shadow: 1,
-    back_color: null, back_alpha: null, speaker_colors: {}, events,
+  return {
+    style, font: "Arial", size_frac: clean ? 0.0327 : 0.0479, baseline_frac: baseline,
+    uppercase: typeof cfg.uppercase === "boolean" ? cfg.uppercase : !clean, color: String(cfg.color ?? "#FFFFFF"),
+    highlight: String(cfg.highlight ?? "#FFD400"), outline_frac: 0.0031, active_scale: 108, outline_color: "#000000",
+    shadow: box ? 0 : 1, back_color: box ? "#000000" : null, back_alpha: box ? 0.5608 : null, speaker_colors: {}, events,
   };
-  return { edl: copy(edl), kept_ranges, captions };
+}
+
+function clipView(edl: Edl, tr: Transcript): ClipView {
+  const ranges = wordRanges(edl);
+  // the mock source is one short sample, so a clip's times are made relative to its first word and held inside it
+  const base = ranges.length ? Math.floor(ranges[0][0] / PASSAGE_LEN) * CLIP_SPAN_SEC : 0;
+  const replace = ((edl.captions ?? {}) as { replace?: Record<string, string> }).replace;
+  const hideFillers = ((edl.captions ?? {}) as { hide_fillers?: boolean }).hide_fillers !== false;
+  const mapped = ranges
+    .map(([a, b]) => [(tr.words[a]?.start ?? 0) - base, Math.min((tr.words[b]?.end ?? 0) - base, SAMPLE_SEC)] as [number, number]);
+  const kept_ranges = mapped.filter(([a, b]) => b > a);
+  // caption times follow the output: each range starts where the one before it ended
+  const spoken: { text: string; start: number; end: number; speaker: string | null }[] = [];
+  let t = 0;
+  ranges.forEach(([a, b], r) => {
+    const kr = mapped[r];
+    if (kr[1] <= kr[0]) return; // past the end of the sample
+    const s0 = kr[0] + base;
+    for (let i = a; i <= b && i < tr.words.length; i++) {
+      const w = tr.words[i];
+      if (w.start - base >= SAMPLE_SEC) break;
+      if (hideFillers && w.filler === "hard") continue;
+      spoken.push({ text: spelledAs(w.text, replace), start: round(t + w.start - s0), end: round(t + w.end - s0), speaker: w.speaker ?? null });
+    }
+    t += kr[1] - kr[0];
+  });
+  return { edl: copy(edl), kept_ranges, captions: captionTrack(edl, spoken) };
 }
 
 // ---- the engine -----------------------------------------------------------------------------------------------

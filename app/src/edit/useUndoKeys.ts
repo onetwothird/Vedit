@@ -6,14 +6,18 @@ interface UndoActions {
   redo: () => void;
 }
 
+// inputs with no text of their own to undo: Ctrl+Z there undoes the edit they just made
+const CHOICE_INPUTS = new Set(["radio", "checkbox", "range", "color", "button", "submit", "reset", "file"]);
+
 function typingTarget(t: EventTarget | null): boolean {
   const el = t as HTMLElement | null;
   if (!el || !el.tagName) return false;
-  return el.tagName === "INPUT" || el.tagName === "TEXTAREA" || el.tagName === "SELECT" || el.isContentEditable
+  return (el.tagName === "INPUT" && !CHOICE_INPUTS.has((el as HTMLInputElement).type)) || el.tagName === "TEXTAREA" || el.tagName === "SELECT" || el.isContentEditable
     || el.closest?.("[contenteditable]:not([contenteditable=false])") != null;
 }
 
-/** Ctrl/Cmd+Z undoes; Ctrl/Cmd+Shift+Z and Ctrl/Cmd+Y redo. Keys typed into a text field are left alone. */
+/** Ctrl/Cmd+Z undoes; Ctrl/Cmd+Shift+Z and Ctrl/Cmd+Y redo. Keys typed into a text field are left alone;
+ * a radio, checkbox, slider or colour control has no text to undo, so there they undo the edit. */
 export function useUndoKeys(actions: UndoActions = useClipStore.getState()): void {
   const { undo, redo } = actions;
   useEffect(() => {
