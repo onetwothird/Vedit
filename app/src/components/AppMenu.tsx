@@ -1,16 +1,19 @@
 import { useEffect, useId, useRef, useState } from "react";
-import { Link } from "react-router-dom";
+import { Link, useNavigate } from "react-router-dom";
+import { initials, useAuth } from "../auth/auth";
 import { t } from "../i18n/t";
 import { getTheme, setTheme, type Theme } from "../theme/theme";
 
-/** One header control for app-wide things (like the account/menu button in CapCut and Descript):
-    a popover with the Dark / Light appearance switch and a link to Settings. */
+/** One header control for app-wide things (like the account button in CapCut and Descript): the account
+    (or Sign in), the Dark / Light appearance switch, Settings and Sign out. */
 export default function AppMenu() {
   const [open, setOpen] = useState(false);
   const [theme, setThemeState] = useState<Theme>(getTheme);
   const root = useRef<HTMLDivElement>(null);
   const button = useRef<HTMLButtonElement>(null);
   const panelId = useId();
+  const navigate = useNavigate();
+  const { account, signOut } = useAuth();
 
   useEffect(() => {
     if (!open) return;
@@ -53,17 +56,32 @@ export default function AppMenu() {
         title={t("menu.label")}
         onClick={() => setOpen((o) => !o)}
       >
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" aria-hidden="true">
-          <path d="M4 7h10M18 7h2M4 17h4M12 17h8" />
-          <circle cx="16" cy="7" r="2" />
-          <circle cx="10" cy="17" r="2" />
-        </svg>
+        {account ? (
+          <span className="avatar" aria-hidden="true">{initials(account.name)}</span>
+        ) : (
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" aria-hidden="true">
+            <circle cx="12" cy="8.5" r="3.5" />
+            <path d="M5 19.5c1.2-3.3 3.8-5 7-5s5.8 1.7 7 5" />
+          </svg>
+        )}
         <svg className="chev" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
           <path d="m7 10 5 5 5-5" />
         </svg>
       </button>
       {open && (
         <div className="menu-panel" id={panelId} role="group" aria-label={t("menu.label")}>
+          {account ? (
+            <div className="menu-account">
+              <span className="avatar lg" aria-hidden="true">{initials(account.name)}</span>
+              <span className="who">
+                <span className="who-name">{account.name}</span>
+                <span className="who-email" title={account.email}>{account.email}</span>
+                <span className={`plan ${account.plan}`}>{t(`menu.plan.${account.plan}`)}</span>
+              </span>
+            </div>
+          ) : (
+            <Link className="primary menu-signin" to="/signin" onClick={() => setOpen(false)}>{t("menu.account.signin")}</Link>
+          )}
           <fieldset className="menu-section">
             <legend>{t("menu.appearance")}</legend>
             <div className="seg seg-full">
@@ -82,6 +100,22 @@ export default function AppMenu() {
             </svg>
             {t("topbar.settings")}
           </Link>
+          {account && (
+            <button
+              type="button"
+              className="menu-item"
+              onClick={async () => {
+                setOpen(false);
+                await signOut();
+                navigate("/signin");
+              }}
+            >
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                <path d="M15 4h3a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2h-3M10 16l-4-4 4-4M6 12h10" />
+              </svg>
+              {t("menu.account.signout")}
+            </button>
+          )}
         </div>
       )}
     </div>

@@ -4,6 +4,7 @@ import Home from "./screens/Home";
 import Import from "./screens/Import";
 import Pick from "./screens/Pick";
 import Placeholder from "./screens/Placeholder";
+import SignIn from "./screens/SignIn";
 
 // HashRouter: a reload inside the desktop app never asks the file server for a route.
 export default function AppRouter() {
@@ -11,6 +12,7 @@ export default function AppRouter() {
     <HashRouter>
       <Routes>
         <Route path="/" element={<Home />} />
+        <Route path="/signin" element={<SignIn />} />
         <Route path="/p/:id/import" element={<Import />} />
         <Route path="/p/:id/pick" element={<Pick />} />
         <Route path="/p/:id/edit/:hid" element={<Edit />} />

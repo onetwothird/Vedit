@@ -1,7 +1,6 @@
 {
   "app.name": "vedit",
   "export.button": "Export {n} clips",
-
   "steps.label": "Steps",
   "step.import": "Import",
   "step.pick": "Pick clips",
@@ -14,7 +13,6 @@
   "menu.appearance": "Appearance",
   "menu.theme.dark": "Dark",
   "menu.theme.light": "Light",
-
   "home.title": "What are you making?",
   "home.tiles.label": "Project types",
   "home.soon": "Coming soon",
@@ -36,7 +34,6 @@
   "home.recent.clips.one": "{n} clip",
   "home.recent.clips.other": "{n} clips",
   "home.recent.noclips": "Not analyzed yet",
-
   "import.title": "Import a video",
   "import.drop.label": "Video file",
   "import.drop.title": "Drop a video here",
@@ -75,7 +72,6 @@
   "import.retry": "Try again",
   "import.missing": "This project isn't available.",
   "import.home": "Back to home",
-
   "pick.title": "Pick clips",
   "pick.list": "Clips",
   "pick.preview": "Selected clip",
@@ -106,20 +102,17 @@
   "player.note.look": "Music and color are applied on export.",
   "player.note.bumpers": "Intro and outro are added on export.",
   "pick.error.reload": "Couldn't load the new clips. Reopen this project to see them.",
-
   "clips.sort": "Sort clips",
   "clips.sort.best": "Best first",
   "clips.sort.order": "In order",
   "clips.score": "Score {n} out of 100",
   "clips.keep": "Keep {title}",
-
   "placeholder.pick": "Pick clips",
   "placeholder.edit": "Edit",
   "placeholder.export": "Export",
   "placeholder.settings": "Settings",
   "placeholder.clips": "{n} clips found",
   "placeholder.soon": "This screen is coming soon.",
-
   "edit.title": "Edit",
   "edit.missing": "This clip isn't available.",
   "edit.back": "Back to Pick clips",
@@ -212,5 +205,33 @@
   "edit.tl.cut": "Cut",
   "edit.tl.music.on": "{name} · ducks under speech",
   "edit.tl.music.none": "No music",
-  "edit.tl.playhead": "Playhead"
+  "edit.tl.playhead": "Playhead",
+  "signin.show": "Long videos in. Ready-to-post Reels, Shorts and TikToks out.",
+  "signin.title": "Sign in to vedit",
+  "signup.title": "Create your vedit account",
+  "signin.sub": "Your license, caption styles and templates stay with your account.",
+  "signin.google": "Continue with Google",
+  "signin.facebook": "Continue with Facebook",
+  "signin.or": "or use your email",
+  "signin.email": "Email",
+  "signin.password": "Password",
+  "signup.name": "Name",
+  "signup.password.hint": "At least {n} characters.",
+  "signin.submit": "Sign in",
+  "signup.submit": "Create account",
+  "signin.new": "New to vedit?",
+  "signin.create": "Create an account",
+  "signup.have": "Already have an account?",
+  "signup.signin": "Sign in",
+  "signin.skip": "Skip for now",
+  "auth.error.not_configured": "Accounts aren't connected in this build yet. Choose Skip for now to keep working.",
+  "auth.error.invalid_email": "Enter an email address like name@example.com.",
+  "auth.error.weak_password": "Use a password with at least {n} characters.",
+  "auth.error.wrong_password": "That password doesn't match this account.",
+  "auth.error.email_taken": "An account with this email already exists. Sign in instead.",
+  "auth.error.no_account": "No account uses this email. Create one instead.",
+  "menu.account.signin": "Sign in",
+  "menu.account.signout": "Sign out",
+  "menu.plan.free": "Free plan",
+  "menu.plan.lifetime": "Lifetime license"
 }

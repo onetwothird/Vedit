@@ -78,6 +78,20 @@ html.light .menu-panel { box-shadow: 0 16px 40px #0000001f; }
 .menu-item:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
 .menu-section + .menu-item { position: relative; }
 .menu-section + .menu-item::before { content: ""; position: absolute; left: 4px; right: 4px; top: -6px; height: 1px; background: var(--line); }
+.menu-btn .avatar { margin: -2px 0; }
+.avatar {
+  width: 24px; height: 24px; border-radius: 50%; display: grid; place-items: center; flex: none;
+  background: var(--accent); color: var(--accent-ink); font: 600 10.5px var(--sans); letter-spacing: .02em;
+}
+.avatar.lg { width: 36px; height: 36px; font-size: 13px; }
+.menu-account { display: flex; align-items: center; gap: 10px; padding-bottom: 12px; border-bottom: 1px solid var(--line); }
+.who { display: flex; flex-direction: column; min-width: 0; gap: 1px; }
+.who-name { font: 600 13.5px var(--sans); color: var(--ink); }
+.who-email { font-size: 12px; color: var(--body); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.plan { align-self: flex-start; margin-top: 5px; padding: 1px 7px; border-radius: var(--r-chip); font: 500 11px var(--sans); background: var(--chip-2); color: var(--ink); }
+.plan.lifetime { background: var(--accent-soft); color: var(--ink); }
+.menu-signin { justify-content: center; }
+button.menu-item { width: calc(100% + 8px); text-align: left; }
 @keyframes menu-in { from { opacity: 0; transform: translateY(-4px) scale(.98); } }
 html.theme-fade, html.theme-fade * { transition: background-color .3s ease, border-color .3s ease, color .3s ease, outline-color .3s ease !important; }
 .divider { width: 1px; height: 22px; background: var(--line-2); margin: 0 4px; }

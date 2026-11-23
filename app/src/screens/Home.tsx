@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
-import { Link } from "react-router-dom";
+import { Link, Navigate } from "react-router-dom";
+import { shouldOfferSignIn, useAuth } from "../auth/auth";
 import FilmFrame from "../components/FilmFrame";
 import Screen from "../components/Screen";
 import { engine } from "../engine/client";
@@ -27,6 +28,7 @@ function formatDate(iso: string): string {
 }
 
 export default function Home() {
+  const account = useAuth((a) => a.account);
   const [recent, setRecent] = useState<Recent>({ status: "loading" });
 
   useEffect(() => {
@@ -40,6 +42,7 @@ export default function Home() {
     };
   }, []);
 
+  if (shouldOfferSignIn(account)) return <Navigate to="/signin" replace />;
   return (
     <Screen>
       <h1 className="title">{t("home.title")}</h1>

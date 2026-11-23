@@ -5,7 +5,8 @@ export default defineConfig({
   fullyParallel: true,
   reporter: "list",
   // a port of its own, so a dev server that is already running is never mistaken for the mock
-  use: { baseURL: "http://localhost:5199", viewport: { width: 1440, height: 900 } },
+  // every test starts past the first-run sign-in screen (signin.spec.ts opts back in)
+  use: { baseURL: "http://localhost:5199", viewport: { width: 1440, height: 900 }, storageState: "tests/e2e/skip-signin.json" },
   projects: [{ name: "chromium", use: { browserName: "chromium" } }],
   webServer: {
     command: "npm run dev:mock -- --port 5199",

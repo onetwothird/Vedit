@@ -1,0 +1,6 @@
+{
+  "cookies": [],
+  "origins": [
+    { "origin": "http://localhost:5199", "localStorage": [{ "name": "vedit.signin.skipped", "value": "true" }] }
+  ]
+}
