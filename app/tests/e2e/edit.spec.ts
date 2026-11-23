@@ -49,6 +49,18 @@ test("a cut word offers Restore word", async ({ page }) => {
   await expect(footer(page)).toHaveText(/1 word cut/);
 });
 
+test("Delete cuts the selection only while focus is in the transcript", async ({ page }) => {
+  await open(page);
+  await word(page, 4).click();
+  await page.keyboard.press("Escape");
+  await page.getByRole("slider", { name: "Playhead" }).focus();
+  await page.keyboard.press("Delete");
+  await expect(word(page, 4)).not.toHaveClass(/\bcut\b/);
+  await word(page, 4).focus();
+  await page.keyboard.press("Delete");
+  await expect(word(page, 4)).toHaveClass(/\bcut\b/);
+});
+
 test("shift-click selects a range and Delete cuts all of it", async ({ page }) => {
   await open(page);
   await word(page, 5).click();
@@ -150,6 +162,18 @@ test("keyboard shortcuts", async ({ page }) => {
   await word(page, 9).click();
   await page.keyboard.press("Escape");
   await expect(page.getByRole("button", { name: "Cut word" })).toHaveCount(0);
+  // focus is back on the word button: Space still plays and pauses, and does not reopen the popover
+  await expect(word(page, 9)).toBeFocused();
+  await page.keyboard.press("Space");
+  await expect(page.getByRole("button", { name: "Pause", exact: true })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Cut word" })).toHaveCount(0);
+  await page.keyboard.press("Space");
+  await expect(page.getByRole("button", { name: "Play", exact: true })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Cut word" })).toHaveCount(0);
+  // Enter opens it
+  await page.keyboard.press("Enter");
+  await expect(page.getByRole("button", { name: "Cut word" })).toBeVisible();
+  await page.keyboard.press("Escape");
   await page.keyboard.press("F2");
   await expect(page.getByRole("textbox", { name: "Correct spelling" })).toBeFocused();
   await page.keyboard.press("Escape");
