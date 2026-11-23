@@ -3,6 +3,7 @@ import { t } from "../i18n/t";
 import AppMenu from "./AppMenu";
 import Logo from "./Logo";
 import Steps, { type StepNumber } from "./Steps";
+import ThemeToggle from "./ThemeToggle";
 
 export interface TopBarProps {
   fileName?: string;
@@ -26,6 +27,7 @@ export default function TopBar({ fileName, saved, step, editHid, primary }: TopB
       </div>
       <Steps current={step} editHid={editHid} />
       <div className="actions">
+        <ThemeToggle />
         <AppMenu />
         {primary && (
           <>

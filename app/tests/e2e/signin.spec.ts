@@ -16,7 +16,7 @@ test("Continue with Google signs in and the header menu shows the account, then 
   await page.goto("/#/signin");
   await page.getByRole("button", { name: "Continue with Google" }).click();
   await expect(page.getByRole("heading", { name: "What are you making?" })).toBeVisible();
-  await page.getByRole("button", { name: "Settings and appearance" }).click();
+  await page.getByRole("button", { name: "Account and settings" }).click();
   await expect(page.getByText("Demo Creator")).toBeVisible();
   await expect(page.getByText("Free plan")).toBeVisible();
   await page.getByRole("button", { name: "Sign out" }).click();
@@ -39,7 +39,7 @@ test("email: create an account, sign out, sign back in; errors explain what to f
   await page.getByRole("button", { name: "Create account" }).click();
   await expect(page.getByRole("heading", { name: "What are you making?" })).toBeVisible();
 
-  await page.getByRole("button", { name: "Settings and appearance" }).click();
+  await page.getByRole("button", { name: "Account and settings" }).click();
   await page.getByRole("button", { name: "Sign out" }).click();
   await page.getByLabel("Email").fill("nobody@example.com");
   await page.getByLabel("Password").fill("test-pass-123");

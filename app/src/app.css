@@ -46,7 +46,25 @@ a.step:hover { color: var(--ink); }
 .icon:hover { background: var(--chip); color: var(--ink); }
 .icon:active { transform: translateY(1px); }
 .icon svg { width: 18px; height: 18px; grid-area: 1 / 1; }
-/* App menu: one control for app-wide things (appearance, settings), like the account menu in CapCut or Descript. */
+/* Light/dark: its own square button beside the account menu, same height, corners and hover. The sun and the moon
+   sit on top of each other; the current one shows, the other is turned away and shrunk, and they swap on click. */
+.theme-btn {
+  position: relative; width: 36px; height: 36px; flex: none; display: inline-grid; place-items: center;
+  border-radius: var(--r-control); border: 1px solid var(--line-2); color: var(--body);
+  transition: background-color .15s, color .15s;
+}
+.theme-btn:hover { background: var(--chip); color: var(--ink); }
+.theme-btn:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.theme-btn svg {
+  grid-area: 1 / 1; width: 18px; height: 18px;
+  transition: transform .42s cubic-bezier(.2, .9, .25, 1.15), opacity .22s ease;
+}
+.theme-btn.dark .sun, .theme-btn.light .moon { opacity: 0; transform: rotate(-90deg) scale(.4); }
+.theme-btn.dark .moon, .theme-btn.light .sun { opacity: 1; transform: none; }
+.theme-btn.light:hover .sun { transform: rotate(22deg); }
+.theme-btn.dark:hover .moon { transform: rotate(-12deg); }
+
+/* Account menu: who is signed in, Settings, Sign out (like the account button in CapCut or Descript). */
 .app-menu { position: relative; }
 .menu-btn {
   height: 36px; padding: 0 8px 0 10px; display: inline-flex; align-items: center; gap: 4px; border-radius: var(--r-control);
@@ -64,11 +82,6 @@ a.step:hover { color: var(--ink); }
   box-shadow: 0 16px 40px #00000059; transform-origin: top right; animation: menu-in .16s ease-out;
 }
 html.light .menu-panel { box-shadow: 0 16px 40px #0000001f; }
-.menu-section { border: 0; padding: 0; margin: 0; min-width: 0; }
-.menu-section legend { padding: 0; margin-bottom: 8px; font: 500 12px var(--sans); color: var(--body); }
-.seg-full { display: flex; width: 100%; }
-.seg-full .seg-opt { flex: 1; }
-.seg-full .seg-opt span { text-align: center; }
 .menu-item {
   display: flex; align-items: center; gap: 10px; height: 36px; padding: 0 10px; margin: 0 -4px;
   border-radius: var(--r-control); color: var(--ink); font: 500 13px var(--sans); border-top: 0;
@@ -76,8 +89,6 @@ html.light .menu-panel { box-shadow: 0 16px 40px #0000001f; }
 .menu-item svg { width: 16px; height: 16px; color: var(--body); }
 .menu-item:hover { background: var(--chip); }
 .menu-item:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
-.menu-section + .menu-item { position: relative; }
-.menu-section + .menu-item::before { content: ""; position: absolute; left: 4px; right: 4px; top: -6px; height: 1px; background: var(--line); }
 .menu-btn .avatar { margin: -2px 0; }
 .avatar {
   width: 24px; height: 24px; border-radius: 50%; display: grid; place-items: center; flex: none;
@@ -191,7 +202,7 @@ html.theme-fade, html.theme-fade * { transition: background-color .3s ease, bord
   .stage-row.current .mark i { animation: none; }
   .sep.into::after { animation: none; transform: none; }
   .step.on, .step.on .dot { animation: none; }
-  .menu-btn .chev, .menu-panel { transition: none; animation: none; }
+  .menu-btn .chev, .menu-panel, .theme-btn svg { transition: none; animation: none; }
   html.theme-fade, html.theme-fade * { transition: none !important; }
   .meter i, .stage-row .bar i { transition: none; }
 }

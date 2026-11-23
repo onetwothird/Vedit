@@ -2,13 +2,11 @@ import { useEffect, useId, useRef, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { initials, useAuth } from "../auth/auth";
 import { t } from "../i18n/t";
-import { getTheme, setTheme, type Theme } from "../theme/theme";
 
-/** One header control for app-wide things (like the account button in CapCut and Descript): the account
-    (or Sign in), the Dark / Light appearance switch, Settings and Sign out. */
+/** The account button in the header (like CapCut and Descript): who is signed in (or Sign in), Settings and
+    Sign out. Light/dark has its own button beside it (ThemeToggle). */
 export default function AppMenu() {
   const [open, setOpen] = useState(false);
-  const [theme, setThemeState] = useState<Theme>(getTheme);
   const root = useRef<HTMLDivElement>(null);
   const button = useRef<HTMLButtonElement>(null);
   const panelId = useId();
@@ -33,16 +31,6 @@ export default function AppMenu() {
       document.removeEventListener("keydown", onKey);
     };
   }, [open]);
-
-  function choose(next: Theme) {
-    if (next === theme) return;
-    // fade colours across the switch instead of snapping (skipped under reduced motion by the CSS)
-    const html = document.documentElement;
-    html.classList.add("theme-fade");
-    window.setTimeout(() => html.classList.remove("theme-fade"), 320);
-    setTheme(next);
-    setThemeState(next);
-  }
 
   return (
     <div className="app-menu" ref={root}>
@@ -82,17 +70,6 @@ export default function AppMenu() {
           ) : (
             <Link className="primary menu-signin" to="/signin" onClick={() => setOpen(false)}>{t("menu.account.signin")}</Link>
           )}
-          <fieldset className="menu-section">
-            <legend>{t("menu.appearance")}</legend>
-            <div className="seg seg-full">
-              {(["dark", "light"] as const).map((m) => (
-                <label key={m} className="seg-opt">
-                  <input type="radio" name={`${panelId}-theme`} checked={theme === m} onChange={() => choose(m)} />
-                  <span>{t(`menu.theme.${m}`)}</span>
-                </label>
-              ))}
-            </div>
-          </fieldset>
           <Link className="menu-item" to="/settings" onClick={() => setOpen(false)}>
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
               <path d="M10.3 3.6a1.7 1.7 0 0 1 3.4 0l.2.9a1.7 1.7 0 0 0 2.5 1l.8-.4a1.7 1.7 0 0 1 2.4 2.4l-.4.8a1.7 1.7 0 0 0 1 2.5l.9.2a1.7 1.7 0 0 1 0 3.4l-.9.2a1.7 1.7 0 0 0-1 2.5l.4.8a1.7 1.7 0 0 1-2.4 2.4l-.8-.4a1.7 1.7 0 0 0-2.5 1l-.2.9a1.7 1.7 0 0 1-3.4 0l-.2-.9a1.7 1.7 0 0 0-2.5-1l-.8.4a1.7 1.7 0 0 1-2.4-2.4l.4-.8a1.7 1.7 0 0 0-1-2.5l-.9-.2a1.7 1.7 0 0 1 0-3.4l.9-.2a1.7 1.7 0 0 0 1-2.5l-.4-.8a1.7 1.7 0 0 1 2.4-2.4l.8.4a1.7 1.7 0 0 0 2.5-1z" />
