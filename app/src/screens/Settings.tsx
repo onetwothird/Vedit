@@ -1,6 +1,7 @@
 import { useEffect, useId, useRef, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
-import { initials, useAuth } from "../auth/auth";
+import { useAuth } from "../auth/auth";
+import Avatar from "../components/Avatar";
 import Screen from "../components/Screen";
 import { engine, isTauri } from "../engine/client";
 import { useJob } from "../engine/events";
@@ -61,10 +62,10 @@ function AccountSection() {
     <Section title={t("settings.account")}>
       {account ? (
         <div className="set-account">
-          <span className="avatar lg" aria-hidden="true">{initials(account.name)}</span>
+          <Avatar account={account} size="lg" />
           <span className="who">
             <span className="who-name">{account.name}</span>
-            <span className="who-email" title={account.email}>{account.email}</span>
+            {account.email && <span className="who-email" title={account.email}>{account.email}</span>}
           </span>
           <span className={`plan ${account.plan}`}>{t(`menu.plan.${account.plan}`)}</span>
           <button

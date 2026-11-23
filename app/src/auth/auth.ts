@@ -113,7 +113,11 @@ export function skipSignIn(): void {
   write(SKIPPED, true);
 }
 
+const SUFFIX = /^(jr|sr|ii|iii|iv|v)\.?$/i;
+
+/** First and last initials, skipping name suffixes: "Angelito Decatoria III" → "AD". */
 export function initials(name: string): string {
-  const parts = name.trim().split(/\s+/).filter(Boolean);
+  const all = name.trim().split(/\s+/).filter(Boolean);
+  const parts = all.length > 1 ? all.filter((p, i) => i === 0 || !SUFFIX.test(p)) : all;
   return ((parts[0]?.[0] ?? "") + (parts.length > 1 ? parts[parts.length - 1][0] : "")).toUpperCase() || "V";
 }

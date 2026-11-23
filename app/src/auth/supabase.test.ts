@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { createAuthStore } from "./auth";
-import { supabaseConfig, supabaseProvider } from "./supabase";
+import { displayName, supabaseConfig, supabaseProvider } from "./supabase";
+import { initials } from "./auth";
 
 const URL_ = "https://abcd.supabase.co";
 const KEY = ["anon", "test", "key"].join("-");
@@ -122,6 +123,33 @@ describe("Google and Facebook", () => {
     expect(location.search).toBe("");
   });
 
+  it("tells a failed return trip apart from a cancelled one", async () => {
+    history.replaceState(null, "", "/?error=server_error&error_code=unexpected_failure&error_description=Error+getting+user+email#/signin");
+    const p = supabaseProvider({ url: URL_, anonKey: KEY, fetchImpl: fakeFetch().impl });
+    await expect(p.resume!()).rejects.toMatchObject({ code: "social_failed" });
+    expect(location.search).toBe("");
+  });
+
+  it("keeps the fullest name and the profile photo the provider shares", async () => {
+    const fb = user({
+      email: undefined,
+      user_metadata: {
+        full_name: "Angelito III", name: "Angelito III", nickname: "Angelito Decatoria III", slug: "Angelito Decatoria III",
+        avatar_url: "https://platform-lookaside.fbsbx.com/p.jpg", picture: "https://platform-lookaside.fbsbx.com/p.jpg",
+      },
+      app_metadata: { provider: "facebook" },
+    });
+    const f = fakeFetch({ body: session({ user: fb }) });
+    const a = await supabaseProvider({ url: URL_, anonKey: KEY, fetchImpl: f.impl }).signIn("ana@example.com", "longenough");
+    expect(a).toMatchObject({ name: "Angelito Decatoria III", email: "", avatar: "https://platform-lookaside.fbsbx.com/p.jpg" });
+  });
+
+  it("never uses a non-https photo, and leaves email accounts without one", async () => {
+    const f = fakeFetch({ body: session({ user: user({ user_metadata: { full_name: "Ana Reyes", avatar_url: "http://x/p.jpg" } }) }) });
+    const a = await supabaseProvider({ url: URL_, anonKey: KEY, fetchImpl: f.impl }).signIn("ana@example.com", "longenough");
+    expect(a.avatar).toBeUndefined();
+  });
+
   it("is unavailable inside the desktop window, where Google blocks embedded sign in", async () => {
     const p = supabaseProvider({ url: URL_, anonKey: KEY, fetchImpl: fakeFetch().impl, embedded: true });
     await expect(p.social("facebook")).rejects.toMatchObject({ code: "social_unavailable" });
@@ -174,4 +202,18 @@ it("reads the project address and anon key from the build, or reports none", () 
   expect(supabaseConfig({})).toBeNull();
   expect(supabaseConfig({ VITE_SUPABASE_URL: URL_ + "/", VITE_SUPABASE_ANON_KEY: KEY })).toEqual({ url: URL_, anonKey: KEY });
   expect(supabaseConfig({ VITE_SUPABASE_URL: URL_, VITE_SUPABASE_PUBLISHABLE_KEY: "sb_publishable_x" })).toEqual({ url: URL_, anonKey: "sb_publishable_x" });
+});
+
+describe("names", () => {
+  it("prefers the longest name that starts like the given one", () => {
+    expect(displayName({ full_name: "Angelito III", nickname: "Angelito Decatoria III" })).toBe("Angelito Decatoria III");
+    expect(displayName({ full_name: "Ana Reyes", nickname: "anarey99" })).toBe("Ana Reyes");
+    expect(displayName({ name: "  Ana   Reyes " })).toBe("Ana Reyes");
+    expect(displayName({})).toBe("");
+  });
+  it("skips suffixes in initials", () => {
+    expect(initials("Angelito Decatoria III")).toBe("AD");
+    expect(initials("Juan Cruz Jr.")).toBe("JC");
+    expect(initials("III")).toBe("I");
+  });
 });

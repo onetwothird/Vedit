@@ -10,6 +10,8 @@ export interface Account {
   email: string;
   provider: SocialProvider | "email";
   plan: Plan;
+  /** The profile photo Google or Facebook shares (https only); absent for email accounts. */
+  avatar?: string;
 }
 
 export type AuthErrorCode =
@@ -23,6 +25,7 @@ export type AuthErrorCode =
   | "rate_limited"
   | "network"
   | "social_cancelled"
+  | "social_failed"
   | "social_unavailable"
   | "unknown";
 
