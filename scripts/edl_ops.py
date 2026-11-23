@@ -17,8 +17,67 @@ from edl import DEFAULT_PAD, clip_span, word_range  # noqa: E402
 from highlights import Highlight  # noqa: E402
 from presets import make_edl_kwargs  # noqa: E402
 
-Section = Literal["captions", "audio", "color", "framing", "output"]
+Section = Literal["captions", "audio", "color", "framing", "output", "overlays"]
 OUTPUT_ASPECTS = ("9:16", "4:5", "1:1", "16:9")
+
+# Overlays the editor places on its timeline: text, and b-roll (an image or a video). render.py draws them.
+OVERLAY_TYPES = ("text", "image", "video")
+TEXT_POSITIONS = ("top", "center", "bottom")
+MEDIA_MODES = ("full", "pip")
+PIP_POSITIONS = ("top-right", "top-left", "bottom-left", "bottom-right", "center")
+MAX_OVERLAYS = 50
+MAX_TEXT = 200
+
+
+def _number(v, what: str, lo: float, hi: float) -> float:
+    if isinstance(v, bool) or not isinstance(v, (int, float)) or not (lo <= v <= hi):
+        raise ValueError(f"{what} must be a number from {lo} to {hi}")
+    return float(v)
+
+
+def _overlay(item) -> dict:
+    """One overlay, checked and reduced to the keys render.py reads. "at" is source time on the main video
+    ({"src": "main", "t": seconds}), so an overlay stays on its moment when words before it are cut."""
+    if not isinstance(item, dict):
+        raise ValueError("each overlay must be an object")
+    kind = item.get("type")
+    if kind not in OVERLAY_TYPES:
+        raise ValueError(f"overlay type must be one of {', '.join(OVERLAY_TYPES)}")
+    at = item.get("at")
+    if not isinstance(at, dict) or not isinstance(at.get("src"), str):
+        raise ValueError("overlay 'at' must be {\"src\": alias, \"t\": seconds}")
+    out: dict = {"type": kind, "at": {"src": at["src"], "t": _number(at.get("t"), "overlay time", 0, 86400)},
+                 "duration": _number(item.get("duration"), "overlay duration", 0.1, 600)}
+    if isinstance(item.get("id"), str):
+        out["id"] = item["id"][:40]
+    if kind == "text":
+        text = item.get("text")
+        if not isinstance(text, str) or not text.strip() or len(text) > MAX_TEXT:
+            raise ValueError(f"overlay text must be 1 to {MAX_TEXT} characters")
+        out["text"] = text
+        pos = item.get("position", "top")
+        if pos not in TEXT_POSITIONS:
+            raise ValueError(f"text position must be one of {', '.join(TEXT_POSITIONS)}")
+        out["position"] = pos
+        if "size" in item:
+            out["size"] = _number(item["size"], "text size", 0.5, 2.5)
+    else:
+        path = item.get("path")
+        if not isinstance(path, str) or not path.strip():
+            raise ValueError("b-roll needs a file path")
+        out["path"] = path
+        mode = item.get("mode", "full")
+        if mode not in MEDIA_MODES:
+            raise ValueError(f"b-roll mode must be one of {', '.join(MEDIA_MODES)}")
+        out["mode"] = mode
+        if mode == "pip":
+            pos = item.get("position", "top-right")
+            if pos not in PIP_POSITIONS:
+                raise ValueError(f"picture-in-picture position must be one of {', '.join(PIP_POSITIONS)}")
+            out["position"] = pos
+        if kind == "video" and "src_in" in item:
+            out["src_in"] = _number(item["src_in"], "b-roll start", 0, 86400)
+    return out
 
 
 def clip_edl(wd: Path, h: Highlight, preset: str, language: str | None, brand: Path | None) -> dict:
@@ -167,6 +226,17 @@ def patch_section(edl: dict, section: Section, patch: dict) -> dict:
                     c.pop(k, None)
                 else:
                     c[k] = v
+    elif section == "overlays":
+        bad = set(patch) - {"items"}
+        if bad:
+            raise ValueError(f"unknown overlays keys: {sorted(bad)}")
+        items = patch.get("items")
+        if items is None:
+            e.pop("overlays", None)
+        else:
+            if not isinstance(items, list) or len(items) > MAX_OVERLAYS:
+                raise ValueError(f"overlays items must be a list of at most {MAX_OVERLAYS}")
+            e["overlays"] = [_overlay(o) for o in items]
     elif section == "output":
         bad = set(patch) - {"aspect"}
         if bad:

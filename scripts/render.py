@@ -27,6 +27,36 @@ from common import even, ffmpeg_bin, filter_path, need, progress, ts  # noqa: E4
 from edl import Timeline  # noqa: E402
 
 
+
+TEXT_FONT = Path(__file__).resolve().parent.parent / "fonts" / "Poppins-Bold.ttf"
+TEXT_Y = {"top": "h*0.12", "center": "(h-text_h)/2", "bottom": "h*0.70-text_h"}
+
+
+def _text_overlays(tl, fc: list[str], vlab: str, OW: int, OH: int) -> str:
+    """Text overlays as drawtext filters: white bold text on a dark box, centred, at the top, middle or bottom. The text
+    goes through a file so nothing in it can break the filter graph; expansion is off so % is literal."""
+    items = [o for o in (tl.edl.get("overlays") or []) if o.get("type") == "text"]
+    if not items:
+        return vlab
+    cache = tl.dir / ".render_cache"
+    cache.mkdir(parents=True, exist_ok=True)
+    font = f":fontfile='{filter_path(TEXT_FONT)}'" if TEXT_FONT.exists() else ""
+    for k, ov in enumerate(items):
+        at = tl.anchor(ov.get("at", 0))
+        if at is None:
+            print(f"[render] text overlay {k} anchored to a cut moment — skipped", file=sys.stderr)
+            continue
+        dur = float(ov.get("duration", 3))
+        txt = cache / f"text{k}.txt"
+        txt.write_text(str(ov.get("text", "")), encoding="utf-8")
+        fs = max(12, round(OH * 0.05 * float(ov.get("size", 1))))
+        y = TEXT_Y.get(ov.get("position", "top"), TEXT_Y["top"])
+        fc.append(f"[{vlab}]drawtext=textfile='{filter_path(txt)}'{font}:expansion=none:fontsize={fs}:fontcolor=white:"
+                  f"box=1:boxcolor=black@0.55:boxborderw={max(6, fs // 3)}:x=(w-text_w)/2:y={y}:"
+                  f"enable='between(t,{at:.3f},{at + dur:.3f})'[vt{k}]")
+        vlab = f"vt{k}"
+    return vlab
+
 def atempo_chain(speed: float) -> list[str]:
     out, s = [], speed
     while s > 2.0:
@@ -241,6 +271,8 @@ def final_pass(tl: Timeline, segs: list[Path], ass: Path | None, out: Path, prev
         fc.append(f"[{vlab}][ov{k}]overlay={xy}:enable='between(t,{at:.3f},{at + dur:.3f})':eof_action=pass[vo{k}]")
         vlab = f"vo{k}"
         n_in += 1
+
+    vlab = _text_overlays(tl, fc, vlab, OW, OH)
 
     if ass:
         fonts = Path(__file__).resolve().parent.parent / "fonts"

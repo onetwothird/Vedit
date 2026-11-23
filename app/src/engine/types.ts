@@ -131,6 +131,15 @@ export interface Edl {
   [key: string]: unknown;
 }
 
+/** Text or b-roll the editor places on its timeline (scripts/edl_ops.py _overlay). `at` is source time on the main
+    video, so an overlay stays on its moment when words before it are cut; `duration` is seconds of output. */
+export type Overlay =
+  | { id?: string; type: "text"; at: { src: string; t: number }; duration: number; text: string; position: "top" | "center" | "bottom"; size?: number }
+  | {
+      id?: string; type: "image" | "video"; at: { src: string; t: number }; duration: number; path: string; mode: "full" | "pip";
+      position?: "top-right" | "top-left" | "bottom-left" | "bottom-right" | "center"; src_in?: number;
+    };
+
 export interface CaptionWord {
   text: string;
   start: number;
@@ -171,9 +180,11 @@ export interface ClipView {
   /** Source-time [start, end] of each clip in play order. */
   kept_ranges: [number, number][];
   captions: CaptionTrack;
+  /** Mock engine only: seconds its short sample video is shifted back from real source time. */
+  sample_offset?: number;
 }
 
-export type EditSection = "captions" | "audio" | "color" | "framing" | "output";
+export type EditSection = "captions" | "audio" | "color" | "framing" | "output" | "overlays";
 
 export type ClipOp =
   | { op: "cut"; w0: number; w1: number }

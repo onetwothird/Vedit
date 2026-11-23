@@ -1,11 +1,12 @@
 import { useCallback, useEffect, useImperativeHandle, useMemo, useRef, useState, type ReactNode, type Ref } from "react";
-import type { Aspect, ClipView } from "../engine/types";
+import type { Aspect, ClipView, Overlay } from "../engine/types";
 import { t } from "../i18n/t";
 import { getSafeZone, setSafeZone } from "../lib/prefs";
 import CaptionOverlay from "./CaptionOverlay";
+import OverlayLayer from "./OverlayLayer";
 import {
   advance, captionClock, clipFraming, cropStyle, exportOnly, locate, outputLength, outputStart, safeZoneBands, speedOf,
-  viewRanges,
+  viewRanges, type Range,
 } from "./playback";
 
 export interface PlayerHandle {
@@ -58,6 +59,11 @@ const Icon = ({ d, fill }: { d: string; fill?: boolean }) => (
 export default function Player({ view, src, aspect, fit = { width: 360, height: 420 }, onTime, poster, ref }: PlayerProps) {
   const video = useRef<HTMLVideoElement>(null);
   const ranges = useMemo(() => viewRanges(view), [view]);
+  // overlays are saved in real source time; the mock plays a sample shifted by sample_offset
+  const ovRanges = useMemo(() => {
+    const off = view.sample_offset ?? 0;
+    return off ? ranges.map((r): Range => (r.length > 2 ? [r[0] + off, r[1] + off, r[2]!] : [r[0] + off, r[1] + off])) : ranges;
+  }, [ranges, view.sample_offset]);
   const rangesRef = useRef(ranges);
   rangesRef.current = ranges;
   const onTimeRef = useRef(onTime);
@@ -219,6 +225,9 @@ export default function Player({ view, src, aspect, fit = { width: 360, height: 
             onPause={() => setPlaying(false)}
             onError={() => setFailed(true)}
           />
+        )}
+        {shown && (
+          <OverlayLayer overlays={(view.edl.overlays as Overlay[] | undefined) ?? []} ranges={ovRanges} out={out} frameHeight={fh} playing={playing} />
         )}
         {shown && <CaptionOverlay track={view.captions} outT={captionClock(view.captions, out)} frameHeight={fh} />}
         {shown && safe && (

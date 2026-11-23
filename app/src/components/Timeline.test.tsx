@@ -189,3 +189,106 @@ describe("split and delete", () => {
     expect(splitBtn.disabled).toBe(true);
   });
 });
+
+describe("text and b-roll layers", () => {
+  const OV = [
+    { id: "t1", type: "text" as const, at: { src: "main", t: 1 }, duration: 2, text: "Hello", position: "top" as const },
+    { id: "b1", type: "image" as const, at: { src: "main", t: 3 }, duration: 1, path: "C:/clips/shot.png", mode: "full" as const },
+  ];
+  const btn = (label: string) => [...host.querySelectorAll<HTMLButtonElement>("button")].find((b) => b.getAttribute("aria-label") === label || b.title === label || b.textContent === label)!;
+
+  it("draws each layer in its own lane", () => {
+    render({ overlays: OV, onOverlays: vi.fn() });
+    expect($(".tl-ov-text .tl-ovb").textContent).toBe("Hello");
+    expect($(".tl-ov-broll .tl-ovb").textContent).toBe("shot.png");
+  });
+
+  it("adds text at the playhead and selects it", () => {
+    const onOverlays = vi.fn();
+    render({ playhead: 2, onOverlays });
+    act(() => btn("Add text at the playhead").click());
+    const items = onOverlays.mock.calls[0][0];
+    expect(items).toHaveLength(1);
+    expect(items[0]).toMatchObject({ type: "text", text: "Your text", position: "top", at: { t: 2 } });
+  });
+
+  it("drags a layer later as one edit", () => {
+    const onOverlays = vi.fn();
+    render({ overlays: OV, onOverlays });
+    const block = $(".tl-ov-text .tl-ovb");
+    pointer(block, "pointerdown", 1 * pxPerSec);
+    pointer(block, "pointermove", 2 * pxPerSec);
+    expect(onOverlays).not.toHaveBeenCalled();
+    pointer(block, "pointerup", 2 * pxPerSec);
+    expect(onOverlays).toHaveBeenCalledTimes(1);
+    expect(onOverlays.mock.calls[0][0][0].at.t).toBeCloseTo(2, 1);
+    expect(onOverlays.mock.calls[0][0][0].duration).toBe(2);
+  });
+
+  it("drags the end edge to make a layer longer", () => {
+    const onOverlays = vi.fn();
+    render({ overlays: OV, onOverlays });
+    const end = $(".tl-ov-text .tl-ovb-edge.end");
+    pointer(end, "pointerdown", 3 * pxPerSec);
+    pointer(end, "pointerup", 4 * pxPerSec);
+    expect(onOverlays.mock.calls[0][0][0]).toMatchObject({ at: { t: 1 } });
+    expect(onOverlays.mock.calls[0][0][0].duration).toBeCloseTo(3, 1);
+  });
+
+  it("nudges a layer with the arrow keys", () => {
+    const onOverlays = vi.fn();
+    render({ overlays: OV, onOverlays });
+    press($(".tl-ov-text .tl-ovb"), "ArrowRight");
+    expect(onOverlays.mock.calls[0][0][0].at.t).toBeCloseTo(1.1, 5);
+  });
+
+  it("deletes the selected layer, not the video under it", () => {
+    const onOverlays = vi.fn();
+    const p = render({ overlays: OV, onOverlays });
+    pointer($(".tl-ov-broll .tl-ovb"), "pointerdown", 3 * pxPerSec);
+    pointer($(".tl-ov-broll .tl-ovb"), "pointerup", 3 * pxPerSec);
+    act(() => btn("Delete layer").click());
+    expect(onOverlays).toHaveBeenLastCalledWith([OV[0]]);
+    expect(p.onCut).not.toHaveBeenCalled();
+  });
+});
+
+describe("toolbar", () => {
+  const OV = [{ id: "t1", type: "text" as const, at: { src: "main", t: 1 }, duration: 2, text: "Hello", position: "top" as const }];
+  const btn = (label: string) => [...host.querySelectorAll<HTMLButtonElement>("button")].find((b) => b.getAttribute("aria-label") === label)!;
+
+  it("undoes and redoes, and is off when there is nothing to undo or redo", () => {
+    const onUndo = vi.fn();
+    const onRedo = vi.fn();
+    render({ onUndo, onRedo, canUndo: true, canRedo: false });
+    expect(btn("Redo").disabled).toBe(true);
+    act(() => btn("Undo").click());
+    expect(onUndo).toHaveBeenCalledTimes(1);
+  });
+
+  it("duplicates the selected layer right after it", () => {
+    const onOverlays = vi.fn();
+    render({ overlays: OV, onOverlays });
+    expect(btn("Duplicate layer").disabled).toBe(true);
+    pointer($(".tl-ov-text .tl-ovb"), "pointerdown", 1 * pxPerSec);
+    pointer($(".tl-ov-text .tl-ovb"), "pointerup", 1 * pxPerSec);
+    act(() => btn("Duplicate layer").click());
+    const items = onOverlays.mock.calls[0][0];
+    expect(items).toHaveLength(2);
+    expect(items[1]).toMatchObject({ type: "text", text: "Hello", at: { t: 3 }, duration: 2 });
+    expect(items[1].id).not.toBe("t1");
+  });
+
+  it("zooms in, out, and back to the whole clip", () => {
+    render();
+    const content = $(".tl-content");
+    expect(btn("Zoom out").disabled).toBe(true);
+    act(() => btn("Zoom in").click());
+    act(() => btn("Zoom in").click());
+    expect(content.style.width).toBe(`${FALLBACK_WIDTH * 3}px`);
+    act(() => btn("Zoom out").click());
+    expect(content.style.width).toBe(`${FALLBACK_WIDTH * 2}px`);
+    act(() => btn("Fit to clip").click());
+    expect(content.style.width).toBe(`${FALLBACK_WIDTH}px`);
+  });
+});

@@ -388,7 +388,7 @@ html.theme-fade, html.theme-fade * { transition: background-color .3s ease, bord
 .screen:has(.edit) { scrollbar-gutter: auto; }
 .edit {
   display: grid; height: 100%; min-height: 0;
-  grid-template-columns: 268px minmax(0, 1fr) 340px; grid-template-rows: minmax(0, 1fr) 196px;
+  grid-template-columns: 268px minmax(0, 1fr) 340px; grid-template-rows: minmax(0, 1fr) auto; /* the timeline takes what its lanes need; the player gives way */
   grid-template-areas: "clips player insp" "clips tl tl";
 }
 .ed-clips { grid-area: clips; border-right: 1px solid var(--line); display: flex; flex-direction: column; min-height: 0; min-width: 0; }
@@ -467,12 +467,26 @@ html.theme-fade, html.theme-fade * { transition: background-color .3s ease, bord
 .icon[aria-pressed="true"] { background: var(--chip-2); color: var(--ink); }
 .edit .icon:disabled, .edit .secondary:disabled { opacity: .45; cursor: not-allowed; }
 .edit .icon:disabled:hover { background: none; color: var(--body); }
-.tl-zoom { display: flex; align-items: center; gap: 8px; font-size: 11px; color: var(--muted); }
-.tl-zoom input { accent-color: var(--accent); width: 110px; }
-.tl-body { display: grid; grid-template-columns: 78px minmax(0, 1fr); flex: 1; min-height: 0; }
-.tl-names { display: grid; grid-template-rows: 18px 28px 44px 28px; row-gap: 6px; font-size: 11px; color: var(--muted); align-items: center; }
+.tl-zoom { display: flex; align-items: center; gap: 2px; }
+.tl-zoom .icon { width: 28px; height: 28px; }
+.tl-zoom .icon svg { width: 15px; height: 15px; }
+.tl-zoom input { accent-color: var(--accent); width: 96px; margin: 0 4px; }
+.tl-tools .divider { width: 1px; height: 18px; background: var(--line); margin: 0 6px; }
+.tl-add {
+  display: inline-flex; align-items: center; gap: 6px; height: 32px; padding: 0 12px 0 9px; margin-left: 2px;
+  border: 1px solid var(--line); border-radius: var(--r-control); background: var(--chip); color: var(--ink);
+  font: inherit; font-size: 12.5px; cursor: pointer;
+}
+.tl-add svg { width: 16px; height: 16px; }
+.tl-add.text svg { color: #a78bfa; }
+.tl-add.broll svg { color: #38bdf8; }
+.tl-add:hover:not(:disabled) { background: var(--chip-2); }
+.tl-add:disabled { opacity: .45; cursor: not-allowed; }
+.tl-add:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.tl-body { display: grid; grid-template-columns: 78px minmax(0, 1fr); flex: none; }
+.tl-names { display: grid; grid-template-rows: 18px 26px 26px 28px 44px 28px; row-gap: 6px; font-size: 11px; color: var(--muted); align-items: center; }
 .tl-scroll { overflow-x: auto; overflow-y: hidden; min-width: 0; padding-top: 3px; scrollbar-width: thin; }
-.tl-content { position: relative; display: grid; grid-template-rows: 18px 28px 44px 28px; row-gap: 6px; touch-action: none; user-select: none; cursor: text; }
+.tl-content { position: relative; display: grid; grid-template-rows: 18px 26px 26px 28px 44px 28px; row-gap: 6px; touch-action: none; user-select: none; cursor: text; }
 .tl-ruler { position: relative; border-bottom: 1px solid var(--line); font-size: 10px; color: var(--muted); }
 .tl-ruler span { position: absolute; top: 0; transform: translateX(-50%); white-space: nowrap; }
 .tl-ruler span:first-child { transform: none; }
@@ -484,14 +498,55 @@ html.theme-fade, html.theme-fade * { transition: background-color .3s ease, bord
 .tl-gap { border-radius: 7px; border: 1px dashed var(--danger); opacity: .55; background: repeating-linear-gradient(135deg, transparent 0 5px, color-mix(in srgb, var(--danger) 10%, transparent) 5px 10px); }
 .tl-mus { border-radius: var(--r-chip); background: var(--accent-soft); border: 1px solid var(--line); font-size: 11px; color: var(--body); padding: 0 8px; display: flex; align-items: center; overflow: hidden; white-space: nowrap; }
 .tl-lane > .tl-none { position: static; display: flex; align-items: center; height: 100%; font-size: 11px; color: var(--muted); }
-.tl-lane > /* A piece of kept video: click to select it, then Delete removes it. Split points show as a bright seam. */
-.tl-piece { position: absolute; top: 0; bottom: 0; border-radius: var(--r-chip); border: 1.5px solid transparent; background: transparent; cursor: pointer; }
+/* A piece of kept video: click to select it, then Delete removes it. Split points show as a bright seam. */
+.tl-lane > .tl-piece { position: absolute; top: 0; bottom: 0; border-radius: var(--r-chip); border: 1.5px solid transparent; background: transparent; cursor: pointer; }
 .tl-piece:hover { border-color: color-mix(in srgb, var(--ink) 35%, transparent); }
 .tl-piece.on { border-color: var(--ink); background: color-mix(in srgb, var(--ink) 12%, transparent); }
 .tl-piece.split::before { content: ""; position: absolute; left: -2.5px; top: -3px; bottom: -3px; width: 2px; border-radius: 1px; background: var(--ink); }
 .tl-piece:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
-.tl-handle { width: 10px; transform: translateX(-50%); top: -3px; bottom: -3px; border-radius: 4px; background: var(--accent); cursor: ew-resize; z-index: 4; }
+.tl-lane > .tl-handle { width: 10px; transform: translateX(-50%); top: -3px; bottom: -3px; border-radius: 4px; background: var(--accent); cursor: ew-resize; z-index: 4; }
 .tl-handle:focus-visible { outline: 2px solid var(--ink); outline-offset: 1px; }
+/* Text and b-roll blocks: drag to move, drag an edge to change the length. */
+.tl-ov > .tl-ovb {
+  display: flex; align-items: center; padding: 0 10px; border-radius: var(--r-chip); overflow: hidden; white-space: nowrap;
+  font-size: 11px; cursor: grab; touch-action: none; border: 1px solid var(--line-2);
+}
+.tl-ovb.text { background: color-mix(in srgb, #a78bfa 28%, var(--chip)); color: var(--ink); }
+.tl-ovb.image, .tl-ovb.video { background: color-mix(in srgb, #38bdf8 24%, var(--chip)); color: var(--ink); }
+.tl-ovb:active { cursor: grabbing; }
+.tl-ovb.on { border-color: var(--ink); box-shadow: 0 0 0 1px var(--ink); }
+.tl-ovb:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+.tl-ovb-name { overflow: hidden; text-overflow: ellipsis; pointer-events: none; }
+.tl-ovb-edge { position: absolute; top: 0; bottom: 0; width: 8px; cursor: ew-resize; }
+.tl-ovb-edge.start { left: 0; }
+.tl-ovb-edge.end { right: 0; }
+.tl-ovb.on .tl-ovb-edge { background: color-mix(in srgb, var(--ink) 45%, transparent); }
+.tl-props { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; padding: 6px 8px; margin-bottom: 6px; border: 1px solid var(--line); border-radius: var(--r-control); background: var(--bg); }
+.tl-props .seg-opt span { padding: 5px 10px; }
+.tl-props-text { flex: 1 1 200px; min-width: 140px; height: 32px; padding: 0 10px; border-radius: var(--r-chip); border: 1px solid var(--line-2); background: var(--panel); color: var(--ink); font: 500 13px var(--sans); }
+.tl-props-text:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+.tl-props-name { font-size: 12px; color: var(--ink); max-width: 220px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.tl-props-len { font-size: 11.5px; color: var(--muted); }
+.tl-props-end { display: flex; gap: 6px; margin-left: auto; }
+.tl-props-end .secondary { height: 32px; font-size: 12.5px; padding: 0 12px; }
+
+/* Text and b-roll over the preview, as the export draws them. */
+.pv-ov { position: absolute; inset: 0; pointer-events: none; }
+.pv-ov-text { position: absolute; left: 6%; right: 6%; display: flex; justify-content: center; text-align: center; font-family: "Poppins", var(--sans); font-weight: 700; line-height: 1.2; color: #fff; }
+.pv-ov-text span { background: rgb(0 0 0 / .55); padding: .2em .4em; border-radius: 2px; }
+.pv-ov-text.top { top: 12%; }
+.pv-ov-text.center { top: 50%; transform: translateY(-50%); }
+.pv-ov-text.bottom { bottom: 30%; }
+.pv-ov-media { position: absolute; object-fit: cover; }
+.pv-ov-media.full { inset: 0; width: 100%; height: 100%; }
+.pv-ov-media.pip { width: 35%; height: auto; aspect-ratio: auto; }
+.pv-ov-media.pip.top-right { top: 4%; right: 4%; }
+.pv-ov-media.pip.top-left { top: 4%; left: 4%; }
+.pv-ov-media.pip.bottom-left { bottom: 4%; left: 4%; }
+.pv-ov-media.pip.bottom-right { bottom: 4%; right: 4%; }
+.pv-ov-media.pip.center { top: 50%; left: 50%; transform: translate(-50%, -50%); }
+.pv-ov-media.missing { display: grid; place-items: center; background: rgb(0 0 0 / .6); color: #fff; font-size: 11px; }
+.pv-ov-media.missing.pip { aspect-ratio: 16 / 9; }
 .tl-playhead { position: absolute; top: 0; bottom: 0; width: 2px; margin-left: -1px; background: var(--accent); z-index: 3; cursor: ew-resize; }
 .tl-playhead::before { content: ""; position: absolute; top: -3px; left: -5px; width: 12px; height: 12px; border-radius: 3px; background: var(--accent); }
 .tl-playhead:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }

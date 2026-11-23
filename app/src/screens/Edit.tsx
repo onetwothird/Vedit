@@ -12,7 +12,7 @@ import { captionSpans, wordSlot } from "../edit/lanes";
 import { keptRanges, OUTPUT_ASPECTS } from "../edit/timeline";
 import { useUndoKeys } from "../edit/useUndoKeys";
 import { engine } from "../engine/client";
-import type { Aspect, EditSection, Edl, Project, Transcript } from "../engine/types";
+import type { Aspect, EditSection, Edl, Overlay, Project, Transcript } from "../engine/types";
 import { t } from "../i18n/t";
 import { keptCount, sortClips, type ClipSort } from "../lib/clips";
 import { coverWidth } from "../lib/filmstrip";
@@ -56,6 +56,8 @@ export default function Edit() {
   const saving = useClipStore((s) => s.saving);
   const error = useClipStore((s) => s.error);
   const apply = useClipStore((s) => s.apply);
+  const canUndo = useClipStore((s) => s.past.length > 0);
+  const canRedo = useClipStore((s) => s.future.length > 0);
   useUndoKeys();
 
   const [transcriptFailed, setTranscriptFailed] = useState(false);
@@ -172,6 +174,7 @@ export default function Edit() {
   const onCut = useCallback((a: number, b: number) => apply({ op: "cut", w0: a, w1: b }), [apply]);
   const onRestore = useCallback((a: number, b: number) => apply({ op: "restore", w0: a, w1: b }), [apply]);
   const onFix = useCallback((wrong: string, right: string) => apply({ op: "fix_word", wrong, right }), [apply]);
+  const onOverlays = useCallback((items: Overlay[]) => apply({ op: "patch", section: "overlays", patch: { items } }), [apply]);
   const onPatch = useCallback((section: EditSection, patch: Record<string, unknown>) => apply({ op: "patch", section, patch }), [apply]);
   const onTogglePlay = useCallback(() => player.current?.toggle(), []);
   const onPlayFrom = useCallback((w: number) => {
@@ -347,6 +350,12 @@ export default function Edit() {
             onSeek={seekSource}
             onTrim={onTrim}
             onCut={onCut}
+            overlays={(edl?.overlays as Overlay[] | undefined) ?? []}
+            onOverlays={onOverlays}
+            onUndo={() => useClipStore.getState().undo()}
+            onRedo={() => useClipStore.getState().redo()}
+            canUndo={canUndo}
+            canRedo={canRedo}
           />
         ) : (
           <section className="ed-tl" aria-label={t("edit.tl.label")} aria-busy="true" />

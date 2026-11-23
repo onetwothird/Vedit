@@ -168,6 +168,13 @@ export function patchSection(edl: Edl, section: EditSection, patch: Record<strin
         else c[k] = v;
       }
     }
+  } else if (section === "overlays") {
+    const bad = Object.keys(patch).filter((k) => k !== "items");
+    if (bad.length) throw new Error(`unknown overlays keys: ${bad.sort().join(", ")}`);
+    const items = patch.items;
+    if (items === null || items === undefined) delete e.overlays;
+    else if (Array.isArray(items)) e.overlays = copy(items);
+    else throw new Error("overlays items must be a list");
   } else if (section === "output") {
     const bad = Object.keys(patch).filter((k) => k !== "aspect");
     if (bad.length) throw new Error(`unknown output keys: ${bad.sort().join(", ")}`);

@@ -176,7 +176,7 @@ function clipView(edl: Edl, tr: Transcript): ClipView {
     }
     t += kr[1] - kr[0];
   });
-  return { edl: copy(edl), kept_ranges, captions: captionTrack(edl, spoken) };
+  return { edl: copy(edl), kept_ranges, captions: captionTrack(edl, spoken), sample_offset: base };
 }
 
 // ---- the engine -----------------------------------------------------------------------------------------------
