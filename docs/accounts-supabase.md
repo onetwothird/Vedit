@@ -1,6 +1,6 @@
 # Accounts with Supabase
 
-vedit Studio signs people in through Supabase Auth. The app only needs your project's address and its
+Vedit Studio signs people in through Supabase Auth. The app only needs your project's address and its
 **publishable key**. Both are meant to ship inside the app. Never put a secret (`sb_secret_…`) key in the app.
 
 ## 1. Create the project

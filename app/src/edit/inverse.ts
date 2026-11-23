@@ -29,7 +29,8 @@ function previous(edl: Edl, op: Extract<Op, { op: "patch" }>): Record<string, un
   const prev: Record<string, unknown> = {};
   for (const k of Object.keys(op.patch)) {
     let v: unknown;
-    if (op.section === "framing") v = k === "fit" ? edl.fit : (edl.clips[0] as Record<string, unknown> | undefined)?.[k];
+    if (op.section === "overlays") v = edl.overlays;
+    else if (op.section === "framing") v = k === "fit" ? edl.fit : (edl.clips[0] as Record<string, unknown> | undefined)?.[k];
     else v = ((edl[op.section] ?? {}) as Record<string, unknown>)[k];
     prev[k] = v === undefined ? null : v; // null = the key was absent; the server drops it
   }

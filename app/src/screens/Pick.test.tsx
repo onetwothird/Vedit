@@ -23,6 +23,7 @@ const job = (over: Partial<Job>): Job => ({
 
 const fake = vi.hoisted(() => ({
   getProject: vi.fn(), setKept: vi.fn(), analyze: vi.fn(), getJob: vi.fn(), filmstrip: vi.fn(),
+  transcript: vi.fn(async () => { throw new Error("no transcript in these tests"); }),
 }));
 vi.mock("../engine/client", () => ({
   engine: fake, isTauri: () => false, isMock: () => true, fetchEngineInfo: vi.fn(), onJobResult: () => () => undefined,
@@ -83,7 +84,7 @@ describe("Pick", () => {
   it("shows the no-speech state and goes home from it", async () => {
     fake.getProject.mockResolvedValue(project([]));
     await mount({ analyze: { clips: 0, new: 0, reason: "no_speech" } });
-    expect(text()).toContain("No speech found in this video. vedit finds clips from what people say.");
+    expect(text()).toContain("No speech found in this video. Vedit finds clips from what people say.");
     await act(async () => (host.querySelector("a.secondary[href='/']") as HTMLElement).click());
     expect(loc()).toBe("/");
   });
@@ -128,14 +129,14 @@ describe("Pick", () => {
     fake.getProject.mockResolvedValue(project([clip("a", 0, 50), clip("b", 40, 90)]));
     await mount({ analyze: { clips: 2, new: 2 } });
     await act(async () => host.querySelectorAll<HTMLButtonElement>(".clip-main")[1].click()); // a
-    await act(async () => button("Edit selected").click());
+    await act(async () => button("Edit this clip").click());
     expect(loc()).toBe("/p/p1/edit/a");
   });
 
   it("selects the best clip first", async () => {
     fake.getProject.mockResolvedValue(project([clip("a", 0, 50), clip("b", 40, 90)]));
     await mount({ analyze: { clips: 2, new: 2 } });
-    await act(async () => button("Edit selected").click());
+    await act(async () => button("Edit this clip").click());
     expect(loc()).toBe("/p/p1/edit/b");
   });
 
@@ -170,6 +171,6 @@ describe("Pick", () => {
     fake.getProject.mockResolvedValue(project(Array.from({ length: 60 }, (_, i) => clip(`x${i}`, i * 100, 50))));
     await mount({ analyze: { clips: 60, new: 60 } });
     expect((button("Find more clips") as HTMLButtonElement).disabled).toBe(true);
-    expect(text()).toContain("You have the most clips vedit can find (60).");
+    expect(text()).toContain("You have the most clips Vedit can find (60).");
   });
 });

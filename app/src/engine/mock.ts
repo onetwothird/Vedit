@@ -176,7 +176,7 @@ function clipView(edl: Edl, tr: Transcript): ClipView {
     }
     t += kr[1] - kr[0];
   });
-  return { edl: copy(edl), kept_ranges, captions: captionTrack(edl, spoken) };
+  return { edl: copy(edl), kept_ranges, captions: captionTrack(edl, spoken), sample_offset: base };
 }
 
 // ---- the engine -----------------------------------------------------------------------------------------------
@@ -218,6 +218,12 @@ export function createMockEngine(opts: { tickMs?: number; persist?: Pick<Storage
 
   const notFound = (what: string) => new EngineError(404, "not_found", `not found: ${what}`);
 
+  /** Steady, made-up scores per clip, shaped like the engine's (0..1 each), so Pick clips has reasons to show. */
+  const mockFeatures = (i: number, score: number): Record<string, number> => {
+    const f = (k: number) => Math.round(((Math.sin(i * 2.3 + k) + 1) / 2) * 100) / 100;
+    return { hook: score / 100, energy: f(1), laughter: f(2), direct: f(3), complete: f(4), face: 0.5 };
+  };
+
   /** Clips `from` up to (not including) `to` of the full list, with an edit file each. */
   function seedClips(pid: string, from = 0, to = CLIPS.length): ProjectClip[] {
     return ALL_CLIPS.slice(from, to).map(([title, score, kept], k) => {
@@ -226,7 +232,7 @@ export function createMockEngine(opts: { tickMs?: number; persist?: Pick<Storage
       const id = `h${String(i + 1).padStart(2, "0")}`;
       const highlight: Highlight = {
         id, start: transcript.words[w0].start, end: transcript.words[w1].end, w0, w1, score, title,
-        features: { hook: score / 100 },
+        features: mockFeatures(i, score),
       };
       let edl: Edl = { clips: [{ src: "main", words: [w0, w1] }], output: { aspect: "9:16", fps: 30 }, captions: { style: "pop" } };
       for (const f of HARD_FILLERS) edl = applyOp(edl, { op: "cut", w0: w0 + f, w1: w0 + f });

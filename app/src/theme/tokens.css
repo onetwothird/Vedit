@@ -12,6 +12,15 @@
   font-style: normal;
   font-display: swap;
 }
+/* Poppins Bold: the font the export draws text layers in (scripts/render.py TEXT_FONT), so the preview wraps and
+   sizes them the same way. */
+@font-face {
+  font-family: "Poppins";
+  src: url("../fonts/Poppins-Bold.ttf") format("truetype");
+  font-weight: 700;
+  font-style: normal;
+  font-display: block;
+}
 @font-face {
   font-family: "Geist Pixel";
   src: url("../fonts/GeistPixel-Square.woff2") format("woff2");

@@ -84,7 +84,7 @@ class ExportBody(BaseModel):
     clips: list[str]
     formats: list[str] = ["9:16"]
     quality: Literal["normal", "high"] = "normal"
-    out_dir: Optional[str] = None  # absolute folder for the files; default: "<name> - vedit" next to the video
+    out_dir: Optional[str] = None  # absolute folder for the files; default: "<name> - Vedit" next to the video
     srt: bool = True  # also write the .srt subtitle file
     thumbnail: bool = False  # also save a .jpg frame beside each video
     first_number: int = Field(1, ge=1, le=999)  # the "NN" the first clip's file name starts at (a retry keeps its number)

@@ -96,6 +96,8 @@ export function cutWords(edl: Edl, w0: number, w1: number): Edl {
   return e;
 }
 
+const CLIP_WIDE = ["crop_x", "speed"] as const; // set on every clip by the framing patch, so a restored piece takes them too
+
 export function restoreWords(edl: Edl, w0: number, w1: number): Edl {
   checkRange(w0, w1);
   const e = copy(edl);
@@ -115,6 +117,8 @@ export function restoreWords(edl: Edl, w0: number, w1: number): Edl {
     pos = touching[0][0];
   } else {
     node = { src, words: [w0, w1] };
+    // a clip-wide setting (framing, speed) carries over from the clip's other pieces
+    for (const k of CLIP_WIDE) if (same.length && k in same[0][1]) node[k] = copy(same[0][1][k]);
     const after = same.filter(([, c]) => c.words![0] > w1).map(([i]) => i);
     pos = after.length ? after[0] : same.length ? same[same.length - 1][0] + 1 : clips.length;
   }
@@ -155,7 +159,7 @@ export function patchSection(edl: Edl, section: EditSection, patch: Record<strin
       else sec[k] = copy(v);
     }
   } else if (section === "framing") {
-    const bad = Object.keys(patch).filter((k) => !["crop_x", "zoom", "fit"].includes(k));
+    const bad = Object.keys(patch).filter((k) => !["crop_x", "zoom", "fit", "speed"].includes(k));
     if (bad.length) throw new Error(`unknown framing keys: ${bad.sort().join(", ")}`);
     if ("fit" in patch) {
       if (patch.fit === null) delete e.fit;
@@ -168,6 +172,13 @@ export function patchSection(edl: Edl, section: EditSection, patch: Record<strin
         else c[k] = v;
       }
     }
+  } else if (section === "overlays") {
+    const bad = Object.keys(patch).filter((k) => k !== "items");
+    if (bad.length) throw new Error(`unknown overlays keys: ${bad.sort().join(", ")}`);
+    const items = patch.items;
+    if (items === null || items === undefined) delete e.overlays;
+    else if (Array.isArray(items)) e.overlays = copy(items);
+    else throw new Error("overlays items must be a list");
   } else if (section === "output") {
     const bad = Object.keys(patch).filter((k) => k !== "aspect");
     if (bad.length) throw new Error(`unknown output keys: ${bad.sort().join(", ")}`);

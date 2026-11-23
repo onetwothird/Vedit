@@ -130,7 +130,7 @@ export function supabaseProvider(opts: SupabaseOptions): AuthProvider {
     const photo = [meta.avatar_url, meta.picture].find((p) => typeof p === "string" && p.startsWith("https://"));
     return {
       id: u.id,
-      name: displayName(meta) || email.split("@")[0] || "vedit",
+      name: displayName(meta) || email.split("@")[0] || "Vedit",
       email,
       provider: via,
       plan: u.app_metadata?.plan === "lifetime" ? "lifetime" : "free",

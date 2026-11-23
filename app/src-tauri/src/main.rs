@@ -121,7 +121,7 @@ fn main() {
             show_in_folder
         ])
         .build(tauri::generate_context!())
-        .expect("failed to build the vedit Studio app");
+        .expect("failed to build the Vedit Studio app");
 
     app.run(|handle, event| match event {
         RunEvent::Exit => handle.state::<Engine>().shutdown(),

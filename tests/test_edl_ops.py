@@ -131,10 +131,9 @@ def test_kept_ranges_pad_and_time_clips(pipeline_workdir):
     W = tr["words"]
     e = {"pad": [0, 0], "clips": [{"src": "main", "in": 1.0, "out": 2.5}, {"src": "main", "words": [2, 3]}]}
     got = kept_ranges(e, tr)
-    assert got[0] == (1.0, pytest.approx(2.5))   # 1.5 s = exactly 45 frames at the default 30 fps
+    assert got[0] == (1.0, pytest.approx(2.5)) 
     assert got[1][0] == max(0.0, W[2]["start"])
     assert got[1][1] == pytest.approx(W[3]["end"], abs=1 / 30)
-
 
 def test_clip_edl_stays_inside_highlight(en_podcast_wd):
     hs, _ = find_highlights(en_podcast_wd)
@@ -242,3 +241,44 @@ def test_patch_section_framing_null_removes_keys():
     assert "fit" not in out
     assert all("crop_x" not in c and "zoom" not in c for c in out["clips"])
     assert out["clips"][0]["words"] == [0, 1] and "fit" not in patch_section({"clips": []}, "framing", {"fit": None})
+
+
+def test_patch_section_overlays_replace_and_clean():
+    items = [
+        {"id": "t1", "type": "text", "at": {"src": "main", "t": 2}, "duration": 3, "text": "Day 1", "position": "top", "x": 9},
+        {"type": "image", "at": {"src": "main", "t": 5.5}, "duration": 2, "path": "C:/b.png", "mode": "pip", "position": "top-left"},
+    ]
+    out = patch_section(E, "overlays", {"items": items})
+    assert out["overlays"][0] == {"id": "t1", "type": "text", "at": {"src": "main", "t": 2.0}, "duration": 3.0,
+                                  "text": "Day 1", "position": "top"}
+    assert out["overlays"][1]["mode"] == "pip" and out["overlays"][1]["position"] == "top-left"
+    assert "overlays" not in patch_section(out, "overlays", {"items": None})
+
+
+@pytest.mark.parametrize("bad", [
+    {"type": "gif", "at": {"src": "main", "t": 0}, "duration": 1},
+    {"type": "text", "at": {"src": "main", "t": 0}, "duration": 1, "text": " "},
+    {"type": "text", "at": 3, "duration": 1, "text": "x"},
+    {"type": "text", "at": {"src": "main", "t": 0}, "duration": 0, "text": "x"},
+    {"type": "video", "at": {"src": "main", "t": 0}, "duration": 1, "path": ""},
+    {"type": "image", "at": {"src": "main", "t": 0}, "duration": 1, "path": "a.png", "mode": "pip", "position": "left"},
+])
+def test_patch_section_overlays_rejects_bad_items(bad):
+    with pytest.raises(ValueError):
+        patch_section(E, "overlays", {"items": [bad]})
+
+
+def test_patch_section_framing_speed_and_bad_speed():
+    edl = {"clips": [{"src": "main", "words": [0, 3]}, {"src": "main", "words": [5, 8]}]}
+    out = patch_section(edl, "framing", {"speed": 1.25})
+    assert [c["speed"] for c in out["clips"]] == [1.25, 1.25]
+    assert "speed" not in patch_section(out, "framing", {"speed": None})["clips"][0]
+    for bad in (0.1, 9, "fast", True):
+        with pytest.raises(ValueError):
+            patch_section(edl, "framing", {"speed": bad})
+
+
+def test_restore_keeps_clip_wide_speed_and_framing():
+    edl = {"clips": [{"src": "main", "words": [0, 3], "speed": 1.5, "crop_x": 0.4}]}
+    out = restore_words(edl, 8, 9)  # touches nothing: a new piece
+    assert out["clips"][1] == {"src": "main", "words": [8, 9], "speed": 1.5, "crop_x": 0.4}

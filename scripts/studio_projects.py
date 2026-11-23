@@ -193,7 +193,7 @@ def list_recent(limit: int = 10) -> list[Project]:
 
 def output_dir(source: Path) -> Path:
     source = Path(source)
-    return source.parent / f"{source.stem} - vedit"
+    return source.parent / f"{source.stem} - Vedit"
 
 
 def output_name(index: int, title: str, aspect: str) -> str:

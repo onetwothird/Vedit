@@ -1,7 +1,9 @@
 import { memo, useEffect, useMemo, useRef, useState, type KeyboardEvent, type PointerEvent } from "react";
-import type { TranscriptWord } from "../engine/types";
+import type { Overlay, TranscriptWord } from "../engine/types";
+import { duplicateLayer, withIds } from "../edit/overlays";
+import OverlayLane from "./OverlayLane";
 import { t } from "../i18n/t";
-import { laneSegments, rulerTicks, snapToWord, speechEnergy, wordSlot } from "../edit/lanes";
+import { lanePieces, laneSegments, rulerTicks, snapToWord, speechEnergy, splitWordAt, wordSlot, type Piece } from "../edit/lanes";
 import { baseName } from "../lib/native";
 
 export interface TimelineProps {
@@ -18,7 +20,22 @@ export interface TimelineProps {
   onSeek(srcT: number): void;
   /** Keep words first..last of the clip (snapped to words). */
   onTrim(first: number, last: number): void;
+  /** Cut words w0..w1 (a deleted piece). */
+  onCut(w0: number, w1: number): void;
+  /** Text and b-roll on the clip; onOverlays saves the whole list (one undo step). */
+  overlays?: readonly Overlay[];
+  onOverlays?(items: Overlay[]): void;
+  /** Undo and redo the last edit (Ctrl+Z, Ctrl+Shift+Z). */
+  onUndo?(): void;
+  onRedo?(): void;
+  canUndo?: boolean;
+  canRedo?: boolean;
+  /** The selected text or b-roll layer, shared with the Text and B-roll tools; left out, the timeline keeps its own. */
+  layer?: string | null;
+  onLayer?(id: string | null): void;
 }
+
+const ZOOM_MAX = 10;
 
 /** Lane width when the layout cannot be measured (jsdom, first paint). */
 export const FALLBACK_WIDTH = 600;
@@ -41,7 +58,7 @@ const ToolIcon = ({ d }: { d: string }) => (
 );
 
 /** The clip on a source-time ruler: captions, the video with its cuts, music, and a draggable playhead. */
-function Timeline({ words, w0, w1, kept, captions, music, playhead, onSeek, onTrim }: TimelineProps) {
+function Timeline({ words, w0, w1, kept, captions, music, playhead, onSeek, onTrim, onCut, overlays = [], onOverlays, onUndo, onRedo, canUndo = false, canRedo = false, layer, onLayer }: TimelineProps) {
   const [tool, setTool] = useState<Tool>("select");
   const [zoom, setZoom] = useState(1);
   const [laneW, setLaneW] = useState(FALLBACK_WIDTH);
@@ -49,6 +66,18 @@ function Timeline({ words, w0, w1, kept, captions, music, playhead, onSeek, onTr
   const scroller = useRef<HTMLDivElement>(null);
   const content = useRef<HTMLDivElement>(null);
   const drag = useRef<Drag | null>(null);
+  // Split points (the word each new piece starts at) and the selected piece. They only shape the timeline: a split
+  // alone changes nothing in the video, so they are not saved; deleting a piece is a cut, saved and undoable.
+  const [splits, setSplits] = useState<ReadonlySet<number>>(() => new Set());
+  const [picked, setPicked] = useState<number | null>(null); // the selected piece's first word
+  const [ownLayer, setOwnLayer] = useState<string | null>(null); // the selected text or b-roll, when no one shares it
+  const ovSel = layer !== undefined ? layer : ownLayer;
+  const setOvSel = (id: string | null) => (onLayer ? onLayer(id) : setOwnLayer(id));
+  useEffect(() => {
+    setSplits(new Set());
+    setPicked(null);
+    setOwnLayer(null);
+  }, [w0, w1]);
 
   useEffect(() => {
     const el = scroller.current;
@@ -68,6 +97,8 @@ function Timeline({ words, w0, w1, kept, captions, music, playhead, onSeek, onTr
   const x = (s: number) => (s - t0) * pps;
   const segs = useMemo(() => laneSegments(words, w0, w1, kept), [words, w0, w1, kept]);
   const keptSegs = segs.filter((s) => s.kind === "kept");
+  const pieces = useMemo(() => lanePieces(words, segs, splits, w1), [words, segs, splits, w1]);
+  const selected: Piece | undefined = pieces.find((p) => p.w0 === picked);
   const first = keptSegs[0]?.w0 ?? w0;
   const last = keptSegs[keptSegs.length - 1]?.w1 ?? w1;
 
@@ -142,6 +173,70 @@ function Timeline({ words, w0, w1, kept, captions, music, playhead, onSeek, onTr
     onSeek(Math.min(t1, Math.max(t0, playhead + d)));
   }
 
+  const splitAt = splitWordAt(words, pieces, playhead);
+  function split() {
+    if (splitAt === null) return;
+    setSplits((s) => new Set([...s, splitAt]));
+    setPicked(splitAt);
+  }
+  const items: Overlay[] = useMemo(() => withIds(overlays), [overlays]);
+  const ovSelected = items.find((o) => o.id === ovSel);
+  const saveOverlays = (next: Overlay[]) => onOverlays?.(next);
+  const changeOverlay = (next: Overlay) => saveOverlays(items.map((o) => (o.id === next.id ? next : o)));
+  function selectOverlay(id: string | null) {
+    setOvSel(id);
+    if (id) setPicked(null);
+  }
+  function duplicate() {
+    if (!ovSelected) return;
+    const o = duplicateLayer(ovSelected, t0, t1);
+    saveOverlays([...items, o]);
+    selectOverlay(o.id!);
+  }
+  const zoomBy = (d: number) => setZoom((z) => Math.min(ZOOM_MAX, Math.max(1, z + d)));
+
+  function remove() {
+    if (ovSelected) {
+      setOvSel(null);
+      saveOverlays(items.filter((o) => o.id !== ovSelected.id));
+      return;
+    }
+    if (!selected) return;
+    setPicked(null);
+    onCut(selected.w0, selected.w1);
+  }
+  // S splits at the playhead; Delete or Backspace removes the selected piece. Not while typing.
+  const keys = useRef({ split, remove, duplicate, zoomBy });
+  keys.current = { split, remove, duplicate, zoomBy };
+  useEffect(() => {
+    const onKey = (e: globalThis.KeyboardEvent) => {
+      const el = e.target as HTMLElement | null;
+      const typing = el && (["INPUT", "TEXTAREA", "SELECT"].includes(el.tagName) || el.isContentEditable);
+      if ((e.ctrlKey || e.metaKey) && !e.altKey && !e.shiftKey && !typing && e.key.toLowerCase() === "d") {
+        e.preventDefault();
+        keys.current.duplicate();
+        return;
+      }
+      if (!typing && !e.ctrlKey && !e.metaKey && (e.key === "=" || e.key === "+" || e.key === "-")) {
+        e.preventDefault();
+        keys.current.zoomBy(e.key === "-" ? -1 : 1);
+        return;
+      }
+      if (e.ctrlKey || e.metaKey || e.altKey || (el && (["INPUT", "TEXTAREA", "SELECT"].includes(el.tagName) || el.isContentEditable))) return;
+      if (e.key === "s" || e.key === "S") {
+        e.preventDefault();
+        keys.current.split();
+      } else if (e.key === "Delete" || e.key === "Backspace") {
+        // the transcript and other panels use these keys for their own selection
+        if (el && el !== document.body && !el.closest?.(".ed-tl")) return;
+        e.preventDefault();
+        keys.current.remove();
+      }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, []);
+
   const edgeAt = (kind: "start" | "end"): number => {
     const w = draft?.kind === kind ? draft.w : kind === "start" ? first : last;
     return kind === "start" ? words[w]?.start ?? t0 : wordSlot(words, w, w1)[1];
@@ -152,28 +247,48 @@ function Timeline({ words, w0, w1, kept, captions, music, playhead, onSeek, onTr
     <section className="ed-tl" aria-label={t("edit.tl.label")}>
       <div className="tl-bar">
         <div className="tl-tools">
-          <button type="button" className="icon" aria-label={t("edit.tl.select")} title={t("edit.tl.select")} aria-pressed={tool === "select"} onClick={() => setTool("select")}>
+          <button type="button" className="icon" aria-label={t("edit.tl.undo")} title={t("edit.tl.undo.title")} disabled={!canUndo || !onUndo} onClick={onUndo}>
+            <ToolIcon d="M9 14 4 9l5-5M4 9h10.5a5.5 5.5 0 0 1 0 11H11" />
+          </button>
+          <button type="button" className="icon" aria-label={t("edit.tl.redo")} title={t("edit.tl.redo.title")} disabled={!canRedo || !onRedo} onClick={onRedo}>
+            <ToolIcon d="m15 14 5-5-5-5M20 9H9.5a5.5 5.5 0 0 0 0 11H13" />
+          </button>
+          <span className="divider" aria-hidden="true" />
+          <button type="button" className="icon" aria-label={t("edit.tl.select")} title={t("edit.tl.select.title")} aria-pressed={tool === "select"} onClick={() => setTool("select")}>
             <ToolIcon d="M5 3l14 8-6 2-2 6z" />
           </button>
-          <button type="button" className="icon" aria-label={t("edit.tl.split")} title={t("edit.tl.split.soon")} disabled>
+          <button type="button" className="icon" aria-label={t("edit.tl.split")} title={t("edit.tl.split.title")} disabled={splitAt === null} onClick={split}>
             <ToolIcon d="M8.6 7.6 20 18M8.6 16.4 20 6M9 6a3 3 0 1 1-6 0 3 3 0 0 1 6 0zM9 18a3 3 0 1 1-6 0 3 3 0 0 1 6 0z" />
           </button>
           <button type="button" className="icon" aria-label={t("edit.tl.trim")} title={t("edit.tl.trim.title")} aria-pressed={tool === "trim"} onClick={() => setTool(tool === "trim" ? "select" : "trim")}>
             <ToolIcon d="M7 4v16M17 4v16M7 12h10" />
           </button>
-          <span className="divider" aria-hidden="true" />
-          <button type="button" className="secondary" title={t("edit.tl.soon")} disabled>{t("edit.tl.text")}</button>
-          <button type="button" className="secondary" title={t("edit.tl.soon")} disabled>{t("edit.tl.broll")}</button>
+          <button type="button" className="icon" aria-label={t("edit.tl.duplicate")} title={t("edit.tl.duplicate.title")} disabled={!ovSelected} onClick={duplicate}>
+            <ToolIcon d="M9 9h11v11H9zM5 15V4h11" />
+          </button>
+          <button type="button" className="icon" aria-label={t(ovSelected ? "edit.tl.delete.layer" : "edit.tl.delete")} title={t(ovSelected ? "edit.tl.delete.layer.title" : "edit.tl.delete.title")} disabled={!selected && !ovSelected} onClick={remove}>
+            <ToolIcon d="M4 7h16M9 7V4.5h6V7M6.5 7l1 13h9l1-13M10 11v5M14 11v5" />
+          </button>
         </div>
-        <label className="tl-zoom">
-          {t("edit.tl.zoom")}
-          <input type="range" min={1} max={10} step={1} value={zoom} onChange={(e) => setZoom(Number(e.currentTarget.value))} />
-        </label>
+        <div className="tl-zoom">
+          <button type="button" className="icon" aria-label={t("edit.tl.zoom.out")} title={t("edit.tl.zoom.out.title")} disabled={zoom <= 1} onClick={() => zoomBy(-1)}>
+            <ToolIcon d="M5 12h14" />
+          </button>
+          <input type="range" aria-label={t("edit.tl.zoom")} min={1} max={ZOOM_MAX} step={1} value={zoom} onChange={(e) => setZoom(Number(e.currentTarget.value))} />
+          <button type="button" className="icon" aria-label={t("edit.tl.zoom.in")} title={t("edit.tl.zoom.in.title")} disabled={zoom >= ZOOM_MAX} onClick={() => zoomBy(1)}>
+            <ToolIcon d="M12 5v14M5 12h14" />
+          </button>
+          <button type="button" className="icon" aria-label={t("edit.tl.zoom.fit")} title={t("edit.tl.zoom.fit.title")} disabled={zoom === 1} onClick={() => setZoom(1)}>
+            <ToolIcon d="M4 9V4h5M20 9V4h-5M4 15v5h5M20 15v5h-5" />
+          </button>
+        </div>
       </div>
 
       <div className="tl-body">
         <div className="tl-names" aria-hidden="true">
           <span />
+          <span>{t("edit.tl.lane.text")}</span>
+          <span>{t("edit.tl.lane.broll")}</span>
           <span>{t("edit.tl.captions")}</span>
           <span className="video">{t("edit.tl.video")}</span>
           <span>{t("edit.tl.music")}</span>
@@ -193,6 +308,21 @@ function Timeline({ words, w0, w1, kept, captions, music, playhead, onSeek, onTr
                 <span key={s} style={{ left: s * pps }}>{clock(s)}</span>
               ))}
             </div>
+
+            {(["text", "broll"] as const).map((kind) => (
+              <OverlayLane
+                key={kind}
+                kind={kind}
+                overlays={items}
+                x={x}
+                pps={pps}
+                t0={t0}
+                t1={t1}
+                selected={ovSel}
+                onSelect={selectOverlay}
+                onChange={changeOverlay}
+              />
+            ))}
 
             <div className="tl-lane tl-caps" role="group" aria-label={t("edit.tl.captions")}>
               {captions.map((c, i) => (
@@ -222,6 +352,20 @@ function Timeline({ words, w0, w1, kept, captions, music, playhead, onSeek, onTr
                   </div>
                 );
               })}
+              {tool === "select" && pieces.map((p) => (
+                <button
+                  key={`p${p.w0}`}
+                  type="button"
+                  className={`tl-piece${p.w0 === picked ? " on" : ""}${splits.has(p.w0) ? " split" : ""}`}
+                  style={{ left: x(p.start), width: Math.max(2, x(p.end) - x(p.start) - 2) }}
+                  aria-label={t("edit.tl.piece", { a: words[p.w0]?.text ?? "", b: words[p.w1]?.text ?? "" })}
+                  aria-pressed={p.w0 === picked}
+                  onClick={() => {
+                    setPicked(p.w0 === picked ? null : p.w0);
+                    setOvSel(null);
+                  }}
+                />
+              ))}
               {tool === "trim" && keptSegs.length > 0 && (["start", "end"] as const).map((kind) => (
                 <span
                   key={kind}

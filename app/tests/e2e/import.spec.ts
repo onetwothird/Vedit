@@ -59,7 +59,7 @@ test("a failed analysis shows the error and Try again recovers", async ({ page }
 test("an unsupported file is rejected with a plain message", async ({ page }) => {
   await page.goto("/#/p/new/import");
   await chooseVideo(page, "notes.txt");
-  await expect(page.getByRole("alert")).toHaveText("This file isn't a video vedit can open. Try an MP4 or MOV file.");
+  await expect(page.getByRole("alert")).toHaveText("This file isn't a video Vedit can open. Try an MP4 or MOV file.");
   await expect(page.getByRole("button", { name: "Start" })).toBeDisabled();
 });
 

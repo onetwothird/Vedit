@@ -1,15 +1,17 @@
 import { useEffect, useRef, useState } from "react";
 import { Link, useLocation, useNavigate, useParams } from "react-router-dom";
 import ClipList from "../components/ClipList";
+import EpisodeTimeline from "../components/EpisodeTimeline";
 import FilmFrame from "../components/FilmFrame";
 import Screen from "../components/Screen";
 import { engine } from "../engine/client";
 import { useJob } from "../engine/events";
-import type { Aspect, AnalyzeResult, ClipView, Project } from "../engine/types";
+import type { Aspect, AnalyzeResult, ClipView, Project, Transcript } from "../engine/types";
 import { t } from "../i18n/t";
 import { keptCount, sortClips, type ClipSort } from "../lib/clips";
 import { analyzeBody, baseName } from "../lib/native";
-import { formatLength } from "../lib/time";
+import { formatClock, formatLength } from "../lib/time";
+import { whyPicked } from "../lib/why";
 import { useFilmstrip } from "../lib/useFilmstrip";
 import { coverWidth } from "../lib/filmstrip";
 import { previewSrc } from "../preview/media";
@@ -17,8 +19,8 @@ import Player from "../preview/Player";
 
 const MORE_CLIPS = 6;
 const MAX_CLIPS = 60; // the most the engine accepts
-const STAGE_PAD = 48; // .stage padding, both sides
-const STAGE_MAX_H = 420;
+const STAGE_MAX_H = 560; // the phone frame never grows past this, however tall the window
+const CONTROLS_H = 56; // the player's controls under the frame
 
 const ASPECTS: Aspect[] = ["9:16", "1:1", "4:5", "16:9"];
 
@@ -53,7 +55,8 @@ export default function Pick() {
   const running = job?.state === "queued" || job?.state === "running";
   const busy = running || starting;
   const stage = useRef<HTMLDivElement>(null);
-  const [stageW, setStageW] = useState(560);
+  const [fit, setFit] = useState({ width: 320, height: 420 });
+  const [transcript, setTranscript] = useState<Transcript | null>(null);
 
   // the selected clip's edit, for the player; until it arrives (or if it never does) the filmstrip frame stands in
   const [loaded, setLoaded] = useState<{ hid: string; view: ClipView } | null>(null);
@@ -99,12 +102,24 @@ export default function Pick() {
   useEffect(() => {
     const el = stage.current;
     if (!el || typeof ResizeObserver === "undefined") return;
-    const measure = () => setStageW(Math.max(80, el.clientWidth - STAGE_PAD));
+    const measure = () =>
+      setFit({ width: Math.max(80, el.clientWidth), height: Math.max(160, Math.min(STAGE_MAX_H, el.clientHeight - CONTROLS_H)) });
     measure();
     const ro = new ResizeObserver(measure);
     ro.observe(el);
     return () => ro.disconnect();
   }, [project !== null]);
+
+  // the words, for each clip's quote and the video's waveform; Pick still works without them
+  const hasClips = (project?.clips.length ?? 0) > 0;
+  useEffect(() => {
+    if (!id || !hasClips) return;
+    let live = true;
+    engine.transcript(id).then((tr) => live && setTranscript(tr), () => undefined);
+    return () => {
+      live = false;
+    };
+  }, [id, hasClips]);
 
   const clips = project?.clips ?? [];
   const sorted = sortClips(clips, sort);
@@ -166,9 +181,6 @@ export default function Pick() {
     fileName: project ? baseName(project.source) : undefined,
     step: 2 as const,
     editHid: currentId,
-    primary: id
-      ? { label: t("pick.edit"), disabled: !currentId, onClick: () => currentId && navigate(`/p/${id}/edit/${currentId}`) }
-      : undefined,
   };
 
   if (missing) {
@@ -233,30 +245,85 @@ export default function Pick() {
 
         <section className="pick-preview" aria-label={t("pick.preview")}>
           {current && (
-            <>
-              <div className="stage" ref={stage}>
-                {loaded && loaded.hid === current.highlight.id && project ? (
-                  <Player
-                    key={loaded.hid}
-                    view={loaded.view}
-                    src={previewSrc(project)}
-                    aspect={ASPECTS.find((a) => a === loaded.view.edl.output?.aspect) ?? "9:16"}
-                    fit={{ width: stageW, height: STAGE_MAX_H }}
-                    poster={(f) => <FilmFrame film={film} t={current.highlight.start} width={coverWidth(film, f.width, f.height)} />}
-                  />
-                ) : (
-                  <FilmFrame film={film} t={current.highlight.start} fit={{ width: stageW, height: STAGE_MAX_H }} className="preview-frame" />
-                )}
-              </div>
-              <h2 className="preview-title">{current.highlight.title}</h2>
-              <p className="preview-meta">
-                <span>{t("pick.length", { len: formatLength(current.highlight.end - current.highlight.start) })}</span>
-                <span>{t("pick.score", { n: Math.round(current.highlight.score) })}</span>
-              </p>
-            </>
+            <div className="stage" ref={stage}>
+              {loaded && loaded.hid === current.highlight.id && project ? (
+                <Player
+                  key={loaded.hid}
+                  view={loaded.view}
+                  src={previewSrc(project)}
+                  aspect={ASPECTS.find((a) => a === loaded.view.edl.output?.aspect) ?? "9:16"}
+                  fit={fit}
+                  poster={(f) => <FilmFrame film={film} t={current.highlight.start} width={coverWidth(film, f.width, f.height)} />}
+                />
+              ) : (
+                <FilmFrame film={film} t={current.highlight.start} fit={fit} className="preview-frame" />
+              )}
+            </div>
           )}
         </section>
+
+        {current && (
+          <ClipDetails
+            clip={current}
+            words={transcript?.words}
+            onToggleKept={() => toggleKept(current.highlight.id)}
+            onEdit={() => id && navigate(`/p/${id}/edit/${current.highlight.id}`)}
+          />
+        )}
+
+        {transcript && (
+          <EpisodeTimeline
+            clips={clips}
+            words={transcript.words}
+            duration={transcript.duration ?? transcript.words[transcript.words.length - 1]?.end ?? 0}
+            currentId={currentId}
+            onSelect={setPicked}
+          />
+        )}
       </div>
     </Screen>
+  );
+}
+
+/** The selected clip: where it is in the video, what's said, why it was picked, and what to do with it. */
+function ClipDetails({ clip, words, onToggleKept, onEdit }: {
+  clip: Project["clips"][number];
+  words?: Transcript["words"];
+  onToggleKept(): void;
+  onEdit(): void;
+}) {
+  const h = clip.highlight;
+  const said = words?.slice(h.w0, h.w1 + 1).filter((w) => !w.filler).map((w) => w.text).join(" ");
+  const why = whyPicked(h.features);
+  return (
+    <section className="pick-info" aria-labelledby="pick-info-title">
+      <h2 className="preview-title" id="pick-info-title">{h.title}</h2>
+      <p className="preview-meta">
+        <span>{t("pick.range", { a: formatClock(h.start), b: formatClock(h.end) })}</span>
+        <span>{t("pick.length", { len: formatLength(h.end - h.start) })}</span>
+        <span>{t("pick.score", { n: Math.round(h.score) })}</span>
+      </p>
+      {said && (
+        <div className="pick-said">
+          <h3>{t("pick.words")}</h3>
+          <blockquote>{said}</blockquote>
+        </div>
+      )}
+      {why.length > 0 && (
+        <div className="pick-why">
+          <h3>{t("pick.why")}</h3>
+          <ul>{why.map((k) => <li key={k}>{t(`pick.why.${k}`)}</li>)}</ul>
+        </div>
+      )}
+      <div className="pick-actions">
+        <button type="button" className={clip.kept ? "secondary keep-btn on" : "secondary keep-btn"} aria-pressed={clip.kept} onClick={onToggleKept}>
+          <span className="box" aria-hidden="true">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round"><path d="M5 12.5l4.5 4.5L19 7.5" /></svg>
+          </span>
+          {t("pick.keep")}
+        </button>
+        <button type="button" className="primary" onClick={onEdit}>{t("pick.edit")}</button>
+      </div>
+    </section>
   );
 }

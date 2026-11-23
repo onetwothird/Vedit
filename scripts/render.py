@@ -27,6 +27,61 @@ from common import even, ffmpeg_bin, filter_path, need, progress, ts  # noqa: E4
 from edl import Timeline  # noqa: E402
 
 
+
+TEXT_FONT = Path(__file__).resolve().parent.parent / "fonts" / "Poppins-Bold.ttf"
+TEXT_Y = {"top": "h*0.12", "center": "(h-text_h)/2", "bottom": "h*0.70-text_h"}
+TEXT_WIDTH = 0.88  # of the frame: the box, padding included, stays inside this (the preview's left/right 6%)
+
+
+def wrap_text(text: str, fs: int, max_w: float) -> str:
+    """Break text into lines that fit max_w pixels in the text font at size fs, at spaces (a word longer than a line
+    gets a line of its own). Line breaks the user typed are kept. Without the font file or Pillow, one line."""
+    try:
+        from PIL import ImageFont
+        font = ImageFont.truetype(str(TEXT_FONT), fs)
+    except Exception:
+        return text
+    out = []
+    for para in text.split("\n"):
+        line = ""
+        for word in para.split():
+            trial = f"{line} {word}" if line else word
+            if line and font.getlength(trial) > max_w:
+                out.append(line)
+                line = word
+            else:
+                line = trial
+        out.append(line)
+    return "\n".join(out)
+
+
+def _text_overlays(tl, fc: list[str], vlab: str, OW: int, OH: int) -> str:
+    """The editor's text layers as drawtext filters: white bold text on a dark box, centred, at the top, middle or bottom. The text
+    goes through a file so nothing in it can break the filter graph; expansion is off so % is literal."""
+    # the editor's text layers (they carry an id); hand-written text overlays go through the captions file instead
+    items = [o for o in (tl.edl.get("overlays") or []) if o.get("type") == "text" and o.get("id")]
+    if not items:
+        return vlab
+    cache = tl.dir / ".render_cache"
+    cache.mkdir(parents=True, exist_ok=True)
+    font = f":fontfile='{filter_path(TEXT_FONT)}'" if TEXT_FONT.exists() else ""
+    for k, ov in enumerate(items):
+        at = tl.anchor(ov.get("at", 0))
+        if at is None:
+            print(f"[render] text overlay {k} anchored to a cut moment — skipped", file=sys.stderr)
+            continue
+        dur = float(ov.get("duration", 3))
+        txt = cache / f"text{k}.txt"
+        fs = max(12, round(OH * 0.05 * float(ov.get("size", 1))))
+        pad = max(6, fs // 3)
+        txt.write_text(wrap_text(str(ov.get("text", "")), fs, OW * TEXT_WIDTH - 2 * pad), encoding="utf-8")
+        y = TEXT_Y.get(ov.get("position", "top"), TEXT_Y["top"])
+        fc.append(f"[{vlab}]drawtext=textfile='{filter_path(txt)}'{font}:expansion=none:fontsize={fs}:fontcolor=white:"
+                  f"text_align=C:box=1:boxcolor=black@0.55:boxborderw={pad}:x=(w-text_w)/2:y={y}:"
+                  f"enable='between(t,{at:.3f},{at + dur:.3f})'[vt{k}]")
+        vlab = f"vt{k}"
+    return vlab
+
 def atempo_chain(speed: float) -> list[str]:
     out, s = [], speed
     while s > 2.0:
@@ -241,6 +296,8 @@ def final_pass(tl: Timeline, segs: list[Path], ass: Path | None, out: Path, prev
         fc.append(f"[{vlab}][ov{k}]overlay={xy}:enable='between(t,{at:.3f},{at + dur:.3f})':eof_action=pass[vo{k}]")
         vlab = f"vo{k}"
         n_in += 1
+
+    vlab = _text_overlays(tl, fc, vlab, OW, OH)
 
     if ass:
         fonts = Path(__file__).resolve().parent.parent / "fonts"
