@@ -1,8 +1,5 @@
 {
   "app.name": "vedit",
-  "theme.toggle": "Switch to {mode} theme",
-  "theme.dark": "dark",
-  "theme.light": "light",
   "export.button": "Export {n} clips",
 
   "steps.label": "Steps",
@@ -13,6 +10,10 @@
   "topbar.saved": "Saved",
   "topbar.settings": "Settings",
   "topbar.home": "vedit home",
+  "menu.label": "Settings and appearance",
+  "menu.appearance": "Appearance",
+  "menu.theme.dark": "Dark",
+  "menu.theme.light": "Light",
 
   "home.title": "What are you making?",
   "home.tiles.label": "Project types",

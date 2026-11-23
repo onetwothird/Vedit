@@ -209,7 +209,7 @@ export default function Import() {
 
   if (missing) {
     return (
-      <Screen bar={bar}>
+      <Screen bar={bar} narrow>
         <h1 className="title">{t("import.title")}</h1>
         <p className="note-text" role="alert">{t("import.missing")}</p>
         <Link className="secondary inline" to="/">{t("import.home")}</Link>
@@ -219,7 +219,7 @@ export default function Import() {
 
   if (loading) {
     return (
-      <Screen bar={bar}>
+      <Screen bar={bar} narrow>
         <h1 className="title">{t("import.title")}</h1>
       </Screen>
     );
@@ -228,7 +228,7 @@ export default function Import() {
   if (job && running) {
     const pct = Math.round(job.pct);
     return (
-      <Screen bar={bar}>
+      <Screen bar={bar} narrow>
         <h1 className="title">{t("import.analyzing")}</h1>
         <section className="run">
           <div className="run-head">
@@ -255,7 +255,7 @@ export default function Import() {
 
   if (job && failed) {
     return (
-      <Screen bar={bar}>
+      <Screen bar={bar} narrow>
         <h1 className="title">{t("import.failed.title")}</h1>
         <section className="run failed">
           <p className="error" role="alert">{job.error || t("import.failed.generic")}</p>
@@ -271,7 +271,7 @@ export default function Import() {
   }
 
   return (
-    <Screen bar={bar}>
+    <Screen bar={bar} narrow>
       <h1 className="title">{t("import.title")}</h1>
       <div className="import">
         <div

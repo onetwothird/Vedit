@@ -45,15 +45,40 @@ a.step:hover { color: var(--ink); }
 }
 .icon:hover { background: var(--chip); color: var(--ink); }
 .icon:active { transform: translateY(1px); }
-.icon[aria-current="page"] { background: var(--chip); border-color: var(--line-2); color: var(--ink); }
 .icon svg { width: 18px; height: 18px; grid-area: 1 / 1; }
-.icon .gear { transition: transform .5s cubic-bezier(.3, 1.4, .5, 1); }
-.icon:hover .gear { transform: rotate(60deg); }
-/* Theme toggle: the sun shows in dark mode (click for light), the moon in light mode; they swap with a turn. */
-.theme-toggle .sun, .theme-toggle .moon { transition: transform .45s cubic-bezier(.3, 1.3, .5, 1), opacity .25s; }
-.theme-toggle .moon { opacity: 0; transform: rotate(-90deg) scale(.5); }
-html.light .theme-toggle .sun { opacity: 0; transform: rotate(90deg) scale(.5); }
-html.light .theme-toggle .moon { opacity: 1; transform: none; }
+/* App menu: one control for app-wide things (appearance, settings), like the account menu in CapCut or Descript. */
+.app-menu { position: relative; }
+.menu-btn {
+  height: 36px; padding: 0 8px 0 10px; display: inline-flex; align-items: center; gap: 4px; border-radius: var(--r-control);
+  border: 1px solid var(--line-2); color: var(--body); transition: background-color .15s, color .15s;
+}
+.menu-btn svg { width: 18px; height: 18px; }
+.menu-btn .chev { width: 14px; height: 14px; transition: transform .2s ease; }
+.menu-btn:hover, .menu-btn[aria-expanded="true"] { background: var(--chip); color: var(--ink); }
+.menu-btn[aria-expanded="true"] .chev { transform: rotate(180deg); }
+.menu-btn:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.menu-panel {
+  position: absolute; right: 0; top: calc(100% + 8px); z-index: 50; width: 232px; padding: 12px;
+  display: flex; flex-direction: column; gap: 10px;
+  background: var(--panel); border: 1px solid var(--line-2); border-radius: var(--r-surface);
+  box-shadow: 0 16px 40px #00000059; transform-origin: top right; animation: menu-in .16s ease-out;
+}
+html.light .menu-panel { box-shadow: 0 16px 40px #0000001f; }
+.menu-section { border: 0; padding: 0; margin: 0; min-width: 0; }
+.menu-section legend { padding: 0; margin-bottom: 8px; font: 500 12px var(--sans); color: var(--body); }
+.seg-full { display: flex; width: 100%; }
+.seg-full .seg-opt { flex: 1; }
+.seg-full .seg-opt span { text-align: center; }
+.menu-item {
+  display: flex; align-items: center; gap: 10px; height: 36px; padding: 0 10px; margin: 0 -4px;
+  border-radius: var(--r-control); color: var(--ink); font: 500 13px var(--sans); border-top: 0;
+}
+.menu-item svg { width: 16px; height: 16px; color: var(--body); }
+.menu-item:hover { background: var(--chip); }
+.menu-item:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+.menu-section + .menu-item { position: relative; }
+.menu-section + .menu-item::before { content: ""; position: absolute; left: 4px; right: 4px; top: -6px; height: 1px; background: var(--line); }
+@keyframes menu-in { from { opacity: 0; transform: translateY(-4px) scale(.98); } }
 html.theme-fade, html.theme-fade * { transition: background-color .3s ease, border-color .3s ease, color .3s ease, outline-color .3s ease !important; }
 .divider { width: 1px; height: 22px; background: var(--line-2); margin: 0 4px; }
 .primary {
@@ -152,7 +177,7 @@ html.theme-fade, html.theme-fade * { transition: background-color .3s ease, bord
   .stage-row.current .mark i { animation: none; }
   .sep.into::after { animation: none; transform: none; }
   .step.on, .step.on .dot { animation: none; }
-  .icon .gear, .theme-toggle .sun, .theme-toggle .moon { transition: none; }
+  .menu-btn .chev, .menu-panel { transition: none; animation: none; }
   html.theme-fade, html.theme-fade * { transition: none !important; }
   .meter i, .stage-row .bar i { transition: none; }
 }
@@ -185,6 +210,8 @@ html.theme-fade, html.theme-fade * { transition: background-color .3s ease, bord
 
 /* ---------- pick clips ---------- */
 .content.wide { max-width: none; height: 100%; padding: 20px 24px; }
+.content.narrow { max-width: 784px; }
+.content.narrow .import, .content.narrow .run { max-width: none; }
 .pick { display: grid; grid-template-columns: minmax(320px, 400px) minmax(0, 1fr); gap: 24px; height: 100%; min-height: 0; }
 .pick-side { display: flex; flex-direction: column; min-height: 0; gap: 10px; }
 .pick-count { font: 600 15px var(--sans); color: var(--ink); }
@@ -212,8 +239,10 @@ html.theme-fade, html.theme-fade * { transition: background-color .3s ease, bord
 .keep input:focus-visible + .box { outline: 2px solid var(--accent); outline-offset: 2px; }
 .pick-foot { display: flex; flex-direction: column; align-items: flex-start; gap: 8px; border-top: 1px solid var(--line); padding-top: 12px; }
 .pick-foot .secondary:disabled { cursor: progress; color: var(--body); }
-.pick-preview { display: flex; flex-direction: column; gap: 10px; min-width: 0; align-items: flex-start; overflow: auto; }
-.stage { background: var(--stage); border-radius: var(--r-surface); padding: 24px; width: 100%; max-width: 640px; display: grid; place-items: center; }
+.pick-preview { display: flex; flex-direction: column; gap: 10px; min-width: 0; align-items: center; overflow: auto; }
+/* the stage and its caption share one centred column in the space right of the list */
+.pick-preview > * { width: 100%; max-width: 760px; }
+.stage { background: var(--stage); border-radius: var(--r-surface); padding: 24px; width: 100%; max-width: 760px; display: grid; place-items: center; }
 .preview-frame { border-radius: var(--r-media); }
 .preview-title { font: 600 18px/1.3 var(--sans); color: var(--ink); }
 .preview-meta { font-size: 12px; color: var(--body); }
