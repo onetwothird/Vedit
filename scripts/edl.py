@@ -121,7 +121,7 @@ class Timeline:
         ref_img = self.sources[self.ref].get("is_image")
         o.setdefault("fps", 30 if ref_img else min(60, round(first.get("fps", 30)) or 30))
         o["path"] = self._abs(o.get("path", "final.mp4"))
-        o.setdefault("crf", 20)
+        o.setdefault("crf", 18)  # visually clean after Reels/TikTok re-encode it
         o.setdefault("preset", "medium")
         return o
 
@@ -131,6 +131,36 @@ class Timeline:
             return word_range(self.words_for(alias), a, b, pad, alias)
         except ValueError as e:
             die(str(e))
+
+    def sharp_zoom(self, alias: str) -> float:
+        """How far a static zoom can go before the crop is enlarged more than the unzoomed shot: 1 when the output
+        already needs every source pixel (or more), more when the source has pixels to spare."""
+        s = self.sources[alias]
+        if s.get("is_image"):
+            return 1.0
+        sw, sh = s["info"]["width"], s["info"]["height"]
+        OW, OH = self.out["width"], self.out["height"]
+        cw = sh * OW / OH if sw / sh > OW / OH else sw
+        return max(1.0, cw / OW)
+
+    def punchin_zoom(self, alias: str, zoom: float) -> float:
+        """An automatic punch-in, capped at sharp_zoom; under 1.02 it is not worth a visible step."""
+        z = min(zoom, self.sharp_zoom(alias))
+        return round(z, 3) if z >= 1.02 else 1.0
+
+    @staticmethod
+    def _punchins(raw: list[dict]) -> set[int]:
+        """Indices of automatic punch-ins: clips marked "punchin" (autocut), or, in edits made before the mark
+        existed, the alternating jump-cut zooms (some clips at one zoom, the rest at none). A zoom you set yourself
+        (punchin false, or the same zoom on every clip) is never changed."""
+        clips = [(i, c) for i, c in enumerate(raw) if not c.get("_bumper")]
+        if any("punchin" in c for _, c in clips):
+            return {i for i, c in clips if c.get("punchin") is True and isinstance(c.get("zoom"), (int, float))}
+        zoomed = {i: float(c["zoom"]) for i, c in clips
+                  if isinstance(c.get("zoom"), (int, float)) and not isinstance(c.get("zoom"), bool) and c["zoom"] > 1}
+        if zoomed and len(zoomed) < len(clips) and len(set(zoomed.values())) == 1:
+            return set(zoomed)
+        return set()
 
     def _resolve_clips(self):
         raw = list(self.edl.get("clips") or [])
@@ -142,6 +172,7 @@ class Timeline:
             die("edl.json has no clips")
         t = 0.0
         fps = self.out["fps"]
+        punch = self._punchins(raw)
         for i, c in enumerate(raw):
             c = dict(c)
             alias = c.get("src", self.ref)
@@ -177,6 +208,9 @@ class Timeline:
                 ain = tin + asrc["offset"]
             else:
                 ain = tin  # ref time
+            if i in punch:  # an automatic punch-in zooms only as far as the picture stays sharp
+                c["zoom_asked"] = c["zoom"]
+                c["zoom"] = self.punchin_zoom(alias, float(c["zoom"]))
             c.update({"index": i, "src": alias, "tin": tin, "tout": tin + dur * speed, "vin": vin, "ain": ain,
                       "audio_alias": a_alias, "speed": speed, "dur": dur, "t0": t, "t1": t + dur})
             self.clips.append(c)

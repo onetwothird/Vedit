@@ -91,6 +91,7 @@ def make_edl(wd: Path, src: str = "main", mode: str | None = None, max_gap: floa
             gap = spans[k][0] - spans[k - 1][1]
             if gap < 3.0 and k % 2 == 1:  # jump cut within same shot -> hide it with a punch-in
                 clips[k]["zoom"] = punchin
+                clips[k]["punchin"] = True  # automatic: render keeps it only as far as the picture stays sharp
 
     probe = an["probe"]
     suffix = "_edited" if not aspect else "_" + aspect.replace(":", "x")

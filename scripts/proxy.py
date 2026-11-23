@@ -15,7 +15,8 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from common import die, ffmpeg_bin, load_json, need, progress, save_json, workdir_for  # noqa: E402
 
-PROXY_SHORT_SIDE = 540
+PROXY_SHORT_SIDE = 1080  # the preview crops to vertical and zooms, so it needs the source's detail up to 1080p
+PROXY_CRF = "20"
 MAX_DIRECT_SECONDS = 1800
 MAX_STRIP_COLS = 50  # keeps the sprite under the 65535 px JPEG limit for any realistic source
 
@@ -112,7 +113,7 @@ def _encode(cmd: list[str], duration: float, tmp: Path) -> None:
 
 
 def make_proxy(video: Path, wd: Path) -> Path:
-    """Upright 540p H.264/AAC proxy in wd/proxy.mp4 (cached by source size+mtime), or `video` itself if fine."""
+    """Upright H.264/AAC proxy (the source's size, at most 1080p) in wd/proxy.mp4 (cached by source size+mtime), or `video` itself if fine."""
     video, wd = Path(video), Path(wd)
     info = probe(video)
     if not needs_proxy(info):
@@ -121,7 +122,8 @@ def make_proxy(video: Path, wd: Path) -> Path:
     wd.mkdir(parents=True, exist_ok=True)
     out, meta = wd / "proxy.mp4", wd / "proxy.json"
     st = video.stat()
-    key = {"src": str(video.resolve()), "size": st.st_size, "mtime": st.st_mtime}
+    key = {"src": str(video.resolve()), "size": st.st_size, "mtime": st.st_mtime,
+           "short": PROXY_SHORT_SIDE, "crf": PROXY_CRF}  # an older, smaller proxy is rebuilt
     if out.exists() and meta.exists():
         try:
             if load_json(meta) == key:
@@ -132,12 +134,13 @@ def make_proxy(video: Path, wd: Path) -> Path:
     w, h = int(v["width"]), int(v["height"])
     if rotation(v) in (90, 270):
         w, h = h, w
-    scale = f"{PROXY_SHORT_SIDE}:-2" if h > w else f"-2:{PROXY_SHORT_SIDE}"
+    short = min(PROXY_SHORT_SIDE, w, h) // 2 * 2  # never enlarged: the proxy keeps every pixel up to 1080p
+    scale = f"{short}:-2" if h > w else f"-2:{short}"
     g = str(_fps(v))
     tmp = wd / "proxy.part.mp4"
     meta.unlink(missing_ok=True)
     cmd = [ffmpeg_bin("ffmpeg"), "-y", "-v", "error", "-i", str(video), "-vf", f"scale={scale}", "-pix_fmt", "yuv420p",
-           "-c:v", "libx264", "-preset", "veryfast", "-crf", "26", "-g", g, "-keyint_min", g,
+           "-c:v", "libx264", "-preset", "veryfast", "-crf", PROXY_CRF, "-g", g, "-keyint_min", g,
            "-sc_threshold", "0"]
     cmd += ["-c:a", "aac", "-b:a", "128k"] if audio_stream(info) else ["-an"]
     cmd += ["-movflags", "+faststart", "-f", "mp4", str(tmp)]

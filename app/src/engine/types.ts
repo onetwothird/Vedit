@@ -182,6 +182,10 @@ export interface ClipView {
   captions: CaptionTrack;
   /** Mock engine only: seconds its short sample video is shifted back from real source time. */
   sample_offset?: number;
+  /** The zoom each clip is drawn at in the export: automatic punch-ins are capped where the picture would soften. */
+  zooms?: number[];
+  /** How far a zoom can go on this video before the picture is enlarged past its own pixels (1 = not at all). */
+  sharp_zoom?: number;
 }
 
 export type EditSection = "captions" | "audio" | "color" | "framing" | "output" | "overlays";

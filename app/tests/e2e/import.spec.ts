@@ -6,6 +6,20 @@ async function chooseVideo(page: Page, name: string) {
   await page.locator('input[type="file"]').setInputFiles(video(name));
 }
 
+test("the whole Clip card opens Import, and its sound button plays sound without leaving Home", async ({ page }) => {
+  await page.goto("/#/");
+  const sound = page.locator(".mode-hero").getByRole("button", { name: "Sound" });
+  if (await sound.count()) {
+    // only the local preview footage has an audio track; the bundled clip has none, so CI has no button
+    await sound.click();
+    await expect(sound).toHaveAttribute("aria-pressed", "true");
+    await expect(page).toHaveURL(/#\/$/);
+    expect(await page.locator(".mode-hero .src-frame video").evaluate((v: HTMLVideoElement) => v.muted)).toBe(false);
+  }
+  await page.locator(".mode-hero .cuts").click({ force: true, position: { x: 10, y: 10 } });
+  await expect(page).toHaveURL(/\/p\/new\/import$/);
+});
+
 test("home shows five tiles and only one is active", async ({ page }) => {
   await page.goto("/#/");
   await expect(page.getByRole("heading", { name: "What are you making?" })).toBeVisible();

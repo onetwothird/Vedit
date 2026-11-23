@@ -415,7 +415,7 @@ def test_export_steps_paths_and_result(client, auth, app, fake_queue, analyzed_p
     assert [(x["stage"], x["hid"], x["aspect"]) for x in job["result"]["renders"]] == [
         ("render 1/2", h["id"], "9:16"), ("render 2/2", h["id"], "1:1")]
     temps = [Path(s[1][s[1].index("--crf") - 1]) for s in steps]
-    assert all(s[1][s[1].index("--crf") + 1] == "18" for s in steps)
+    assert all(s[1][s[1].index("--crf") + 1] == "15" for s in steps)
     outs = [output_dir(tiny_video.resolve()) / output_name(1, h["title"], a) for a in ("9:16", "1:1")]
     for (_, argv, _), aspect, out in zip(steps, ("9:16", "1:1"), outs):
         e = load_json(argv[argv.index("--crf") - 1])
@@ -811,10 +811,10 @@ def test_render_crf_flag(pipeline_workdir, tmp_path, monkeypatch):
     seen = []
     monkeypatch.setattr(render, "render_segments", lambda tl, *a, **k: [])
     monkeypatch.setattr(render, "final_pass", lambda tl, segs, ass, out, preview: seen.append(tl.out["crf"]))
-    for extra in ([], ["--crf", "18"]):
+    for extra in ([], ["--crf", "15"]):
         monkeypatch.setattr(sys, "argv", ["render.py", str(wd / "edl.json"), *extra])
         render.main()
-    assert seen == [20, 18]
+    assert seen == [18, 15]
 
 
 # ---- models ---------------------------------------------------------------------------------------------------

@@ -1,4 +1,5 @@
 import { Fragment, useEffect, useRef, useState } from "react";
+import { t as tr } from "../../i18n/t";
 import type React from "react";
 import podcast from "./podcast.mp4";
 import poster from "./podcast-poster.jpg";
@@ -37,6 +38,8 @@ const LOCAL = import.meta.env.DEV
   : {};
 const HERO_LOCAL = Boolean(LOCAL["./hero-local.mp4"]);
 const heroVideo = LOCAL["./hero-local.mp4"] ?? podcast;
+/** podcast.mp4 was saved without audio; the local preview keeps its sound, so only it offers the sound button. */
+export const HERO_HAS_SOUND = HERO_LOCAL;
 const heroPoster = LOCAL["./hero-local.jpg"] ?? poster;
 
 /** Where to place a cover-fitted video inside a box of aspect `boxAspect` so the point (cx, cy)
@@ -165,32 +168,61 @@ function Cut({ o, children, caption }: { o: Output; children: React.ReactNode; c
     for its platform with its own caption style. Matching timecodes tie each clip to its moment. */
 export function ClipArt() {
   const root = useRef<HTMLDivElement>(null);
+  const source = useRef<HTMLVideoElement>(null);
   const motion = useInViewPlayback(root);
+  const [sound, setSound] = useState(false);
+  function toggleSound() {
+    const v = source.current;
+    if (!v) return;
+    const on = !sound;
+    v.muted = !on;
+    if (on) {
+      v.currentTime = 0; // from the top, so the line starts with its first word
+      v.play().catch(() => undefined);
+    }
+    setSound(on);
+  }
   const N = 72;
   const W = bars(N, 3);
   const spans: [number, number][] = [[6, 13], [30, 36], [53, 61]];
   return (
-    <div ref={root} className={motion ? "hero-art moving" : "hero-art"} aria-hidden="true">
+    <div ref={root} className={motion ? "hero-art moving" : "hero-art"}>
       <div className="src">
         <div className="src-frame">
-          <video src={heroVideo} poster={heroPoster} muted loop playsInline preload="metadata" />
-          <span className="src-dur mono">1:12:29</span>
+          <video ref={source} src={heroVideo} poster={heroPoster} muted loop playsInline preload="metadata" aria-hidden="true" />
+          <span className="src-dur mono" aria-hidden="true">1:12:29</span>
+          {HERO_HAS_SOUND && (
+            <button
+              type="button"
+              className="hero-sound"
+              aria-pressed={sound}
+              aria-label={tr("home.sound")}
+              title={tr(sound ? "home.sound.off" : "home.sound.on")}
+              onClick={toggleSound}
+            >
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                <path d="M11 5 6 9H3v6h3l5 4z" />
+                {sound ? <path d="M15.5 8.5a5 5 0 0 1 0 7M18.5 5.5a9 9 0 0 1 0 13" /> : <path d="m16 9 6 6M22 9l-6 6" />}
+              </svg>
+              <span>{tr(sound ? "home.sound.on.label" : "home.sound.off.label")}</span>
+            </button>
+          )}
         </div>
-        <svg className="wave" viewBox={`0 0 ${N * 5} 34`} preserveAspectRatio="none">
+        <svg className="wave" aria-hidden="true" viewBox={`0 0 ${N * 5} 34`} preserveAspectRatio="none">
           {W.map((v, i) => {
             const on = spans.findIndex(([a, b]) => i >= a && i <= b);
             const h = 4 + v * 26;
             return <rect key={i} className={on >= 0 ? `art-bar on d${on}` : "art-bar"} x={i * 5} y={30 - h} width={3.4} height={h} rx={1} />;
           })}
         </svg>
-        <div className="wave-times mono">
+        <div className="wave-times mono" aria-hidden="true">
           {spans.map(([a], i) => (
             <span key={a} style={{ left: `${(a / N) * 100}%` }}>{OUTPUTS[i].time}</span>
           ))}
         </div>
       </div>
 
-      <div className="cuts">
+      <div className="cuts" aria-hidden="true">
         <Cut o={OUTPUTS[0]} caption={HERO_LOCAL ? (t) => (
           <p className="cap-pop synced">
             {popAt(t).map((w, i) => <Fragment key={i}>{i > 0 && " "}<span>{w.toUpperCase()}</span></Fragment>)}

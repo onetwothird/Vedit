@@ -200,7 +200,10 @@ export default function Player({ view, src, aspect, fit = { width: 360, height: 
   const fw = Math.max(1, Math.floor(Math.min(fit.width, fit.height * A)));
   const fh = Math.max(1, Math.round(fw / A));
   const idx = locate(ranges, out).idx;
-  const { cropX, zoom } = clipFraming(view.edl.clips[idx]);
+  const framing = clipFraming(view.edl.clips[idx]);
+  const cropX = framing.cropX;
+  // the export's zoom for this clip when the engine sent it (punch-ins capped to stay sharp), else the edit's own
+  const zoom = view.zooms?.length === view.edl.clips.length ? view.zooms[idx] ?? framing.zoom : framing.zoom;
   const bands = safeZoneBands(aspect);
   const only = exportOnly(view.edl);
   const look = previewColor(view.edl.color);

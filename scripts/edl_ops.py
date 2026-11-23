@@ -236,6 +236,8 @@ def patch_section(edl: dict, section: Section, patch: dict) -> dict:
                     c.pop(k, None)
                 else:
                     c[k] = v
+            if "zoom" in patch:
+                c["punchin"] = False  # a zoom you chose is kept as it is, never capped like an automatic punch-in
     elif section == "overlays":
         bad = set(patch) - {"items"}
         if bad:

@@ -53,8 +53,26 @@ def test_rotated_phone_clip_proxy_is_upright(tmp_path):
     src = _clip(tmp_path / "phone.mp4", rot=90)
     p = make_proxy(src, tmp_path / "wd")
     v = video_stream(probe(p))
-    assert (v["width"], v["height"]) == (540, 960) and rotation(v) == 0
+    assert (v["width"], v["height"]) == (180, 320) and rotation(v) == 0  # upright, and never enlarged
     assert v["pix_fmt"] == "yuv420p"
+
+
+def test_proxy_keeps_detail_up_to_1080p(tmp_path):
+    """The preview crops to vertical and zooms, so the proxy keeps the source's pixels, only capping at 1080p."""
+    src = _clip(tmp_path / "wide.mkv", dur=1, size="2560x1440")
+    v = video_stream(probe(make_proxy(src, tmp_path / "wd")))
+    assert (v["width"], v["height"]) == (1920, 1080)
+
+
+def test_an_old_small_proxy_is_rebuilt(tmp_path):
+    import json
+    src = _clip(tmp_path / "talk.mkv", dur=1, size="1280x720")
+    wd = tmp_path / "wd"
+    make_proxy(src, wd)
+    meta = json.loads((wd / "proxy.json").read_text())
+    (wd / "proxy.json").write_text(json.dumps({k: meta[k] for k in ("src", "size", "mtime")}))  # an older build's key
+    v = video_stream(probe(make_proxy(src, wd)))
+    assert (v["width"], v["height"]) == (1280, 720) and json.loads((wd / "proxy.json").read_text())["short"] == 1080
 
 
 def test_compliant_source_returned_as_is(tmp_path):
@@ -66,7 +84,7 @@ def test_proxy_cached(tmp_path):
     src = _clip(tmp_path / "phone.mp4", rot=90)
     wd = tmp_path / "wd"
     p = make_proxy(src, wd)
-    assert set(load_json(wd / "proxy.json")) == {"src", "size", "mtime"}
+    assert set(load_json(wd / "proxy.json")) == {"src", "size", "mtime", "short", "crf"}
     stamp = os.stat(p).st_mtime_ns
     assert make_proxy(src, wd) == p
     assert os.stat(p).st_mtime_ns == stamp
@@ -99,7 +117,7 @@ def test_non_ascii_spaced_paths(tmp_path):
     folder.mkdir()
     src = _clip(folder / "pelikula ñ.mp4", rot=90)
     p = make_proxy(src, folder / "wd ñ")
-    assert p.exists() and video_stream(probe(p))["height"] == 960
+    assert p.exists() and video_stream(probe(p))["height"] == 320
     filmstrip(p, folder / "wd ñ")
     assert load_json(folder / "wd ñ" / "filmstrip.json")["count"] == 1
 
