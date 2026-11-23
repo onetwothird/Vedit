@@ -61,3 +61,8 @@
   .signin-show { display: none; }
   .signin-brand.small { display: flex; }
 }
+
+.signin-form .notice {
+  padding: 10px 12px; border-radius: var(--r-control); background: var(--chip);
+  font-size: 13px; line-height: 1.5; color: var(--ink);
+}

@@ -107,7 +107,11 @@ export default function SignIn() {
               />
               {mode === "signup" && <small>{t("signup.password.hint", { n: MIN_PASSWORD })}</small>}
             </label>
-            {error && <p className="error" role="alert">{t(`auth.error.${error}`, { n: MIN_PASSWORD })}</p>}
+            {error === "check_email" ? (
+              <p className="notice" role="status">{t("auth.error.check_email")}</p>
+            ) : error ? (
+              <p className="error" role="alert">{t(`auth.error.${error}`, { n: MIN_PASSWORD })}</p>
+            ) : null}
             <button type="submit" className="primary signin-submit" disabled={busy}>
               {t(mode === "signin" ? "signin.submit" : "signup.submit")}
             </button>
