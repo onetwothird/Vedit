@@ -14,7 +14,7 @@ import vlog from "./img/vlog.jpg";
    built from the app's own parts: timelines, waveforms, phone frames, caption chips. */
 
 /** Deterministic bar heights (0..1) so the waveform looks the same on every render. */
-function bars(n: number, seed: number): number[] {
+export function bars(n: number, seed: number): number[] {
   let s = seed;
   const out: number[] = [];
   for (let i = 0; i < n; i++) {

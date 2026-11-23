@@ -108,6 +108,30 @@ test("fits a 375px phone without sideways scrolling", async ({ page }) => {
   expect(over).toBe(false);
 });
 
+test("the ruler: a click scrolls to the section and parks the playhead there; scrolling moves it", async ({ page }) => {
+  await page.goto("/#/settings");
+  const ruler = page.getByRole("navigation", { name: "Settings sections" });
+  await expect(ruler.getByRole("link", { name: "Account" })).toHaveAttribute("aria-current", "true");
+
+  await ruler.getByRole("link", { name: "Brand kit" }).click();
+  await expect(ruler.getByRole("link", { name: "Brand kit" })).toHaveAttribute("aria-current", "true");
+  await expect(ruler.getByRole("link", { name: "Account" })).not.toHaveAttribute("aria-current", "true");
+  await expect(page.getByRole("heading", { name: "Brand kit" })).toBeInViewport();
+  await expect(page.locator("#brand")).toBeFocused();
+
+  // scrolling back to the top hands the playhead back to Account
+  await page.locator(".screen").evaluate((el) => el.scrollTo({ top: 0 }));
+  await expect(ruler.getByRole("link", { name: "Account" })).toHaveAttribute("aria-current", "true");
+});
+
+test("the caption preview follows the brand kit as you edit", async ({ page }) => {
+  await page.goto("/#/settings");
+  await page.getByLabel("Caption font").fill("Poppins");
+  await expect(page.locator(".cap-line")).toHaveCSS("font-family", /Poppins/);
+  await page.getByLabel("Caption color").fill("#ff0000");
+  await expect(page.locator(".cap-line")).toHaveCSS("color", "rgb(255, 0, 0)");
+});
+
 for (const scheme of ["dark", "light"] as const) {
   test(`no serious accessibility problems in ${scheme} theme`, async ({ page }) => {
     await page.goto("/");

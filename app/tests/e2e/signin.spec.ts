@@ -25,8 +25,9 @@ test("Continue with Google signs in and the header menu shows the account, then 
 
 test("email: create an account, sign out, sign back in; errors explain what to fix", async ({ page }) => {
   await page.goto("/#/signin");
-  await page.getByRole("button", { name: "Create an account" }).click();
+  await page.getByRole("tab", { name: "Create an account" }).click();
   await expect(page.getByRole("heading", { name: "Create your vedit account" })).toBeVisible();
+  await expect(page.getByRole("tab", { name: "Create an account" })).toHaveAttribute("aria-selected", "true");
   await page.getByLabel("Name").fill("Ana Reyes");
   await page.getByLabel("Email").fill("ana@example");
   await page.getByLabel("Password").fill("short");
@@ -55,4 +56,17 @@ test("sign in fits a phone screen without sideways scrolling", async ({ page }) 
   await page.goto("/#/signin");
   await expect(page.getByRole("heading", { name: "Sign in to vedit" })).toBeVisible();
   expect(await page.evaluate(() => document.documentElement.scrollWidth === innerWidth)).toBe(true);
+});
+
+test("the mode switch is a tablist the arrow keys move along", async ({ page }) => {
+  await page.goto("/#/signin");
+  const signin = page.getByRole("tab", { name: "Sign in" });
+  await expect(signin).toHaveAttribute("aria-selected", "true");
+  await signin.focus();
+  await page.keyboard.press("ArrowRight");
+  await expect(page.getByRole("tab", { name: "Create an account" })).toBeFocused();
+  await expect(page.getByRole("heading", { name: "Create your vedit account" })).toBeVisible();
+  await expect(page.getByLabel("Name")).toBeVisible();
+  await page.keyboard.press("ArrowLeft");
+  await expect(page.getByRole("heading", { name: "Sign in to vedit" })).toBeVisible();
 });

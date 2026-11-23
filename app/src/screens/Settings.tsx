@@ -1,7 +1,8 @@
-import { useEffect, useId, useRef, useState } from "react";
+import { useEffect, useId, useRef, useState, type ReactNode } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { useAuth } from "../auth/auth";
 import Avatar from "../components/Avatar";
+import Ruler from "../components/Ruler";
 import Screen from "../components/Screen";
 import { engine, isTauri } from "../engine/client";
 import { useJob } from "../engine/events";
@@ -14,6 +15,7 @@ import {
 } from "../lib/prefs";
 import { appVersion, checkForUpdate, restartApp, type FoundUpdate } from "../lib/updates";
 import { getTheme, onThemeChange, switchTheme, type Theme } from "../theme/theme";
+import poster from "./home/podcast-poster.jpg";
 
 const LANGUAGES: Language[] = ["en", "tl", "taglish"];
 const PLATFORMS: Platform[] = ["reels", "shorts", "tiktok"];
@@ -42,12 +44,30 @@ function Seg<T extends string>(props: {
   );
 }
 
-function Section({ title, note, children }: { title: string; note?: string; children: React.ReactNode }) {
-  const id = useId();
+const SECTIONS = ["account", "general", "ai", "models", "brand", "updates"] as const;
+type SectionId = (typeof SECTIONS)[number];
+
+/* Section icons, in the app's stroke style (1.7, round caps). */
+const ICONS: Record<SectionId, ReactNode> = {
+  account: <><circle cx="12" cy="8" r="3.6" /><path d="M5 20c.6-3.6 3.4-5.6 7-5.6s6.4 2 7 5.6" /></>,
+  general: <><path d="M4 7h9M17 7h3M4 17h3M11 17h9" /><circle cx="15" cy="7" r="2" /><circle cx="9" cy="17" r="2" /></>,
+  ai: <><path d="M10 4.5 11.6 9 16 10.5 11.6 12 10 16.5 8.4 12 4 10.5 8.4 9z" /><path d="M17.5 14.5v5M15 17h5" /></>,
+  models: <path d="M4 10.5v3M8 7v10M12 4v16M16 8v8M20 10.5v3" />,
+  brand: <><path d="M12 3.5a8.5 8.5 0 1 0 0 17c1 0 1.6-.7 1.6-1.5 0-.9-.6-1.3-.6-2.1 0-.9.7-1.5 1.6-1.5h2.1a3.8 3.8 0 0 0 3.8-3.8c0-4.4-3.8-8.1-8.5-8.1z" /><circle cx="7.8" cy="11" r=".9" /><circle cx="10.5" cy="7.4" r=".9" /><circle cx="15" cy="7.8" r=".9" /></>,
+  updates: <><path d="M19.5 12a7.5 7.5 0 1 1-2.2-5.3" /><path d="M19.5 4.5v4h-4" /></>,
+};
+
+function Section({ id, title, note, children }: { id: SectionId; title: string; note?: string; children: ReactNode }) {
+  const head = useId();
   return (
-    <section className="set-sec" aria-labelledby={id}>
-      <h2 id={id}>{title}</h2>
-      {note && <p className="set-note">{note}</p>}
+    <section className="set-sec" id={id} aria-labelledby={head} tabIndex={-1}>
+      <header className="set-head">
+        <span className="set-icon" aria-hidden="true">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round">{ICONS[id]}</svg>
+        </span>
+        <h2 id={head}>{title}</h2>
+        {note && <p className="set-note">{note}</p>}
+      </header>
       {children}
     </section>
   );
@@ -59,15 +79,15 @@ function AccountSection() {
   const { account, signOut } = useAuth();
   const navigate = useNavigate();
   return (
-    <Section title={t("settings.account")}>
+    <Section id="account" title={t("settings.account")}>
       {account ? (
         <div className="set-account">
           <Avatar account={account} size="lg" />
           <span className="who">
             <span className="who-name">{account.name}</span>
             {account.email && <span className="who-email" title={account.email}>{account.email}</span>}
+            <span className={`plan ${account.plan}`}>{t(`menu.plan.${account.plan}`)}</span>
           </span>
-          <span className={`plan ${account.plan}`}>{t(`menu.plan.${account.plan}`)}</span>
           <button
             type="button"
             className="secondary"
@@ -80,9 +100,9 @@ function AccountSection() {
           </button>
         </div>
       ) : (
-        <div className="set-account">
+        <div className="set-account out">
           <span className="set-note">{t("settings.account.signedout")}</span>
-          <Link className="secondary" to="/signin">{t("settings.account.signin")}</Link>
+          <Link className="primary" to="/signin">{t("settings.account.signin")}</Link>
         </div>
       )}
     </Section>
@@ -115,7 +135,7 @@ function GeneralSection() {
   }
 
   return (
-    <Section title={t("settings.general")}>
+    <Section id="general" title={t("settings.general")}>
       <div className="set-grid">
         <Seg<Language>
           legend={t("settings.language")}
@@ -248,7 +268,7 @@ function AiSection() {
   }
 
   return (
-    <Section title={t("settings.ai")} note={t("settings.ai.note")}>
+    <Section id="ai" title={t("settings.ai")} note={t("settings.ai.note")}>
       <Seg<AiProvider>
         legend={t("settings.ai.provider")}
         name="provider"
@@ -345,6 +365,9 @@ function ModelRow({ name, info, onChanged, onError }: {
 
   return (
     <li className="model-row">
+      <svg className="model-glyph" viewBox="0 0 20 20" aria-hidden="true">
+        {[5, 9, 14, 7, 11, 4].map((h, i) => <rect key={i} x={1.5 + i * 3} y={10 - h / 2} width="1.8" height={h} rx=".9" />)}
+      </svg>
       <div className="model-info">
         <span className="model-name">{label}</span>
         <span className="model-size mono">{sizeText(info.size_mb)}</span>
@@ -386,7 +409,7 @@ function ModelsSection() {
   }, []);
 
   return (
-    <Section title={t("settings.models")} note={t("settings.models.note")}>
+    <Section id="models" title={t("settings.models")} note={t("settings.models.note")}>
       {models ? (
         <ul className="model-list">
           {Object.entries(models).map(([name, info]) => (
@@ -463,6 +486,33 @@ function FileField({ id, label, value, kind, onChange }: { id: string; label: st
   );
 }
 
+/** Black or white, whichever reads on `hex` (a #rrggbb colour). */
+function inkOn(hex: string): string {
+  const n = parseInt(hex.slice(1), 16);
+  const [r, g, b] = [n >> 16, (n >> 8) & 255, n & 255];
+  return 0.299 * r + 0.587 * g + 0.114 * b > 150 ? "#111" : "#fff";
+}
+
+/** What the brand kit does: a 9:16 frame with a sample caption in the chosen font and colours, one word highlighted. */
+function CaptionPreview({ brand }: { brand: Brand }) {
+  const font = brand.font.replace(/["\\;{}]/g, "").trim();
+  const color = brand.caption_color || "#ffffff";
+  const hl = brand.highlight || "#ffffff";
+  return (
+    <figure className="cap-preview">
+      <div className="cap-frame" aria-hidden="true">
+        <img src={poster} alt="" loading="lazy" decoding="async" />
+        <p className="cap-line" style={{ color, fontFamily: font ? `"${font}", var(--sans)` : undefined }}>
+          {t("settings.brand.sample.before")}{" "}
+          <span className="cap-hl" style={{ background: hl, color: inkOn(hl) }}>{t("settings.brand.sample.word")}</span>{" "}
+          {t("settings.brand.sample.after")}
+        </p>
+      </div>
+      <figcaption>{t("settings.brand.preview")}</figcaption>
+    </figure>
+  );
+}
+
 function BrandSection() {
   const [brand, setBrand] = useState<Brand>(EMPTY_BRAND);
   const [loaded, setLoaded] = useState(false);
@@ -503,12 +553,14 @@ function BrandSection() {
   }
 
   return (
-    <Section title={t("settings.brand")} note={t("settings.brand.note")}>
+    <Section id="brand" title={t("settings.brand")} note={t("settings.brand.note")}>
+      <div className="brand-kit">
       <div className="set-grid">
         <div className="field">
           <label className="field-label" htmlFor={`${base}-font`}>{t("settings.brand.font")}</label>
           <input id={`${base}-font`} className="ed-input" value={brand.font} onChange={(e) => set({ font: e.target.value })} autoComplete="off" />
         </div>
+        <FileField id={`${base}-logo`} label={t("settings.brand.logo")} kind="logo" value={brand.logo} onChange={(v) => set({ logo: v })} />
         <div className="field">
           <label className="field-label" htmlFor={`${base}-color`}>{t("settings.brand.color")}</label>
           <div className="set-color">
@@ -523,10 +575,11 @@ function BrandSection() {
             <span className="mono">{brand.highlight || t("settings.brand.none")}</span>
           </div>
         </div>
-        <FileField id={`${base}-logo`} label={t("settings.brand.logo")} kind="logo" value={brand.logo} onChange={(v) => set({ logo: v })} />
         <FileField id={`${base}-intro`} label={t("settings.brand.intro")} kind="intro" value={brand.intro} onChange={(v) => set({ intro: v })} />
         <FileField id={`${base}-outro`} label={t("settings.brand.outro")} kind="outro" value={brand.outro} onChange={(v) => set({ outro: v })} />
         <FileField id={`${base}-music`} label={t("settings.brand.music")} kind="music" value={brand.music} onChange={(v) => set({ music: v })} />
+      </div>
+      <CaptionPreview brand={brand} />
       </div>
       <div className="row wrap">
         <button type="button" className="primary" onClick={save} disabled={busy || !loaded}>{t("settings.brand.save")}</button>
@@ -593,8 +646,8 @@ function UpdatesSection() {
             : "";
 
   return (
-    <Section title={t("settings.updates")}>
-      <p className="set-note">{version && t("settings.updates.version", { v: version })}</p>
+    <Section id="updates" title={t("settings.updates")}>
+      <p className="set-version">{version && t("settings.updates.version", { v: version })}</p>
       <div className="row wrap">
         {state.kind === "ready" ? (
           <button type="button" className="primary" onClick={() => void restartApp()}>{t("settings.updates.restart")}</button>
@@ -611,11 +664,66 @@ function UpdatesSection() {
   );
 }
 
+/** Which section is current: the last one whose top has passed just under the sticky ruler, or the last one when the
+    page is scrolled to the end. One IntersectionObserver, with enough thresholds to report while sections move. */
+function useCurrentSection(root: React.RefObject<HTMLDivElement | null>, pinned: React.RefObject<boolean>, onChange: (id: SectionId) => void) {
+  useEffect(() => {
+    const el = root.current;
+    const scroller = el?.closest<HTMLElement>(".screen");
+    if (!el || !scroller || typeof IntersectionObserver !== "function") return;
+    const sections = SECTIONS.map((id) => document.getElementById(id)).filter((s): s is HTMLElement => !!s);
+    const pick = () => {
+      if (pinned.current) return;
+      const line = (el.querySelector(".set-ruler")?.getBoundingClientRect().bottom ?? scroller.getBoundingClientRect().top) + 48;
+      let current: SectionId = SECTIONS[0];
+      if (scroller.scrollTop > 0 && scroller.scrollTop + scroller.clientHeight >= scroller.scrollHeight - 2) current = SECTIONS[SECTIONS.length - 1];
+      else for (const s of sections) if (s.getBoundingClientRect().top <= line) current = s.id as SectionId;
+      onChange(current);
+    };
+    const io = new IntersectionObserver(pick, { root: scroller, threshold: Array.from({ length: 21 }, (_, i) => i / 20) });
+    sections.forEach((s) => io.observe(s));
+    return () => io.disconnect();
+    // onChange only sets state
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [root, pinned]);
+}
+
 export default function Settings() {
+  const root = useRef<HTMLDivElement>(null);
+  const pinned = useRef(false);
+  const [current, setCurrent] = useState<SectionId>("account");
+  useCurrentSection(root, pinned, setCurrent);
+
+  // A click on the ruler: the playhead goes there at once and stays while the page scrolls to the section.
+  function go(id: string) {
+    const target = document.getElementById(id);
+    if (!target) return;
+    setCurrent(id as SectionId);
+    pinned.current = true;
+    const scroller = target.closest<HTMLElement>(".screen");
+    const reduce = window.matchMedia?.("(prefers-reduced-motion: reduce)").matches;
+    const release = () => {
+      pinned.current = false;
+      scroller?.removeEventListener("scrollend", release);
+    };
+    scroller?.addEventListener("scrollend", release);
+    window.setTimeout(release, reduce ? 50 : 900);
+    target.scrollIntoView({ behavior: reduce ? "auto" : "smooth", block: "start" });
+    target.focus({ preventScroll: true });
+  }
+
   return (
     <Screen narrow>
       <h1 className="title">{t("settings.title")}</h1>
-      <div className="settings">
+      <div className="settings" ref={root}>
+        <div className="set-ruler">
+          <Ruler
+            label={t("settings.sections")}
+            segments={SECTIONS.map((id) => ({ id, label: t(`settings.nav.${id}`) }))}
+            active={current}
+            onPick={go}
+          />
+        </div>
         <AccountSection />
         <GeneralSection />
         <AiSection />
