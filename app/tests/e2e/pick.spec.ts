@@ -5,12 +5,12 @@ const file = (name: string) => ({ name, mimeType: "video/mp4", buffer: Buffer.fr
 
 test("ranked list, keep toggle, sort and keyboard selection", async ({ page }) => {
   await page.goto("/#/p/mock-1/pick");
-  await expect(page.getByRole("heading", { name: "12 clips found · 8 kept" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "12 clips found, 8 kept" })).toBeVisible();
   const titles = page.locator(".clip-title");
   await expect(titles.first()).toHaveText("Nobody tells you this when you start");
 
   await page.getByRole("checkbox", { name: /Keep Long story about my laptop/ }).check({ force: true });
-  await expect(page.getByRole("heading", { name: "12 clips found · 9 kept" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "12 clips found, 9 kept" })).toBeVisible();
 
   await page.getByRole("radio", { name: "In order" }).check();
   await expect(page.getByRole("radio", { name: "In order" })).toBeChecked();
@@ -27,11 +27,11 @@ test("ranked list, keep toggle, sort and keyboard selection", async ({ page }) =
 
 test("find more clips adds six", async ({ page }) => {
   await page.goto("/#/p/mock-1/pick");
-  await expect(page.getByRole("heading", { name: "12 clips found · 8 kept" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "12 clips found, 8 kept" })).toBeVisible();
   const more = page.getByRole("button", { name: /Find more clips|Finding more clips/ });
   await more.click();
   await expect(page.getByRole("button", { name: /Finding more clips/ })).toBeDisabled();
-  await expect(page.getByRole("heading", { name: "18 clips found · 14 kept" })).toBeVisible({ timeout: 15_000 });
+  await expect(page.getByRole("heading", { name: "18 clips found, 14 kept" })).toBeVisible({ timeout: 15_000 });
   await expect(page.getByText("Added 6 clips.")).toBeVisible();
 });
 

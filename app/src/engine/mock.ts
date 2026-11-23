@@ -55,17 +55,10 @@ function seedTranscript(): Transcript {
 const round = (n: number): number => Math.round(n * 1000) / 1000;
 const copy = <T>(x: T): T => JSON.parse(JSON.stringify(x)) as T;
 
-// A small coloured sprite grid standing in for the real thumbnails: one numbered frame per 5 seconds.
+// Real thumbnails: public/mock/filmstrip.jpg is 120 frames (192x108, 20x6 grid, one per 5 s) cut from the
+// Pexels podcast clip, one camera angle per 30 s clip (wide, then each speaker close up).
 function mockFilmstrip(): FilmstripInfo {
-  const every = 5, width = 64, height = 36, count = 120, cols = 20, rows = 6;
-  let cells = "";
-  for (let i = 0; i < count; i++) {
-    const x = (i % cols) * width, y = Math.floor(i / cols) * height;
-    cells += `<rect x="${x}" y="${y}" width="${width}" height="${height}" fill="hsl(${(i * 37) % 360} 22% ${22 + (i % 4) * 4}%)"/>`
-      + `<circle cx="${x + 32}" cy="${y + 15}" r="6" fill="#9a9ba0"/><rect x="${x + 22}" y="${y + 24}" width="20" height="14" rx="7" fill="#7b7c81"/>`;
-  }
-  const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${cols * width}" height="${rows * height}">${cells}</svg>`;
-  return { every, height, width, count, cols, rows, image: `data:image/svg+xml;utf8,${encodeURIComponent(svg)}` };
+  return { every: 5, width: 192, height: 108, count: 120, cols: 20, rows: 6, image: "/mock/filmstrip.jpg" };
 }
 
 // ---- word-range edit logic ------------------------------------------------------------------------------------

@@ -76,7 +76,7 @@ describe("Pick", () => {
   it("shows the counts and the clips best first", async () => {
     fake.getProject.mockResolvedValue(project([clip("a", 0, 50), clip("b", 40, 90, false), clip("c", 80, 70)]));
     await mount({ analyze: { clips: 3, new: 3, reason: null } });
-    expect(text()).toContain("3 clips found · 2 kept");
+    expect(text()).toContain("3 clips found, 2 kept");
     expect([...host.querySelectorAll(".clip-title")].map((e) => e.textContent)).toEqual(["Clip b", "Clip c", "Clip a"]);
   });
 
@@ -106,12 +106,12 @@ describe("Pick", () => {
     let resolve!: (p: Project) => void;
     fake.setKept.mockReturnValue(new Promise<Project>((r) => (resolve = r)));
     await mount({ analyze: { clips: 2, new: 2 } });
-    expect(text()).toContain("2 clips found · 2 kept");
+    expect(text()).toContain("2 clips found, 2 kept");
     await act(async () => boxes()[0].click()); // b, the best clip
     expect(fake.setKept).toHaveBeenCalledWith("p1", "b", false);
-    expect(text()).toContain("2 clips found · 1 kept"); // before the engine answered
+    expect(text()).toContain("2 clips found, 1 kept"); // before the engine answered
     await act(async () => resolve(project([clip("a", 0, 50), clip("b", 40, 90, false)])));
-    expect(text()).toContain("2 clips found · 1 kept");
+    expect(text()).toContain("2 clips found, 1 kept");
   });
 
   it("reverts the checkbox and shows an error when setKept fails", async () => {
@@ -120,7 +120,7 @@ describe("Pick", () => {
     await mount({ analyze: { clips: 1, new: 1 } });
     await act(async () => boxes()[0].click());
     expect(boxes()[0].checked).toBe(true);
-    expect(text()).toContain("1 clip found · 1 kept");
+    expect(text()).toContain("1 clip found, 1 kept");
     expect(host.querySelector("[role=alert]")!.textContent).toMatch(/couldn.t save/i);
   });
 

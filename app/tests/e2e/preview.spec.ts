@@ -7,7 +7,7 @@ const clockSeconds = (s: string): number => {
 
 test.beforeEach(async ({ page }) => {
   await page.goto("/#/p/mock-1/pick");
-  await expect(page.getByRole("heading", { name: "12 clips found · 8 kept" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "12 clips found, 8 kept" })).toBeVisible();
   await expect(page.locator(".pv video")).toBeVisible();
   await expect.poll(() => page.locator(".pv video").evaluate((v: HTMLVideoElement) => v.readyState)).toBeGreaterThanOrEqual(2);
 });
