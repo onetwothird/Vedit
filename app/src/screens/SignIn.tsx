@@ -74,7 +74,7 @@ export default function SignIn() {
     <div className="signin">
       <aside className="signin-show" aria-hidden="true">
         <div className="signin-brand">
-          <Logo size={30} />
+          <Logo size={26} />
           <span className="signin-word">{t("app.name")}</span>
         </div>
         <div className="signin-art">
@@ -86,7 +86,7 @@ export default function SignIn() {
       <main className="signin-main">
         <div className="signin-strip">
           <div className="signin-brand">
-            <Logo size={28} />
+            <Logo size={26} />
             <span className="signin-word">{t("app.name")}</span>
           </div>
           <WaveStrip />
