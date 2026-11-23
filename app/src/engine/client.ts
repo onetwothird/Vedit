@@ -2,7 +2,7 @@
 // The token and any AI key are never logged and never put into an error message.
 
 import type {
-  AnalyzeBody, ClipOp, ClipView, Doctor, Engine, EngineInfo, ErrorBody, ExportBody, FilmstripInfo, Health, Job, ModelStatus,
+  AiTestBody, AiTestResult, AnalyzeBody, Brand, ClipOp, ClipView, Doctor, Engine, EngineInfo, ErrorBody, ExportBody, FilmstripInfo, Health, Job, ModelStatus,
   NewProjectBody, Project, Transcript,
 } from "./types";
 import { mockEngine } from "./mock";
@@ -109,6 +109,9 @@ export function createClient(opts: ClientOptions): Engine {
     models: () => request<ModelStatus>("GET", "/models"),
     downloadModel: (name) => job(request<Job>("POST", `/models/${enc(name)}/download`)),
     deleteModel: (name) => request<ModelStatus>("DELETE", `/models/${enc(name)}`),
+    testAi: (body: AiTestBody) => request<AiTestResult>("POST", "/ai/test", body),
+    brand: () => request<Brand>("GET", "/brand"),
+    saveBrand: (brand: Brand) => request<Brand>("PUT", "/brand", brand),
   };
 }
 

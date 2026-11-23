@@ -4,7 +4,7 @@
 import {
   EngineError,
   type AnalyzeBody, type CaptionTrack, type ClipOp, type ClipView, type Doctor, type Edl, type EdlClip, type Engine,
-  type ExportBody, type FilmstripInfo, type Health, type Highlight, type Job, type ModelStatus, type NewProjectBody, type Project,
+  type AiTestResult, type Brand, type ExportBody, type FilmstripInfo, type Health, type Highlight, type Job, type ModelStatus, type NewProjectBody, type Project,
   type ProjectClip, type RenderPlanEntry, type Transcript, type TranscriptWord,
 } from "./types";
 import { spelledAs } from "../edit/spelling";
@@ -211,6 +211,7 @@ export function createMockEngine(opts: { tickMs?: number; persist?: Pick<Storage
   const timers = new Map<string, ReturnType<typeof setTimeout>>();
   const listeners = new Set<(job: Job) => void>();
   const models: ModelStatus = { small: { installed: true, size_mb: 484 }, "large-v3": { installed: false, size_mb: 3090 } };
+  let brand: Brand = { font: "", caption_color: "", highlight: "", logo: "", intro: "", outro: "", music: "" };
   const failedOnce = new Set<string>(); // projects whose first analyze already failed on purpose
   let seq = 0;
 
@@ -412,6 +413,12 @@ export function createMockEngine(opts: { tickMs?: number; persist?: Pick<Storage
       models[name].installed = false;
       return snapshot(models);
     },
+    // the mock accepts any key that starts with "sk-"
+    async testAi(body): Promise<AiTestResult> {
+      return body.api_key.startsWith("sk-") ? { ok: true } : { ok: false, error: "rejected" };
+    },
+    async brand() { return { ...brand }; },
+    async saveBrand(next) { brand = { ...next }; return { ...brand }; },
   };
 }
 

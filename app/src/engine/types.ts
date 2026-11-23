@@ -212,6 +212,24 @@ export interface ExportBody {
 
 export type ModelStatus = Record<string, { installed: boolean; size_mb: number }>;
 
+/** The brand kit saved by Settings; an empty string means not set. Colours are #rrggbb. */
+export interface Brand {
+  font: string;
+  caption_color: string;
+  highlight: string;
+  logo: string;
+  intro: string;
+  outro: string;
+  music: string;
+}
+
+export interface AiTestBody {
+  provider: "anthropic" | "openai";
+  api_key: string;
+}
+
+export type AiTestResult = { ok: true } | { ok: false; error: string };
+
 export interface Health {
   ok: boolean;
   version: string;
@@ -247,4 +265,7 @@ export interface Engine {
   models(): Promise<ModelStatus>;
   downloadModel(name: string): Promise<Job>;
   deleteModel(name: string): Promise<ModelStatus>;
+  testAi(body: AiTestBody): Promise<AiTestResult>;
+  brand(): Promise<Brand>;
+  saveBrand(brand: Brand): Promise<Brand>;
 }

@@ -778,3 +778,54 @@ def test_patch_output_aspect_over_http(client, auth, analyzed_project):
     assert r.status_code == 200 and "aspect" not in r.json()["edl"]["output"]
     if before is not None:
         client.patch(url, headers=auth, json={"op": "patch", "section": "output", "patch": {"aspect": before}})
+
+
+# ---- AI key test and brand kit --------------------------------------------------------------------------------
+
+def test_ai_test_reports_ok_and_never_echoes_the_key(client, auth, monkeypatch):
+    import studio_server
+    seen = {}
+
+    def fake_get(url, headers):
+        seen["url"], seen["headers"] = url, headers
+        return 200
+
+    monkeypatch.setattr(studio_server, "_http_get", fake_get)
+    r = client.post("/ai/test", headers=auth, json={"provider": "anthropic", "api_key": "sk-ant-secret"})
+    assert r.json() == {"ok": True}
+    assert "anthropic.com" in seen["url"] and seen["headers"]["x-api-key"] == "sk-ant-secret"
+    assert "sk-ant-secret" not in r.text
+    client.post("/ai/test", headers=auth, json={"provider": "openai", "api_key": "sk-x"})
+    assert seen["headers"]["Authorization"] == "Bearer sk-x"
+
+
+@pytest.mark.parametrize("status,error", [(401, "rejected"), (403, "rejected"), (500, "status_500")])
+def test_ai_test_failures(client, auth, monkeypatch, status, error):
+    import studio_server
+    monkeypatch.setattr(studio_server, "_http_get", lambda url, headers: status)
+    r = client.post("/ai/test", headers=auth, json={"provider": "openai", "api_key": "sk-bad"})
+    assert r.json() == {"ok": False, "error": error}
+
+
+def test_ai_test_network_error_hides_the_key(client, auth, monkeypatch):
+    import studio_server
+
+    def boom(url, headers):
+        raise OSError("failed with header sk-leak")
+
+    monkeypatch.setattr(studio_server, "_http_get", boom)
+    r = client.post("/ai/test", headers=auth, json={"provider": "openai", "api_key": "sk-leak"})
+    assert r.json() == {"ok": False, "error": "network"}
+    assert "sk-leak" not in r.text
+    assert client.post("/ai/test", headers=auth, json={"provider": "openai", "api_key": " "}).json()["error"] == "empty"
+    assert client.post("/ai/test", headers=auth, json={"provider": "nope", "api_key": "k"}).status_code == 422
+
+
+def test_brand_round_trip(client, auth, home):
+    empty = client.get("/brand", headers=auth).json()
+    assert empty == {k: "" for k in ("font", "caption_color", "highlight", "logo", "intro", "outro", "music")}
+    kit = {**empty, "font": "Poppins", "caption_color": "#ffffff", "highlight": "#ffc72c", "logo": "C:/b/logo.png"}
+    assert client.put("/brand", headers=auth, json=kit).json() == kit
+    assert client.get("/brand", headers=auth).json() == kit
+    saved = json.loads((home / "brand.json").read_text(encoding="utf-8"))
+    assert saved == {"font": "Poppins", "caption_color": "#ffffff", "highlight": "#ffc72c", "logo": "C:/b/logo.png"}

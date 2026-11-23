@@ -41,3 +41,37 @@ export function setSafeZone(on: boolean): void {
     /* private mode: the toggle still works for this session */
   }
 }
+
+function write(key: string, value: string): void {
+  try {
+    localStorage.setItem(key, value);
+  } catch {
+    // storage unavailable: the choice lasts until the app closes
+  }
+}
+
+export const setLanguage = (v: Language): void => write("vedit.language", v);
+export const setPlatform = (v: Platform): void => write("vedit.platform", v);
+export const setAiProvider = (v: AiProvider): void => write("vedit.ai.provider", v);
+
+/** The rest of Settings, in localStorage["vedit.settings"]. The AI key is never here (Credential Manager). */
+export interface Settings {
+  outputMode: "next" | "folder";
+  outputFolder: string;
+}
+
+const DEFAULT_SETTINGS: Settings = { outputMode: "next", outputFolder: "" };
+
+export function getSettings(): Settings {
+  try {
+    const raw = JSON.parse(read("vedit.settings") ?? "{}") as Partial<Settings>;
+    const folder = typeof raw.outputFolder === "string" ? raw.outputFolder : "";
+    return { outputMode: raw.outputMode === "folder" && folder ? "folder" : "next", outputFolder: folder };
+  } catch {
+    return DEFAULT_SETTINGS;
+  }
+}
+
+export function saveSettings(s: Settings): void {
+  write("vedit.settings", JSON.stringify(s));
+}

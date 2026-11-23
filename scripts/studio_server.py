@@ -71,6 +71,11 @@ class AnalyzeBody(BaseModel):
     max_clips: Optional[int] = Field(default=None, ge=1, le=60)  # most highlights to keep; None = the engine default
 
 
+class AITestBody(BaseModel):
+    provider: Literal["anthropic", "openai"]
+    api_key: str
+
+
 class KeptBody(BaseModel):
     kept: bool
 
@@ -79,6 +84,48 @@ class ExportBody(BaseModel):
     clips: list[str]
     formats: list[str] = ["9:16"]
     quality: Literal["normal", "high"] = "normal"
+
+
+BRAND_KEYS = ("font", "caption_color", "highlight", "logo", "intro", "outro", "music")
+AI_TEST_URLS = {"anthropic": "https://api.anthropic.com/v1/models", "openai": "https://api.openai.com/v1/models"}
+
+
+class BrandBody(BaseModel):
+    """The brand kit keys the Settings screen edits (see presets.apply_brand); an empty string means unset."""
+    font: str = ""
+    caption_color: str = ""
+    highlight: str = ""
+    logo: str = ""
+    intro: str = ""
+    outro: str = ""
+    music: str = ""
+
+
+def brand_file() -> Path:
+    """Where the app's brand kit lives: %LOCALAPPDATA%\vedit\brand.json, else ~/.vedit/brand.json (VEDIT_HOME wins)."""
+    home = os.environ.get("VEDIT_HOME")
+    if home:
+        return Path(home) / "brand.json"
+    local = os.environ.get("LOCALAPPDATA")
+    return (Path(local) / "vedit" if local else Path.home() / ".vedit") / "brand.json"
+
+
+def _http_get(url: str, headers: dict) -> int:
+    import httpx  # lazy, like highlights_llm
+    return httpx.get(url, headers=headers, timeout=15).status_code
+
+
+def check_ai_key(provider: str, api_key: str) -> dict:
+    """Ask the provider to list its models: the cheapest authenticated call, no tokens spent. Never logs the key."""
+    headers = ({"x-api-key": api_key, "anthropic-version": "2023-06-01"} if provider == "anthropic"
+               else {"Authorization": f"Bearer {api_key}"})
+    try:
+        status = _http_get(AI_TEST_URLS[provider], headers)
+    except Exception:  # noqa: BLE001 - any network failure is one plain answer; the exception text could echo the key
+        return {"ok": False, "error": "network"}
+    if 200 <= status < 300:
+        return {"ok": True}
+    return {"ok": False, "error": "rejected" if status in (401, 403) else f"status_{status}"}
 
 
 # ---- errors and small helpers ---------------------------------------------------------------------------------
@@ -342,7 +389,7 @@ class Engine:
             if any(_overlap_share(h, c.highlight) > OVERLAP_DROP for c in preserved):
                 continue
             try:
-                edl = clip_edl(wd, h, p.platform, language, None)
+                edl = clip_edl(wd, h, p.platform, language, brand_file() if brand_file().exists() else None)
             except ValueError as e:
                 print(f"vedit: skipping highlight {hid}: {e}", file=sys.stderr)
                 continue
@@ -558,6 +605,24 @@ def create_app(token: str, queue: JobQueue | None = None) -> FastAPI:
             return _error(409, "busy", "a job is running; try again when it finishes")
         models.delete(name)
         return models.status()
+
+    @app.post("/ai/test")
+    def ai_test(body: AITestBody):
+        if not body.api_key.strip():
+            return {"ok": False, "error": "empty"}
+        return check_ai_key(body.provider, body.api_key.strip())
+
+    @app.get("/brand")
+    def get_brand():
+        f = brand_file()
+        saved = load_json(f) if f.exists() else {}
+        return {k: saved.get(k) if isinstance(saved.get(k), str) else "" for k in BRAND_KEYS}
+
+    @app.put("/brand")
+    def put_brand(body: BrandBody):
+        kit = {k: v for k, v in body.model_dump().items() if v.strip()}
+        _atomic_write_json(brand_file(), kit)
+        return {k: kit.get(k, "") for k in BRAND_KEYS}
 
     @app.get("/projects/recent")
     def recent():
