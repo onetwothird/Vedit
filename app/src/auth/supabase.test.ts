@@ -49,6 +49,7 @@ describe("email", () => {
     expect(a).toEqual({ id: "u1", name: "Ana Reyes", email: "ana@example.com", provider: "email", plan: "lifetime" });
     expect(f.calls[0].url).toBe(`${URL_}/auth/v1/token?grant_type=password`);
     expect((f.calls[0].init.headers as Record<string, string>).apikey).toBe(KEY);
+    expect((f.calls[0].init.headers as Record<string, string>).Authorization).toBeUndefined();
     expect(JSON.parse(String(f.calls[0].init.body))).toEqual({ email: "ana@example.com", password: "test-pass-123" });
     expect(JSON.stringify({ ...localStorage })).not.toContain("test-pass-123");
     expect(supabaseProvider({ url: URL_, anonKey: KEY, fetchImpl: f.impl }).restore()).toEqual(a);
@@ -172,4 +173,5 @@ describe("session", () => {
 it("reads the project address and anon key from the build, or reports none", () => {
   expect(supabaseConfig({})).toBeNull();
   expect(supabaseConfig({ VITE_SUPABASE_URL: URL_ + "/", VITE_SUPABASE_ANON_KEY: KEY })).toEqual({ url: URL_, anonKey: KEY });
+  expect(supabaseConfig({ VITE_SUPABASE_URL: URL_, VITE_SUPABASE_PUBLISHABLE_KEY: "sb_publishable_x" })).toEqual({ url: URL_, anonKey: "sb_publishable_x" });
 });

@@ -1,17 +1,17 @@
 # Accounts with Supabase
 
 vedit Studio signs people in through Supabase Auth. The app only needs your project's address and its
-**anon (public) key**. Both are meant to ship inside the app. Never put the `service_role` key in the app.
+**publishable key**. Both are meant to ship inside the app. Never put a secret (`sb_secret_…`) key in the app.
 
 ## 1. Create the project
 
 1. Go to supabase.com, create a project (the free tier is enough to start), and wait for it to finish setting up.
-2. Open **Project Settings > API** and copy the **Project URL** and the **anon public** key.
+2. Copy the **Project URL** from the project home page, and the **publishable** key (`sb_publishable_…`) from **Project Settings > API Keys**.
 3. In `app/`, copy `.env.example` to `.env.local` and paste both values in. `.env.local` is git-ignored.
 
 ```
 VITE_SUPABASE_URL=https://your-project-ref.supabase.co
-VITE_SUPABASE_ANON_KEY=your-anon-public-key
+VITE_SUPABASE_PUBLISHABLE_KEY=sb_publishable_your-key
 ```
 
 Restart `npm run dev`. The sign-in screen now talks to your project. (`npm run dev:mock` keeps using the

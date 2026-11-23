@@ -43,10 +43,11 @@ interface TokenResponse {
 const SESSION = "vedit.session";
 const PKCE = "vedit.pkce";
 
-/** The project address and anon key baked into the build, or null when this build has none. */
+/** The project address and publishable key baked into the build, or null when this build has none. */
 export function supabaseConfig(env: Record<string, unknown> = import.meta.env): SupabaseConfig | null {
   const url = typeof env.VITE_SUPABASE_URL === "string" ? env.VITE_SUPABASE_URL.trim().replace(/\/+$/, "") : "";
-  const anonKey = typeof env.VITE_SUPABASE_ANON_KEY === "string" ? env.VITE_SUPABASE_ANON_KEY.trim() : "";
+  const raw = env.VITE_SUPABASE_PUBLISHABLE_KEY ?? env.VITE_SUPABASE_ANON_KEY; // publishable (sb_publishable_…) or a legacy anon key
+  const anonKey = typeof raw === "string" ? raw.trim() : "";
   return url && anonKey ? { url, anonKey } : null;
 }
 
@@ -85,7 +86,8 @@ export function supabaseProvider(opts: SupabaseOptions): AuthProvider {
     try {
       res = await doFetch(`${opts.url}/auth/v1${path}`, {
         method: "POST",
-        headers: { apikey: opts.anonKey, Authorization: `Bearer ${token ?? opts.anonKey}`, "Content-Type": "application/json" },
+        // the publishable key goes in apikey only; Authorization carries a user's own token, never the project key
+        headers: { apikey: opts.anonKey, "Content-Type": "application/json", ...(token ? { Authorization: `Bearer ${token}` } : {}) },
         body: JSON.stringify(body),
       });
     } catch {
