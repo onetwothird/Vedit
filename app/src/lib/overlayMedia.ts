@@ -1,8 +1,7 @@
-import { convertFileSrc } from "@tauri-apps/api/core";
-import { isTauri } from "../engine/client";
+import { engineMediaUrl, isMock } from "../engine/client";
 
-/* B-roll files for the preview. The installed app loads any path through the asset protocol. A browser cannot read a
-   path, so a file picked there is kept as an object URL for this session, under the name it was saved with. */
+/* B-roll files for the preview. The engine streams a path once a clip uses it. A file picked in a browser has no
+   path, so it is also kept as an object URL for this session, under the name it was saved with. */
 
 const picked = new Map<string, string>();
 
@@ -17,8 +16,9 @@ export function rememberPicked(file: File): string {
 
 /** What the preview loads for a b-roll path, or null when this session cannot show it. */
 export function overlayUrl(path: string): string | null {
-  if (isTauri()) return convertFileSrc(path);
-  return picked.get(path) ?? null;
+  const local = picked.get(path);
+  if (local) return local;
+  return isMock() ? null : engineMediaUrl("/file", { path });
 }
 
 export const BROLL_IMAGE = ["png", "jpg", "jpeg", "webp"];

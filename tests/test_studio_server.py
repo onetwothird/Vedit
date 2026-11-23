@@ -957,3 +957,44 @@ def test_bad_brand_file_is_treated_as_empty(client, auth, home, text):
     assert studio_server.usable_brand_file() is None
     assert client.put("/brand", headers=auth, json={**r.json(), "font": "Fix"}).status_code == 200
     assert studio_server.usable_brand_file() is not None
+
+
+# ---- media for the preview: a <video> or <img> cannot send headers, so these take ?token= ----
+
+def test_media_streams_the_video_with_range_and_query_token(client, analyzed_project, tiny_video):
+    pid = analyzed_project["id"]
+    assert client.get(f"/projects/{pid}/media").status_code == 401
+    assert client.get(f"/projects/{pid}/media?token=wrong").status_code == 401
+    r = client.get(f"/projects/{pid}/media?token={TOKEN}", headers={"Range": "bytes=0-99"})
+    assert r.status_code == 206 and r.headers["content-type"] == "video/mp4"
+    assert r.content == tiny_video.read_bytes()[:100]
+    full = client.get(f"/projects/{pid}/media?token={TOKEN}")
+    assert full.status_code == 200 and len(full.content) == tiny_video.stat().st_size
+
+
+def test_query_token_is_only_for_media_routes(client, analyzed_project):
+    assert client.get(f"/projects/{analyzed_project['id']}?token={TOKEN}").status_code == 401
+    assert client.post(f"/projects/{analyzed_project['id']}/media?token={TOKEN}").status_code == 401
+
+
+def test_filmstrip_image_streams(client, analyzed_project):
+    wd = analyzed_project["wd"]
+    (wd / "filmstrip.jpg").write_bytes(b"\xff\xd8jpeg")
+    r = client.get(f"/projects/{analyzed_project['id']}/filmstrip.jpg?token={TOKEN}")
+    assert r.status_code == 200 and r.content == b"\xff\xd8jpeg" and r.headers["content-type"] == "image/jpeg"
+
+
+def test_file_serves_only_broll_a_clip_uses(client, auth, analyzed_project, tmp_path):
+    pid, hid = analyzed_project["id"], analyzed_project["highlights"][0]["id"]
+    shot, other = tmp_path / "shot.png", tmp_path / "secret.png"
+    shot.write_bytes(b"png-bytes")
+    other.write_bytes(b"nope")
+    url = lambda p: f"/file?path={p}&token={TOKEN}"  # noqa: E731
+    assert client.get(url(shot)).status_code == 404  # not used by any clip yet
+    item = {"id": "b", "type": "image", "at": {"src": "main", "t": 1}, "duration": 1, "path": str(shot), "mode": "full"}
+    assert client.patch(f"/projects/{pid}/clips/{hid}", headers=auth,
+                        json={"op": "patch", "section": "overlays", "patch": {"items": [item]}}).status_code == 200
+    r = client.get(url(shot))
+    assert r.status_code == 200 and r.content == b"png-bytes"
+    assert client.get(url(other)).status_code == 404
+    assert client.get(url(analyzed_project["wd"] / "transcript.main.json")).status_code == 404

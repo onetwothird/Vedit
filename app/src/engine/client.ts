@@ -129,18 +129,27 @@ export const isTauri = (): boolean => typeof window !== "undefined" && "__TAURI_
 
 export const isMock = (): boolean => !isTauri() && import.meta.env.VITE_ENGINE === "mock";
 
+let lastInfo: EngineInfo | null = null; // the engine the app last reached, for media URLs
+
 /** Port and token of the running engine: the Tauri command, else the VITE_ENGINE_URL/VITE_ENGINE_TOKEN dev pair. */
 export async function fetchEngineInfo(): Promise<EngineInfo> {
   if (isTauri()) {
     const { invoke } = await import("@tauri-apps/api/core");
-    return invoke<EngineInfo>("engine_info");
+    return (lastInfo = await invoke<EngineInfo>("engine_info"));
   }
   const url = import.meta.env.VITE_ENGINE_URL as string | undefined;
   const token = import.meta.env.VITE_ENGINE_TOKEN as string | undefined;
   if (!url || !token) throw new Error("no engine: set VITE_ENGINE_URL and VITE_ENGINE_TOKEN, or run dev:mock");
   const port = Number(new URL(url).port);
   if (!Number.isInteger(port) || port <= 0) throw new Error("VITE_ENGINE_URL needs an explicit port");
-  return { port, token };
+  return (lastInfo = { port, token });
+}
+
+/** A URL a <video> or <img> can load from the engine (which streams the file, with seeking): the token rides in
+    the query because media elements cannot send headers. Null until the app has reached the engine once. */
+export function engineMediaUrl(route: string, params: Record<string, string> = {}): string | null {
+  if (!lastInfo) return null;
+  return `http://127.0.0.1:${lastInfo.port}${route}?${new URLSearchParams({ ...params, token: lastInfo.token })}`;
 }
 
 const jobListeners = new Set<(job: Job) => void>();

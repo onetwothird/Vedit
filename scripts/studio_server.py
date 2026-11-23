@@ -28,7 +28,7 @@ sys.path.insert(0, str(HERE))
 from fastapi import Body, FastAPI, Request, WebSocket  # noqa: E402
 from fastapi.exceptions import RequestValidationError  # noqa: E402
 from fastapi.middleware.cors import CORSMiddleware  # noqa: E402
-from fastapi.responses import JSONResponse  # noqa: E402
+from fastapi.responses import FileResponse, JSONResponse  # noqa: E402
 from pydantic import BaseModel, Field  # noqa: E402
 from starlette.exceptions import HTTPException as StarletteHTTPException  # noqa: E402
 
@@ -202,6 +202,45 @@ def _edl_path(wd: Path, clip: ProjectClip) -> Path:
     if not path.is_file():
         raise ClipMissing(f"edit file for clip {clip.highlight.get('id')} is missing: {clip.edl_file}")
     return path
+
+
+# Files the preview loads with a plain <video> or <img>, which cannot send headers: these GET routes take the token as
+# ?token= instead (like /events). Each serves only what a project already uses, never an arbitrary path.
+MEDIA_ROUTE = re.compile(r"^/(projects/[^/]+/(media|filmstrip\.jpg)|file)$")
+MEDIA_EXT = {".mp4": "video/mp4", ".mov": "video/quicktime", ".m4v": "video/mp4", ".webm": "video/webm",
+             ".mkv": "video/x-matroska", ".png": "image/png", ".jpg": "image/jpeg", ".jpeg": "image/jpeg",
+             ".webp": "image/webp"}
+
+
+def _media_response(path: Path) -> FileResponse:
+    """The file with its media type, answering Range requests so the player can seek."""
+    if not path.is_file():
+        raise NotFound(path.name)
+    return FileResponse(path, media_type=MEDIA_EXT.get(path.suffix.lower(), "application/octet-stream"),
+                        headers={"Cache-Control": "no-store"})
+
+
+def _same_file(a: Path, b: Path) -> bool:
+    return os.path.normcase(str(a.resolve())) == os.path.normcase(str(b.resolve()))
+
+
+def _used_broll(path: Path, projects: list[Project]) -> Path | None:
+    """`path` when a clip of one of these projects shows it as b-roll (relative paths are the workdir's)."""
+    if path.suffix.lower() not in MEDIA_EXT:
+        return None
+    for p in projects:
+        wd = workdir_for(p.source)
+        for c in p.clips:
+            try:
+                edl = load_json(wd / c.edl_file)
+            except (OSError, ValueError):
+                continue
+            for o in edl.get("overlays") or []:
+                if isinstance(o, dict) and o.get("type") in ("image", "video") and isinstance(o.get("path"), str):
+                    used = Path(o["path"]) if Path(o["path"]).is_absolute() else wd / o["path"]
+                    if _same_file(used, path if path.is_absolute() else wd / path):
+                        return used
+    return None
 
 
 def _overlap_share(a: dict, b: dict) -> float:
@@ -593,6 +632,8 @@ def create_app(token: str, queue: JobQueue | None = None) -> FastAPI:
         if not origin_ok(request.headers.get("origin")):
             return _error(403, "forbidden", "origin not allowed")
         auth = request.headers.get("authorization") or ""
+        if request.method in ("GET", "HEAD") and MEDIA_ROUTE.match(request.url.path) and not auth:
+            auth = "Bearer " + (request.query_params.get("token") or "")
         if not (auth.startswith("Bearer ") and token_ok(auth[len("Bearer "):])):
             return _error(401, "unauthorized", "missing or wrong token")
         return await call_next(request)
@@ -726,6 +767,24 @@ def create_app(token: str, queue: JobQueue | None = None) -> FastAPI:
         if not meta_path.is_file() or not image.is_file():
             raise NoFilmstrip("this project has no thumbnails yet")
         return {**load_json(meta_path), "image": str(image)}
+
+    @app.get("/projects/{pid}/media")
+    def media(pid: str):
+        """What the player plays: the proxy analysis made, else the source video."""
+        p = _project(pid)
+        return _media_response(Path(p.settings.get("proxy") or p.source))
+
+    @app.get("/projects/{pid}/filmstrip.jpg")
+    def filmstrip_image(pid: str):
+        return _media_response(workdir_for(_project(pid).source) / "filmstrip.jpg")
+
+    @app.get("/file")
+    def broll_file(path: str):
+        """A b-roll photo or video, only when a recent project's clip already shows it."""
+        used = _used_broll(Path(path), list_recent(50))
+        if used is None:
+            raise NotFound("file")
+        return _media_response(used)
 
     @app.get("/projects/{pid}/clips/{hid}")
     def get_clip(pid: str, hid: str):
