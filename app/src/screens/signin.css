@@ -1,5 +1,5 @@
 /* Sign in: the product on the left (the Home hero, playing), the ways in on the right inside 9:16 crop marks.
-   The mode switch is the editor ruler; its playhead marks which one you are in. One surface, no cards. */
+   The mode switch is the app's segmented control, full width. One surface, no cards. */
 .signin { display: grid; grid-template-columns: minmax(0, 1.15fr) minmax(440px, 1fr); height: 100vh; overflow-y: auto; background: var(--panel); }
 
 .signin-show {
@@ -32,14 +32,14 @@
   background-repeat: no-repeat;
 }
 .signin-card > * { flex-shrink: 0; }
-/* Room for two lines, text set on the bottom one: switching modes grows the title upward and the ruler stays put. */
+/* Room for two lines, text set on the bottom one: switching modes grows the title upward and the switch stays put. */
 .signin-title {
   display: flex; align-items: flex-end; min-height: 2.2em;
   font: 400 40px/1.1 var(--pixel); font-synthesis: none; letter-spacing: 0; color: var(--ink);
 }
 
-.signin-card .ruler { margin: 24px 0 24px; }
-.signin-card .ruler-seg { flex-basis: 0; }
+.signin-modes { display: flex; margin: 24px 0; }
+.signin-modes .seg-tab { flex: 1 1 0; height: 32px; padding: 0 12px; font-size: 13px; }
 
 .signin-social { display: flex; flex-direction: column; gap: 8px; }
 .social {

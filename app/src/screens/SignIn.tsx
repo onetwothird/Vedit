@@ -1,8 +1,7 @@
-import { useEffect, useState, type FormEvent } from "react";
+import { useEffect, useRef, useState, type FormEvent, type KeyboardEvent } from "react";
 import { useNavigate } from "react-router-dom";
 import { MIN_PASSWORD, skipSignIn, useAuth, type SocialProvider } from "../auth/auth";
 import Logo from "../components/Logo";
-import Ruler from "../components/Ruler";
 import { t } from "../i18n/t";
 import { ClipArt, bars } from "./home/HomeArt";
 import "./home/home.css";
@@ -45,6 +44,18 @@ export default function SignIn() {
     clearError();
   }
 
+  // The mode switch is a tablist: arrow keys, Home and End move between the two tabs.
+  const tabs = useRef<HTMLDivElement>(null);
+  function onTabKey(e: KeyboardEvent<HTMLButtonElement>) {
+    const next: Mode | null =
+      e.key === "ArrowRight" || e.key === "ArrowLeft" ? (mode === "signin" ? "signup" : "signin")
+        : e.key === "Home" ? "signin" : e.key === "End" ? "signup" : null;
+    if (!next) return;
+    e.preventDefault();
+    switchMode(next);
+    tabs.current?.querySelector<HTMLElement>(`#tab-${next}`)?.focus();
+  }
+
   async function social(p: SocialProvider) {
     await run((auth) => auth.social(p));
   }
@@ -83,17 +94,24 @@ export default function SignIn() {
         <div className="signin-card">
           <h1 className="signin-title">{t(mode === "signin" ? "signin.title" : "signup.title")}</h1>
 
-          <Ruler
-            kind="tabs"
-            label={t("signin.modes")}
-            panel="signin-panel"
-            segments={[
-              { id: "signin", label: t("signin.mode.signin") },
-              { id: "signup", label: t("signin.mode.signup") },
-            ]}
-            active={mode}
-            onPick={(id) => switchMode(id as Mode)}
-          />
+          <div ref={tabs} className="seg signin-modes" role="tablist" aria-label={t("signin.modes")}>
+            {(["signin", "signup"] as const).map((m) => (
+              <button
+                key={m}
+                type="button"
+                role="tab"
+                id={`tab-${m}`}
+                className="seg-tab"
+                aria-selected={mode === m}
+                aria-controls="signin-panel"
+                tabIndex={mode === m ? 0 : -1}
+                onClick={() => switchMode(m)}
+                onKeyDown={onTabKey}
+              >
+                {t(`signin.mode.${m}`)}
+              </button>
+            ))}
+          </div>
 
           <div className="signin-panel" id="signin-panel" role="tabpanel" aria-labelledby={`tab-${mode}`}>
             <div className="signin-social">
