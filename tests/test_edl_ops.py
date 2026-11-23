@@ -214,6 +214,28 @@ def test_patch_section_null_removes_key(section):
     assert patch_section({"clips": []}, section, {"a": None})[section] == {}
 
 
+def test_patch_section_output_aspect():
+    e = {"clips": [], "output": {"aspect": "9:16", "fps": 30, "path": ""}}
+    out = patch_section(e, "output", {"aspect": "1:1"})
+    assert out["output"] == {"aspect": "1:1", "fps": 30, "path": ""}
+    assert e["output"]["aspect"] == "9:16"  # input untouched
+    for a in ("9:16", "4:5", "16:9"):
+        assert patch_section(e, "output", {"aspect": a})["output"]["aspect"] == a
+    assert patch_section({"clips": []}, "output", {"aspect": "16:9"})["output"] == {"aspect": "16:9"}
+
+
+@pytest.mark.parametrize("patch", [{"aspect": "2:1"}, {"aspect": 1}, {"aspect": "9x16"}, {"fps": 60}, {"path": "x.mp4"}])
+def test_patch_section_output_rejects_other_values_and_keys(patch):
+    with pytest.raises(ValueError):
+        patch_section({"clips": [], "output": {"aspect": "9:16"}}, "output", patch)
+
+
+def test_patch_section_output_null_removes_aspect():
+    out = patch_section({"clips": [], "output": {"aspect": "1:1", "fps": 30}}, "output", {"aspect": None})
+    assert out["output"] == {"fps": 30}
+    assert patch_section({"clips": []}, "output", {"aspect": None})["output"] == {}
+
+
 def test_patch_section_framing_null_removes_keys():
     e = {"fit": "blur", "clips": [{"words": [0, 1], "crop_x": 0.3, "zoom": 1.2}, {"in": 1, "out": 2, "crop_x": 0.5}]}
     out = patch_section(e, "framing", {"crop_x": None, "zoom": None, "fit": None})

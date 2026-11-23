@@ -188,6 +188,32 @@ describe("clip store", () => {
     expect(s().view!.edl).toEqual({ clips: [{ src: "main", words: [0, 13], crop_x: 0.4 }] });
   });
 
+  it("undoes an output aspect patch to the previous shape, or removes it when there was none", async () => {
+    const { s, srv, idle } = await setup({ ...E0, output: { aspect: "9:16", fps: 30 } });
+    s().apply({ op: "patch", section: "output", patch: { aspect: "1:1" } });
+    await idle();
+    expect(s().view!.edl.output).toEqual({ aspect: "1:1", fps: 30 });
+    expect(s().past[0].op).toMatchObject({ prev: { aspect: "9:16" } });
+    s().undo();
+    await idle();
+    expect(srv.sent.at(-1)).toEqual({ op: "patch", section: "output", patch: { aspect: "9:16" } });
+    expect(srv.edl().output).toEqual({ aspect: "9:16", fps: 30 });
+
+    const fresh = await setup({ ...E0, output: { fps: 30 } });
+    fresh.s().apply({ op: "patch", section: "output", patch: { aspect: "16:9" } });
+    await fresh.idle();
+    fresh.s().undo();
+    await fresh.idle();
+    expect(fresh.srv.sent.at(-1)).toEqual({ op: "patch", section: "output", patch: { aspect: null } });
+    expect(fresh.srv.edl().output).toEqual({ fps: 30 });
+  });
+
+  it("the local port takes only a valid output aspect", () => {
+    expect(applyOp(E0, { op: "patch", section: "output", patch: { aspect: "4:5" } }).output).toEqual({ aspect: "4:5" });
+    expect(() => applyOp(E0, { op: "patch", section: "output", patch: { aspect: "2:1" } })).toThrow(/aspect/);
+    expect(() => applyOp(E0, { op: "patch", section: "output", patch: { fps: 60 } })).toThrow(/output keys/);
+  });
+
   it("undoes fix_word to the previous replacement, or removes the key when there was none", async () => {
     const { s, srv, idle } = await setup({ ...E0, captions: { replace: { teh: "the" } } });
     s().apply({ op: "fix_word", wrong: "teh", right: "THE" });

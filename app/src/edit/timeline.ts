@@ -11,6 +11,9 @@ export type Op =
   | { op: "fix_word"; wrong: string; right: string; prev?: string }
   | { op: "patch"; section: EditSection; patch: Record<string, unknown>; prev?: Record<string, unknown> };
 
+/** edl_ops.OUTPUT_ASPECTS: the shapes an "output" patch may set. */
+export const OUTPUT_ASPECTS = ["9:16", "4:5", "1:1", "16:9"] as const;
+
 export const DEFAULT_PAD: [number, number] = [0.1, 0.18];
 
 const copy = <T>(x: T): T => JSON.parse(JSON.stringify(x)) as T;
@@ -164,6 +167,16 @@ export function patchSection(edl: Edl, section: EditSection, patch: Record<strin
         if (v === null) delete c[k];
         else c[k] = v;
       }
+    }
+  } else if (section === "output") {
+    const bad = Object.keys(patch).filter((k) => k !== "aspect");
+    if (bad.length) throw new Error(`unknown output keys: ${bad.sort().join(", ")}`);
+    const out = (e.output ??= {}) as Record<string, unknown>;
+    if ("aspect" in patch) {
+      const a = patch.aspect;
+      if (a === null) delete out.aspect;
+      else if (typeof a === "string" && (OUTPUT_ASPECTS as readonly string[]).includes(a)) out.aspect = a;
+      else throw new Error(`aspect must be one of ${OUTPUT_ASPECTS.join(", ")}`);
     }
   } else {
     throw new Error(`unknown section '${String(section)}'`);

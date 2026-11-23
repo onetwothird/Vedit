@@ -9,7 +9,7 @@ import TranscriptPanel from "../components/TranscriptPanel";
 import { useClipStore } from "../edit/edlStore";
 import { keptWords } from "../edit/inverse";
 import { captionSpans, wordSlot } from "../edit/lanes";
-import { keptRanges } from "../edit/timeline";
+import { keptRanges, OUTPUT_ASPECTS } from "../edit/timeline";
 import { useUndoKeys } from "../edit/useUndoKeys";
 import { engine } from "../engine/client";
 import type { Aspect, EditSection, Edl, Project, Transcript } from "../engine/types";
@@ -45,7 +45,6 @@ export default function Edit() {
   const [sort, setSort] = useState<ClipSort>("best");
   const [keepError, setKeepError] = useState(false);
   const [tab, setTab] = useState<InspectorTab>("transcript");
-  const [shape, setShape] = useState<Aspect | null>(null);
   const [outT, setOutT] = useState(0);
   const [stageBox, setStageBox] = useState({ width: 480, height: 520 });
   const player = useRef<PlayerHandle>(null);
@@ -73,7 +72,6 @@ export default function Edit() {
 
   useEffect(() => {
     if (!id || !hid) return;
-    setShape(null);
     setOutT(0);
     void useClipStore.getState().load(id, hid);
   }, [id, hid]);
@@ -224,7 +222,7 @@ export default function Edit() {
   }
 
   const outputAspect = edl?.output?.aspect as Aspect | undefined;
-  const aspect: Aspect = shape ?? (outputAspect && ["9:16", "1:1", "4:5", "16:9"].includes(outputAspect) ? outputAspect : "9:16");
+  const aspect: Aspect = outputAspect && (OUTPUT_ASPECTS as readonly string[]).includes(outputAspect) ? outputAspect : "9:16";
   const ready = !!(project && h && view && edl);
 
   return (
@@ -240,7 +238,7 @@ export default function Edit() {
               <div className="seg" role="radiogroup" aria-label={t("edit.shape")}>
                 {SHAPES.map((s) => (
                   <label key={s} className="seg-opt">
-                    <input type="radio" name="shape" checked={aspect === s} onChange={() => setShape(s)} />
+                    <input type="radio" name="shape" checked={aspect === s} onChange={() => onPatch("output", { aspect: s })} />
                     <span>{s}</span>
                   </label>
                 ))}

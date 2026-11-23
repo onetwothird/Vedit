@@ -64,7 +64,7 @@ test("a captions group shows while playing", async ({ page }) => {
 });
 
 test("plays to the end, stops there paused, and does not keep seeking", async ({ page }) => {
-  test.setTimeout(30_000);
+  test.setTimeout(45_000);
   await page.evaluate(() => {
     const v = document.querySelector("video")!;
     const w = window as unknown as { __seeks: number; __arrived: number | null };
@@ -73,9 +73,15 @@ test("plays to the end, stops there paused, and does not keep seeking", async ({
     v.addEventListener("seeking", () => { if (w.__arrived !== null) w.__seeks++; });
   });
   await page.getByRole("button", { name: "Play", exact: true }).click();
-  await expect(page.getByRole("button", { name: "Play", exact: true })).toBeVisible({ timeout: 20_000 });
+  // wait on state, not on the button: right after the click "Play" is still showing until playback really starts
+  await expect(page.getByRole("button", { name: "Pause", exact: true })).toBeVisible({ timeout: 10_000 });
+  await page.waitForFunction(() => {
+    const v = document.querySelector("video")!;
+    return v.paused && v.currentTime > 11;
+  }, undefined, { timeout: 25_000 });
+  await expect(page.getByRole("button", { name: "Play", exact: true })).toBeVisible();
   await page.evaluate(() => { (window as unknown as { __arrived: number }).__arrived = 1; });
-  await page.waitForTimeout(1000);
+  await page.waitForTimeout(1000); // the window in which a seek loop would show up
   const s = await page.evaluate(() => {
     const v = document.querySelector("video")!;
     return { paused: v.paused, seeks: (window as unknown as { __seeks: number }).__seeks, t: v.currentTime };

@@ -131,7 +131,7 @@
   "edit.error.keep": "Couldn't save that change. Check that vedit is still running, then try again.",
   "edit.error.save": "Couldn't save the last edit, so it was undone: {msg}",
   "edit.player": "Preview",
-  "edit.shape": "Preview shape",
+  "edit.shape": "Shape",
   "edit.prev": "Previous clip",
   "edit.next": "Next clip",
   "edit.tabs": "Edit this clip",

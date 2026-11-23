@@ -760,3 +760,21 @@ def test_patch_null_and_same_fix_remove_keys_over_http(client, auth, analyzed_pr
     client.patch(url, headers=auth, json={"op": "fix_word", "wrong": "FFmpeg", "right": "ffmpeg"})
     r = client.patch(url, headers=auth, json={"op": "fix_word", "wrong": "FFmpeg", "right": "FFmpeg"})
     assert r.status_code == 200 and "FFmpeg" not in r.json()["edl"]["captions"]["replace"]
+
+
+def test_patch_output_aspect_over_http(client, auth, analyzed_project):
+    pid, hid = analyzed_project["id"], analyzed_project["highlights"][0]["id"]
+    url = f"/projects/{pid}/clips/{hid}"
+    before = client.get(url, headers=auth).json()["edl"]["output"].get("aspect")
+    r = client.patch(url, headers=auth, json={"op": "patch", "section": "output", "patch": {"aspect": "1:1"}})
+    assert r.status_code == 200 and r.json()["edl"]["output"]["aspect"] == "1:1"
+    assert client.get(url, headers=auth).json()["edl"]["output"]["aspect"] == "1:1"  # persisted
+    bad = client.patch(url, headers=auth, json={"op": "patch", "section": "output", "patch": {"aspect": "2:1"}})
+    assert bad.status_code == 400
+    bad = client.patch(url, headers=auth, json={"op": "patch", "section": "output", "patch": {"path": "C:/x.mp4"}})
+    assert bad.status_code == 400
+    assert client.get(url, headers=auth).json()["edl"]["output"]["aspect"] == "1:1"  # a refused patch changes nothing
+    r = client.patch(url, headers=auth, json={"op": "patch", "section": "output", "patch": {"aspect": None}})
+    assert r.status_code == 200 and "aspect" not in r.json()["edl"]["output"]
+    if before is not None:
+        client.patch(url, headers=auth, json={"op": "patch", "section": "output", "patch": {"aspect": before}})

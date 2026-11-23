@@ -17,7 +17,8 @@ from edl import DEFAULT_PAD, clip_span, word_range  # noqa: E402
 from highlights import Highlight  # noqa: E402
 from presets import make_edl_kwargs  # noqa: E402
 
-Section = Literal["captions", "audio", "color", "framing"]
+Section = Literal["captions", "audio", "color", "framing", "output"]
+OUTPUT_ASPECTS = ("9:16", "4:5", "1:1", "16:9")
 
 
 def clip_edl(wd: Path, h: Highlight, preset: str, language: str | None, brand: Path | None) -> dict:
@@ -138,7 +139,8 @@ def fix_word(edl: dict, wrong: str, right: str) -> dict:
 
 
 def patch_section(edl: dict, section: Section, patch: dict) -> dict:
-    """Shallow-merge `patch` into a section. "framing" maps crop_x/zoom onto every clip and fit onto the edl.
+    """Shallow-merge `patch` into a section. "framing" maps crop_x/zoom onto every clip and fit onto the edl;
+    "output" takes only the aspect (one of OUTPUT_ASPECTS), the shape the clip is previewed and saved in.
     A null value removes the key (the undo of setting a key that was absent)."""
     e = deepcopy(edl)
     if section in ("captions", "audio", "color"):
@@ -165,6 +167,19 @@ def patch_section(edl: dict, section: Section, patch: dict) -> dict:
                     c.pop(k, None)
                 else:
                     c[k] = v
+    elif section == "output":
+        bad = set(patch) - {"aspect"}
+        if bad:
+            raise ValueError(f"unknown output keys: {sorted(bad)}")
+        out = e.setdefault("output", {})
+        if "aspect" in patch:
+            a = patch["aspect"]
+            if a is None:
+                out.pop("aspect", None)
+            elif a in OUTPUT_ASPECTS:
+                out["aspect"] = a
+            else:
+                raise ValueError(f"aspect must be one of {', '.join(OUTPUT_ASPECTS)}")
     else:
         raise ValueError(f"unknown section '{section}'")
     return e

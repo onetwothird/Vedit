@@ -186,13 +186,31 @@ test("Previous and Next clip, and Export clips goes to export", async ({ page })
   await expect(page).toHaveURL(/\/p\/mock-1\/export$/);
 });
 
-test("the shape switch reshapes the preview", async ({ page }) => {
+test("the shape switch is saved to the clip, undoable, and survives a reload", async ({ page }) => {
   await open(page);
   const frame = page.locator(".pv-frame");
   const tall = (await frame.boundingBox())!;
   expect(tall.height).toBeGreaterThan(tall.width);
+  const ratio = async () => { const b = (await frame.boundingBox())!; return Math.round((b.width / b.height) * 100) / 100; };
+
   await page.getByRole("radio", { name: "16:9" }).check();
-  await expect.poll(async () => { const b = (await frame.boundingBox())!; return b.width > b.height; }).toBe(true);
+  await expect.poll(ratio).toBeCloseTo(16 / 9, 1);
+  await page.getByRole("radio", { name: "1:1" }).check();
+  await expect.poll(ratio).toBeCloseTo(1, 1);
+  await page.keyboard.press("Control+z");
+  await expect(page.getByRole("radio", { name: "16:9" })).toBeChecked();
+  await page.keyboard.press("Control+z");
+  await expect(page.getByRole("radio", { name: "9:16" })).toBeChecked();
+  await expect.poll(ratio).toBeCloseTo(9 / 16, 1);
+
+  await page.getByRole("radio", { name: "1:1" }).check();
+  await expect(page.getByText("Saved", { exact: true })).toBeVisible();
+  await page.reload();
+  await expect(word(page, 0)).toBeVisible();
+  await expect(page.getByRole("radio", { name: "1:1" })).toBeChecked();
+  await expect.poll(ratio).toBeCloseTo(1, 1);
+  // the undo history is per session; the saved shape is what comes back
+  await expect(page.getByRole("radio", { name: "9:16" })).not.toBeChecked();
 });
 
 for (const theme of ["dark", "light"]) {

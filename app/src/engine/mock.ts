@@ -192,8 +192,24 @@ export interface MockEngine extends Engine {
   onJob(listener: (job: Job) => void): () => void;
 }
 
-export function createMockEngine(opts: { tickMs?: number } = {}): MockEngine {
+export function createMockEngine(opts: { tickMs?: number; persist?: Pick<Storage, "getItem" | "setItem"> } = {}): MockEngine {
   const tickMs = opts.tickMs ?? 120;
+  // clip edits outlive a page reload, as the real engine's edit files do (the app's mock passes sessionStorage)
+  const SAVED = "vedit.mock.edls";
+  const saved = (): Record<string, Edl> => {
+    try {
+      return JSON.parse(opts.persist?.getItem(SAVED) ?? "{}") as Record<string, Edl>;
+    } catch {
+      return {};
+    }
+  };
+  const save = (key: string, edl: Edl): void => {
+    try {
+      opts.persist?.setItem(SAVED, JSON.stringify({ ...saved(), [key]: edl }));
+    } catch {
+      /* storage full or blocked: edits last until the reload */
+    }
+  };
   const TICKS = 4; // progress steps per stage
   const transcript = seedTranscript();
   const edls = new Map<string, Edl>(); // `${pid}/${hid}`
@@ -219,7 +235,7 @@ export function createMockEngine(opts: { tickMs?: number } = {}): MockEngine {
       };
       let edl: Edl = { clips: [{ src: "main", words: [w0, w1] }], output: { aspect: "9:16", fps: 30 }, captions: { style: "pop" } };
       for (const f of HARD_FILLERS) edl = applyOp(edl, { op: "cut", w0: w0 + f, w1: w0 + f });
-      edls.set(`${pid}/${id}`, edl);
+      edls.set(`${pid}/${id}`, saved()[`${pid}/${id}`] ?? edl);
       return { highlight, kept, edl_file: `clip-${id}.edl.json` };
     });
   }
@@ -348,6 +364,7 @@ export function createMockEngine(opts: { tickMs?: number } = {}): MockEngine {
         throw new EngineError(400, "bad_request", "the edit would have no speech left");
       }
       edls.set(key, next);
+      save(key, next);
       return clipView(next, transcript);
     },
     async setKept(pid, hid, kept) {
@@ -405,4 +422,12 @@ export function createMockEngine(opts: { tickMs?: number } = {}): MockEngine {
   };
 }
 
-export const mockEngine: MockEngine = createMockEngine();
+const sessionStore = (): Storage | undefined => {
+  try {
+    return typeof sessionStorage === "undefined" ? undefined : sessionStorage;
+  } catch {
+    return undefined;
+  }
+};
+
+export const mockEngine: MockEngine = createMockEngine({ persist: sessionStore() });
