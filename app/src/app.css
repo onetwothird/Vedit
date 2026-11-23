@@ -142,21 +142,52 @@ html.theme-fade, html.theme-fade * { transition: background-color .3s ease, bord
 .r-name { font-size: 13.5px; font-weight: 500; color: var(--ink); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .r-meta { display: flex; gap: 12px; font-size: 12px; color: var(--body); }
 
-/* Import */
-.import { max-width: 640px; display: flex; flex-direction: column; gap: 22px; }
+/* Import: the drop zone is a quiet stage with the app's waveform along its foot; the playhead runs while a file is
+   dragged over. The options sit on one surface, and a short numbered line says what Start will do. */
+.import { max-width: 680px; display: flex; flex-direction: column; gap: 20px; }
 .drop {
-  display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 10px; min-height: 200px; padding: 24px;
-  border: 1.5px dashed var(--line-2); border-radius: var(--r-surface); background: var(--stage); position: relative; text-align: center;
-}
-.drop::before {
-  content: ""; position: absolute; inset: 0; border-radius: inherit; pointer-events: none; opacity: .7;
-  background-image: radial-gradient(var(--line) 1px, transparent 1px); background-size: 14px 14px;
+  display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 8px; min-height: 280px;
+  padding: 32px 24px 72px; border: 1.5px dashed var(--line-2); border-radius: var(--r-surface); background: var(--stage);
+  position: relative; overflow: hidden; text-align: center; transition: border-color .15s, background-color .15s;
 }
 .drop > * { position: relative; }
-.drop.over { border-color: var(--accent); background: var(--accent-soft); }
-.drop-title { font: 600 16px var(--sans); color: var(--ink); }
-.drop-hint { font-size: 12px; color: var(--body); margin-bottom: 6px; }
-.file-name { font-size: 14px; color: var(--ink); max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; margin-bottom: 6px; }
+.drop.over { border-color: var(--accent); border-style: solid; }
+.drop.has-file { border-style: solid; border-color: var(--line); min-height: 200px; }
+.drop-icon { width: 48px; height: 48px; display: grid; place-items: center; margin-bottom: 6px; border-radius: var(--r-control); background: var(--chip); color: var(--ink); }
+.drop-icon svg { width: 24px; height: 24px; }
+.drop-title { font: 600 18px var(--sans); letter-spacing: -0.01em; color: var(--ink); }
+.drop-hint { font-size: 12.5px; color: var(--body); margin-bottom: 8px; }
+.drop-file { display: grid; grid-template-columns: 48px minmax(0, 1fr) auto; align-items: center; gap: 14px; width: 100%; max-width: 560px; text-align: left; }
+.drop-file .drop-icon { margin: 0; }
+.drop-file-text { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.drop-file .drop-hint { margin: 0; }
+.file-name { font-size: 14px; color: var(--ink); max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.drop > .drop-wave { position: absolute; left: 24px; right: 24px; bottom: 16px; height: 40px; color: var(--line-2); pointer-events: none; }
+.drop-wave svg { display: block; width: 100%; height: 100%; fill: currentColor; }
+.drop-head { position: absolute; inset: -4px 0; transform: translateX(0); }
+.drop-head i { position: absolute; left: 0; top: 0; bottom: 0; width: 2px; margin-left: -1px; background: var(--accent); opacity: 0; transition: opacity .15s; }
+.drop-head i::before {
+  content: ""; position: absolute; top: 0; left: -4px; width: 10px; height: 10px; background: var(--accent);
+  clip-path: polygon(0 0, 100% 0, 100% 55%, 50% 100%, 0 55%);
+}
+.drop.over .drop-head i, .drop.has-file .drop-head i { opacity: 1; }
+.drop.has-file .drop-wave { color: color-mix(in srgb, var(--ink) 35%, transparent); }
+@media (prefers-reduced-motion: no-preference) {
+  .drop.over .drop-head { animation: drop-sweep 1.8s cubic-bezier(.45, 0, .2, 1) infinite alternate; }
+}
+@keyframes drop-sweep { from { transform: translateX(0); } to { transform: translateX(100%); } }
+.import-opts { padding: 18px 20px; border: 1px solid var(--line); border-radius: var(--r-surface); background: var(--bg); }
+.import-next { list-style: none; padding: 0; display: flex; flex-wrap: wrap; gap: 8px 20px; counter-reset: next; font-size: 12.5px; color: var(--body); }
+.import-next li { counter-increment: next; display: flex; align-items: center; gap: 8px; }
+.import-next li::before {
+  content: counter(next); width: 18px; height: 18px; display: grid; place-items: center; border-radius: 50%;
+  border: 1px solid var(--line-2); font: 500 10.5px var(--sans); color: var(--body);
+}
+.import .row .primary { min-width: 120px; }
+@media (max-width: 560px) {
+  .drop-file { grid-template-columns: 48px minmax(0, 1fr); }
+  .drop-file .secondary { grid-column: 1 / -1; justify-self: start; }
+}
 .fields { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 18px; }
 .field { border: 0; padding: 0; min-width: 0; }
 .field legend { font: 500 12px var(--sans); color: var(--body); margin-bottom: 8px; padding: 0; }

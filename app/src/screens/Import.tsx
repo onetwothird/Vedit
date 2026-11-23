@@ -286,21 +286,27 @@ export default function Import() {
           onDrop={onDrop}
         >
           {file ? (
-            <>
-              <span className="file-name mono" title={file.path}>{file.name}</span>
+            <div className="drop-file">
+              <span className="drop-icon" aria-hidden="true"><FilmIcon /></span>
+              <span className="drop-file-text">
+                <span className="file-name mono" title={file.path}>{file.name}</span>
+                <span className="drop-hint">{t("import.ready")}</span>
+              </span>
               <button type="button" className="secondary" onClick={choose}>{t("import.choose.another")}</button>
-            </>
+            </div>
           ) : (
             <>
+              <span className="drop-icon" aria-hidden="true"><DropIcon /></span>
               <span className="drop-title">{t("import.drop.title")}</span>
               <span className="drop-hint">{t("import.drop.formats")}</span>
               <button type="button" className="secondary" onClick={choose}>{t("import.choose")}</button>
             </>
           )}
+          <DropWave />
           <input ref={input} type="file" accept={VIDEO_ACCEPT} hidden onChange={onInput} />
         </div>
 
-        <div className="fields">
+        <div className="fields import-opts">
           <Choice<Language>
             legend={t("import.language")}
             name="language"
@@ -321,6 +327,12 @@ export default function Import() {
           />
         </div>
 
+        <ol className="import-next" aria-label={t("import.next")}>
+          {(["listen", "find", "pick"] as const).map((k) => (
+            <li key={k}>{t(`import.next.${k}`)}</li>
+          ))}
+        </ol>
+
         {cancelled && (
           <p className="notice" role="status">
             <strong>{t("import.cancelled")}</strong>
@@ -336,5 +348,45 @@ export default function Import() {
         </div>
       </div>
     </Screen>
+  );
+}
+
+/** A short waveform along the foot of the drop zone; the playhead runs across it while a file is dragged over. */
+const WAVE = Array.from({ length: 96 }, (_, i) => {
+  const r = Math.abs(Math.sin(i * 12.9898) * 43758.5453) % 1;
+  return Math.max(0.12, Math.min(1, (0.55 + 0.45 * Math.sin(i / 6)) * (0.35 + 0.65 * r)));
+});
+
+function DropWave() {
+  return (
+    <span className="drop-wave" aria-hidden="true">
+      <svg viewBox={`0 0 ${WAVE.length * 6} 40`} preserveAspectRatio="none">
+        {WAVE.map((v, i) => {
+          const h = 4 + v * 32;
+          return <rect key={i} x={i * 6 + 1} y={(40 - h) / 2} width={3.4} height={h} rx={1.2} />;
+        })}
+      </svg>
+      <span className="drop-head"><i /></span>
+    </span>
+  );
+}
+
+const ICON = { viewBox: "0 0 24 24", fill: "none", stroke: "currentColor", strokeWidth: 1.7, strokeLinecap: "round", strokeLinejoin: "round" } as const;
+
+function DropIcon() {
+  return (
+    <svg {...ICON}>
+      <rect x="3" y="5" width="18" height="14" rx="2.5" />
+      <path d="M12 15V9m-3 3 3-3 3 3" />
+    </svg>
+  );
+}
+
+function FilmIcon() {
+  return (
+    <svg {...ICON}>
+      <rect x="3" y="5" width="18" height="14" rx="2.5" />
+      <path d="m10 9.5 4.5 2.5-4.5 2.5z" />
+    </svg>
   );
 }
