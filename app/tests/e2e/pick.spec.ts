@@ -21,8 +21,23 @@ test("ranked list, keep toggle, sort and keyboard selection", async ({ page }) =
   await expect(page.locator("[aria-current=true] .clip-title")).toHaveText("My boss laughed at my portfolio");
   await page.keyboard.press("ArrowUp");
   await expect(page.locator("[aria-current=true] .clip-title")).toHaveText("Why I almost quit after a year");
-  await page.getByRole("button", { name: "Edit selected" }).click();
+  await page.getByRole("button", { name: "Edit this clip" }).click();
   await expect(page).toHaveURL(/#\/p\/mock-1\/edit\/h03$/);
+});
+
+test("the video timeline: a clip's mark selects it and shows why it was picked", async ({ page }) => {
+  await page.goto("/#/p/mock-1/pick");
+  const timeline = page.getByRole("region", { name: "Clips in the video" });
+  await timeline.getByRole("button", { name: /^Outro and thank yous, at 5:30$/ }).click();
+  await expect(timeline.getByRole("button", { name: /^Outro and thank yous/ })).toHaveAttribute("aria-current", "true");
+  await expect(page.locator("[aria-current=true] .clip-title")).toHaveText("Outro and thank yous");
+  await expect(page.getByRole("heading", { level: 2, name: "Outro and thank yous" })).toBeVisible();
+  await expect(page.getByText("5:30 to 5:43 in the video")).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Why it was picked" })).toBeVisible();
+
+  await page.getByRole("button", { name: "Keep this clip" }).click();
+  await expect(page.getByRole("button", { name: "Keep this clip" })).toHaveAttribute("aria-pressed", "true");
+  await expect(page.getByRole("heading", { name: "12 clips found, 9 kept" })).toBeVisible();
 });
 
 test("find more clips adds six", async ({ page }) => {

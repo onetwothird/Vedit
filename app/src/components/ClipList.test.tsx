@@ -55,9 +55,9 @@ describe("ClipList", () => {
     expect(p.onSort).toHaveBeenCalledWith("order");
   });
 
-  it("shows the length and the score of each clip", () => {
+  it("shows where each clip starts in the video and its score", () => {
     render();
-    expect(host.textContent).toContain("0:32");
+    expect(host.textContent).toContain("At 0:40");
     expect(host.textContent).toContain("90");
   });
 

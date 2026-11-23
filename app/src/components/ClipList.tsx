@@ -1,8 +1,8 @@
-import { useRef, type KeyboardEvent } from "react";
+import { useEffect, useRef, type KeyboardEvent } from "react";
 import type { FilmstripInfo, ProjectClip } from "../engine/types";
 import { t } from "../i18n/t";
 import { sortClips, type ClipSort } from "../lib/clips";
-import { formatLength } from "../lib/time";
+import { formatClock } from "../lib/time";
 import FilmFrame from "./FilmFrame";
 
 export interface ClipListProps {
@@ -22,6 +22,11 @@ export default function ClipList({ clips, currentId, sort, film, onSort, onSelec
   const sorted = sortClips(clips, sort);
   const mains = useRef(new Map<string, HTMLButtonElement>());
   const tabbable = sorted.some((c) => c.highlight.id === currentId) ? currentId : sorted[0]?.highlight.id;
+
+  // a clip picked elsewhere (the video timeline) scrolls into view in the list
+  useEffect(() => {
+    if (currentId) mains.current.get(currentId)?.scrollIntoView?.({ block: "nearest" });
+  }, [currentId]);
 
   function onKeyDown(e: KeyboardEvent<HTMLUListElement>) {
     if (e.key !== "ArrowDown" && e.key !== "ArrowUp") return;
@@ -66,13 +71,11 @@ export default function ClipList({ clips, currentId, sort, film, onSort, onSelec
                 <FilmFrame film={film} t={h.start} width={80} className="thumb" />
                 <span className="clip-text">
                   <span className="clip-title">{h.title}</span>
-                  <span className="clip-meta">
-                    <span>{formatLength(h.end - h.start)}</span>
-                    <span className="score" title={t("clips.score", { n: Math.round(h.score) })}>
-                      <span className="bar" aria-hidden="true"><i style={{ width: `${Math.max(0, Math.min(100, h.score))}%` }} /></span>
-                      <span>{Math.round(h.score)}</span>
-                    </span>
-                  </span>
+                  <span className="clip-meta">{t("clips.at", { at: formatClock(h.start) })}</span>
+                </span>
+                <span className="score" title={t("clips.score", { n: Math.round(h.score) })}>
+                  <span className="sr-only">{t("clips.score", { n: Math.round(h.score) })}</span>
+                  <span aria-hidden="true">{Math.round(h.score)}</span>
                 </span>
               </button>
               <label className="keep">

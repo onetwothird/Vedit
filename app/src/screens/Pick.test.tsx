@@ -23,6 +23,7 @@ const job = (over: Partial<Job>): Job => ({
 
 const fake = vi.hoisted(() => ({
   getProject: vi.fn(), setKept: vi.fn(), analyze: vi.fn(), getJob: vi.fn(), filmstrip: vi.fn(),
+  transcript: vi.fn(async () => { throw new Error("no transcript in these tests"); }),
 }));
 vi.mock("../engine/client", () => ({
   engine: fake, isTauri: () => false, isMock: () => true, fetchEngineInfo: vi.fn(), onJobResult: () => () => undefined,
@@ -128,14 +129,14 @@ describe("Pick", () => {
     fake.getProject.mockResolvedValue(project([clip("a", 0, 50), clip("b", 40, 90)]));
     await mount({ analyze: { clips: 2, new: 2 } });
     await act(async () => host.querySelectorAll<HTMLButtonElement>(".clip-main")[1].click()); // a
-    await act(async () => button("Edit selected").click());
+    await act(async () => button("Edit this clip").click());
     expect(loc()).toBe("/p/p1/edit/a");
   });
 
   it("selects the best clip first", async () => {
     fake.getProject.mockResolvedValue(project([clip("a", 0, 50), clip("b", 40, 90)]));
     await mount({ analyze: { clips: 2, new: 2 } });
-    await act(async () => button("Edit selected").click());
+    await act(async () => button("Edit this clip").click());
     expect(loc()).toBe("/p/p1/edit/b");
   });
 
