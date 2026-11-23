@@ -442,5 +442,7 @@
   "edit.color.hint": "Sharpen shows in the export only.",
   "edit.color.reset": "Reset color",
   "edit.speed": "Playback speed",
-  "edit.speed.hint": "Voices keep their pitch. Captions and layers stay on their words."
+  "edit.speed.hint": "Voices keep their pitch. Captions and layers stay on their words.",
+  "topbar.demo": "Demo",
+  "topbar.demo.title": "This demo plays a sample clip, not your videos. To edit your own, start the real app: VEDIT_DEV_ENGINE=1 npm run tauri dev"
 }

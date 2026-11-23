@@ -40,7 +40,9 @@ Paths are relative to the edl.json file. Times can be seconds (`12.5`) or `"1:02
      "duration": 3, "mode": "full"},                         // full | pip  (+ position, scale)
     {"type": "image", "path": "../logo.png", "at": 0, "duration": 4, "mode": "pip",
      "position": "top-right", "scale": 0.2},
-    {"type": "audio", "path": "../sfx/whoosh.wav", "at": {"clip": 3, "t": 0}, "volume": 0.6}
+    {"type": "audio", "path": "../sfx/whoosh.wav", "at": {"clip": 3, "t": 0}, "volume": 0.6},
+    {"id": "o1", "type": "text", "text": "Wait for it", "at": {"src": "main", "t": 12.4}, "duration": 3,
+     "position": "top", "size": 1}                           // a Vedit Studio layer, see below
   ],
 
   "clips": [
@@ -55,6 +57,18 @@ Paths are relative to the edl.json file. Times can be seconds (`12.5`) or `"1:02
   ]
 }
 ```
+
+## Vedit Studio layers
+
+Text and b-roll added in the app's Edit screen carry an `id` and are anchored to a moment of the source,
+`"at": {"src": "main", "t": seconds}`, so they stay on their words when clips are cut or sped up (a moment that was
+cut is skipped). render.py draws text layers in Poppins Bold, wrapped to 88% of the frame width and centred, on a
+55% black box; `position` is `top`, `center` or `bottom` and `size` is 0.8, 1 or 1.4. B-roll `mode` is `full` or
+`pip` (a corner at 35% of the width, `position` `top-left` to `bottom-right`), fading in and out over 0.25 s.
+Text overlays without an `id` are hand-written ones and are drawn by captions.py as before.
+
+The app's Speed tool sets `speed` on every clip (0.5 to 4); the Color tool writes `brightness` (−0.2 to 0.2),
+`contrast` (0.7 to 1.4), `saturation` (0 to 2), `sharpen` and `vignette`.
 
 ## Clip fields
 | field | meaning |

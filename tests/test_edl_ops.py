@@ -131,7 +131,7 @@ def test_kept_ranges_pad_and_time_clips(pipeline_workdir):
     W = tr["words"]
     e = {"pad": [0, 0], "clips": [{"src": "main", "in": 1.0, "out": 2.5}, {"src": "main", "words": [2, 3]}]}
     got = kept_ranges(e, tr)
-    assert got[0] == (1.0, pytest.approx(2.5)) 
+    assert got[0] == (1.0, pytest.approx(2.5))
     assert got[1][0] == max(0.0, W[2]["start"])
     assert got[1][1] == pytest.approx(W[3]["end"], abs=1 / 30)
 

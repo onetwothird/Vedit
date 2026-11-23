@@ -15,6 +15,7 @@
 [Features](#features) ·
 [Installation](#installation) ·
 [Quick start](#quick-start) ·
+[Vedit Studio](#option-c-vedit-studio-desktop-app) ·
 [Fact Reels kit](#make-fact-reels-from-your-own-footage) ·
 [Commands](#command-reference) ·
 [How it works](#how-it-works) ·
@@ -28,8 +29,9 @@
 
 Editing a talking-head video takes hours of repetitive work: cutting pauses and filler words, removing bad takes, adding captions, reframing for vertical platforms, balancing audio and making thumbnails.
 
-**vedit automates that work.** It runs as:
+**Vedit automates that work.** It runs as:
 
+- **A desktop app, Vedit Studio.** Import a long video, pick the best clips, edit them with one rail of tools, export.
 - **A command-line tool.** One command turns a raw recording into a platform-ready video.
 - **A [Claude Code](https://docs.claude.com/en/docs/claude-code) skill.** Claude reads the word-level transcript, looks at frames from the video, and makes editorial decisions: picking the hook, removing tangents, choosing the best moments for Shorts. Then it renders the result.
 
@@ -126,7 +128,7 @@ sudo apt install ffmpeg         # Debian / Ubuntu
 
 Open a **new** terminal afterwards so `PATH` refreshes.
 
-**2. Install vedit**
+**2. Install Vedit**
 
 ```bash
 git clone https://github.com/onetwothird/vedit.git
@@ -199,7 +201,7 @@ vedit auto raw.mp4 --preset podcast --language tl        # force transcription l
 
 ### Option B: Claude Code (recommended)
 
-Register vedit as a Claude Code skill:
+Register Vedit as a Claude Code skill:
 
 ```bash
 # macOS / Linux
@@ -221,6 +223,46 @@ Then open Claude Code in your video folder and describe the result you want:
 > *"Make a 30-second skit from these four photos with a different voice for each character."*
 
 Claude analyzes the footage, drafts and refines the edit, renders a preview, checks it visually and delivers the final files.
+
+### Option C: Vedit Studio (desktop app)
+
+Vedit Studio is the same engine with a screen: drop in a long video, pick the best moments, edit each clip, export.
+
+1. **Import.** Choose a video. Vedit listens to it, finds the 20 to 90 second moments worth posting and frames
+   them for vertical.
+2. **Pick clips.** Play each suggestion, keep the good ones, or ask for more.
+3. **Edit.** One rail holds every tool, so nothing is hidden in another screen:
+
+   | Tool | What it does |
+   |---|---|
+   | Transcript | Click a word to cut it or fix its spelling; crossed-out words are removed |
+   | Captions | Caption style, size, colours and position |
+   | Text | Add text at the playhead, type it, place it top, middle or bottom, copy or delete it |
+   | B-roll | A photo or video over the clip, full screen or in a corner, with a fade |
+   | Sound | Loudness, voice polish, noise reduction, background music |
+   | Framing | Shape (9:16, 1:1, 4:5, 16:9), face tracking, zoom |
+   | Color | Brightness, contrast, saturation, sharpen, vignette |
+   | Speed | 1× to 2×; voices keep their pitch, captions and layers stay on their words |
+
+   The timeline under the player has split, trim, delete, undo and redo, zoom, and lanes for text and b-roll you
+   can drag. The preview shows what the export will draw: the same cuts, speed, captions, text, b-roll and colour
+   (sharpen shows in the export only).
+4. **Export.** Every kept clip is rendered to a folder next to your video, `<video name> - Vedit`.
+
+**Run it on your own videos (from source):**
+
+```powershell
+pip install -e ".[all,dev]"
+cd app
+npm ci
+$env:VEDIT_DEV_ENGINE = "1"; npm run tauri dev
+```
+
+`VEDIT_DEV_ENGINE=1` starts the engine from `scripts/` with your Python, so the app always runs the code in this
+folder. Without it, a debug build looks for the bundled engine, which only exists after a release build.
+
+`npm run dev:mock` (in `app/`) opens a **demo** in the browser with a built-in sample clip and a pretend engine. It
+never reads your files, so use it to try the screens, not to edit your videos.
 
 ## Presets
 
@@ -332,8 +374,11 @@ The full `edl.json` schema is documented in [`references/edl.md`](references/edl
 ```
 vedit/
 ├── SKILL.md               Claude Code skill instructions
+├── app/                   Vedit Studio: React + Tauri desktop app (see app/README.md)
 ├── scripts/               Python package (installed as `vedit`)
 │   ├── vedit.py           CLI entry point
+│   ├── studio_server.py   local API the desktop app talks to (127.0.0.1, token-protected)
+│   ├── edl_ops.py         the edits the app sends: cut, restore, trim, fix a word, patch a section
 │   ├── auto.py            one-command pipeline
 │   ├── analyze.py         footage analysis
 │   ├── transcribe.py      word-level transcription
@@ -373,6 +418,9 @@ vedit/
 | Wrong transcription language | Pass `--language en` (or `tl`, `es`, `ja`, …) |
 | Captions use the wrong font | Set `captions.font` to an installed font, or add `.ttf` files to `fonts/` |
 | Vertical crop misses the subject | `pip install opencv-python`, or set `crop_x` per clip (see `vedit frames VIDEO --grid`) |
+| Vedit Studio plays a sample clip, not my video | That is the demo (`npm run dev:mock`, the page says Demo). Start the real app with `VEDIT_DEV_ENGINE=1 npm run tauri dev` |
+| Vedit Studio says "This video can't be previewed" | The engine is not reachable or the video moved. Restart the app; export still works from the saved edit |
+| Captions appear twice, one set over the other | The video already has captions burned in (for example a Reel exported earlier). Import the original recording, or set Captions to off |
 | Render error | The message names the failing clip; the full FFmpeg command is saved in `<workdir>/.render_cache/last_final_cmd.txt` |
 
 See [`docs/USAGE.md`](docs/USAGE.md) for a step-by-step guide.
@@ -388,12 +436,13 @@ See [`docs/USAGE.md`](docs/USAGE.md) for a step-by-step guide.
 
 ## Contributing
 
-Contributions are welcome. Read [CONTRIBUTING.md](CONTRIBUTING.md) to get started.
+Contributions are welcome. Read [CONTRIBUTING.md](CONTRIBUTING.md) to get started. To report a security problem privately, see [SECURITY.md](SECURITY.md).
 
 ```bash
 pip install -e ".[all,dev]"
 ruff check scripts tests
 pytest -q
+cd app && npm ci && npx tsc --noEmit && npx vitest run && npx playwright test
 ```
 
 ## Acknowledgements
@@ -404,5 +453,6 @@ Built on [FFmpeg](https://ffmpeg.org/), [libass](https://github.com/libass/libas
 
 The code is released under the [MIT License](LICENSE). © 2026 Angelito P. Decatoria III
 
-- Fonts in `fonts/` are Poppins, under the [SIL Open Font License 1.1](fonts/OFL.txt).
+- Fonts in `fonts/` and `app/src/fonts/` are Poppins, under the [SIL Open Font License 1.1](fonts/OFL.txt).
+- Videos you edit stay yours. No third-party footage is included in this repository or in release builds.
 - The **Juan Fact a Day** name, mascot, logo and artwork are **not** included in this repository and are not covered by the MIT License.

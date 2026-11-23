@@ -1,4 +1,5 @@
 import { Link } from "react-router-dom";
+import { isMock } from "../engine/client";
 import { t } from "../i18n/t";
 import AppMenu from "./AppMenu";
 import Logo from "./Logo";
@@ -22,6 +23,7 @@ export default function TopBar({ fileName, saved, step, editHid, primary }: TopB
           <Logo size={26} className="mark" />
           <span>{t("app.name")}</span>
         </Link>
+        {isMock() && <span className="demo" title={t("topbar.demo.title")}>{t("topbar.demo")}</span>}
         {fileName && <span className="proj" title={fileName}>{fileName}</span>}
         {saved && <span className="saved">{t("topbar.saved")}</span>}
       </div>

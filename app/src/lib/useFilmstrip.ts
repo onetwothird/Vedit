@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { engine, isTauri } from "../engine/client";
+import { engine, engineMediaUrl, isMock } from "../engine/client";
 import type { FilmstripInfo } from "../engine/types";
 
 /** The project's thumbnail sprite with a loadable image URL, or null while loading or when there is none. */
@@ -13,13 +13,8 @@ export function useFilmstrip(pid: string | undefined): FilmstripInfo | null {
       try {
         const info = await engine.filmstrip(pid);
         if (!live) return;
-        if (isTauri()) {
-          const { convertFileSrc } = await import("@tauri-apps/api/core");
-          if (!live) return;
-          setFilm({ ...info, image: convertFileSrc(info.image) });
-        } else {
-          setFilm(info);
-        }
+        const image = isMock() ? info.image : engineMediaUrl(`/projects/${encodeURIComponent(pid)}/filmstrip.jpg`);
+        if (image) setFilm({ ...info, image });
       } catch {
         // no thumbnails: the screen shows a neutral tile, never an error
       }
