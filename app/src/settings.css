@@ -1,12 +1,9 @@
 /* ---------- Settings ----------
-   The title, then a sticky ruler whose regions are the sections; the playhead follows the one you are reading.
-   Each section is a quiet surface with its own icon and its own content shape. */
+   The title, then the sections. Each section is a quiet surface with its own icon and its own content shape. */
 .settings { display: flex; flex-direction: column; gap: 16px; }
-/* Stuck under the top bar, it covers the gap above the next section so nothing peeks between. */
-.set-ruler { position: sticky; top: 0; z-index: 5; margin-bottom: -8px; padding: 8px 0 16px; background: var(--panel); }
 .set-sec {
   display: flex; flex-direction: column; gap: 16px; padding: 20px 24px 24px; min-width: 0;
-  background: var(--bg); border: 1px solid var(--line); border-radius: var(--r-surface); scroll-margin-top: 88px;
+  background: var(--bg); border: 1px solid var(--line); border-radius: var(--r-surface);
 }
 .set-sec:focus { outline: none; }
 .set-sec:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
@@ -84,6 +81,4 @@
 @media (max-width: 480px) {
   .set-sec { padding: 16px; }
   .set-key { flex-wrap: wrap; }
-  /* the ruler runs edge to edge and scrolls sideways inside itself */
-  .set-ruler .ruler { margin: 0 -16px; padding: 0 16px; scroll-padding: 0 16px; }
 }

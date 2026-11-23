@@ -134,6 +134,7 @@ html.light .art-bar.on { fill: #22a35a; }
   .hero-art.moving .cap-pop span:nth-child(1) { animation-delay: 0s; }
   .hero-art.moving .cap-pop span:nth-child(2) { animation-delay: -1.2s; }
   .hero-art.moving .cap-pop span:nth-child(3) { animation-delay: -0.6s; }
+  .hero-art.moving .cap-pop.synced span { animation: none; }
 }
 @keyframes art-light { from { fill: var(--line-2); } }
 @keyframes art-rise { from { opacity: 0; transform: translateY(8px); } }

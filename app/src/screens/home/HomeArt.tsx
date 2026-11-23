@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { Fragment, useEffect, useRef, useState } from "react";
 import type React from "react";
 import podcast from "./podcast.mp4";
 import poster from "./podcast-poster.jpg";
@@ -107,7 +107,37 @@ const LOCAL_FOCUS: Record<Output["shape"], [number, number, number]> = {
   "16:9": [0.5, 0.42, 1.35],
 };
 
-function Cut({ o, children }: { o: Output; children: React.ReactNode }) {
+/* What is said in the local preview's 10 s loop (start second, words), transcribed from its audio. */
+export const LOCAL_CUES: [number, string][] = [
+  [0, "Bakit? Bawal ba?"],
+  [0.8, "Hindi, wala akong sinabi."],
+  [1.9, "Akala po niya, sabi niya po sa akin kanina parang,"],
+  [4.4, "si Jy po, di ba, 1983 po pinanganak?"],
+  [7.3, "Sabi niya po."],
+  [8.7, "Sir, may narinig ka."],
+];
+const LOOP_END = 10;
+
+/** The line being said at second `t`. */
+export function cueAt(t: number): string {
+  let line = LOCAL_CUES[0][1];
+  for (const [at, words] of LOCAL_CUES) if (t >= at) line = words;
+  return line;
+}
+
+/** Pop captions show up to three words at a time, spread evenly over the line's time. */
+export function popAt(t: number): string[] {
+  const i = LOCAL_CUES.reduce((k, [at], j) => (t >= at ? j : k), 0);
+  const [at, line] = LOCAL_CUES[i];
+  const end = LOCAL_CUES[i + 1]?.[0] ?? LOOP_END;
+  const words = line.split(" ");
+  const chunks = Math.ceil(words.length / 3);
+  const c = Math.min(chunks - 1, Math.floor(((t - at) / (end - at)) * chunks));
+  return words.slice(c * 3, c * 3 + 3);
+}
+
+function Cut({ o, children, caption }: { o: Output; children: React.ReactNode; caption?: (t: number) => React.ReactNode }) {
+  const [t, setT] = useState(o.start);
   const p = cropPlacement(o.aspect, ...(HERO_LOCAL ? LOCAL_FOCUS[o.shape] : o.focus));
   const style = { width: `${p.width}%`, height: `${p.height}%`, left: `${p.left}%`, top: `${p.top}%` };
   return (
@@ -122,8 +152,9 @@ function Cut({ o, children }: { o: Output; children: React.ReactNode }) {
           preload="metadata"
           style={style}
           onLoadedMetadata={(e) => { e.currentTarget.currentTime = o.start; }}
+          onTimeUpdate={caption ? (e) => setT(e.currentTarget.currentTime) : undefined}
         />
-        {children}
+        {caption ? caption(t) : children}
         <span className="cut-time mono">{o.time}</span>
       </div>
     </figure>
@@ -160,16 +191,20 @@ export function ClipArt() {
       </div>
 
       <div className="cuts">
-        <Cut o={OUTPUTS[0]}>
+        <Cut o={OUTPUTS[0]} caption={HERO_LOCAL ? (t) => (
+          <p className="cap-pop synced">
+            {popAt(t).map((w, i) => <Fragment key={i}>{i > 0 && " "}<span>{w.toUpperCase()}</span></Fragment>)}
+          </p>
+        ) : undefined}>
           <p className="cap-pop">
             <span>NOBODY</span> <span>TELLS</span> <span>YOU</span>
           </p>
         </Cut>
         <div className="cuts-col">
-          <Cut o={OUTPUTS[1]}>
+          <Cut o={OUTPUTS[1]} caption={HERO_LOCAL ? (t) => <p className="cap-box">{cueAt(t)}</p> : undefined}>
             <p className="cap-box">The ₱500 mistake</p>
           </Cut>
-          <Cut o={OUTPUTS[2]}>
+          <Cut o={OUTPUTS[2]} caption={HERO_LOCAL ? (t) => <p className="cap-sub"><span className="spk-a">{cueAt(t)}</span></p> : undefined}>
             <p className="cap-sub">
               <span className="spk-a">I almost quit after a year.</span>
               <span className="spk-b">What kept you going?</span>

@@ -2,7 +2,6 @@ import { useEffect, useId, useRef, useState, type ReactNode } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { useAuth } from "../auth/auth";
 import Avatar from "../components/Avatar";
-import Ruler from "../components/Ruler";
 import Screen from "../components/Screen";
 import { engine, isTauri } from "../engine/client";
 import { useJob } from "../engine/events";
@@ -63,7 +62,7 @@ function Section({ id, title, note, children }: { id: SectionId; title: string; 
     <section className="set-sec" id={id} aria-labelledby={head} tabIndex={-1}>
       <header className="set-head">
         <span className="set-icon" aria-hidden="true">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round">{ICONS[id]}</svg>
+          <SectionIcon id={id} />
         </span>
         <h2 id={head}>{title}</h2>
         {note && <p className="set-note">{note}</p>}
@@ -664,66 +663,17 @@ function UpdatesSection() {
   );
 }
 
-/** Which section is current: the last one whose top has passed just under the sticky ruler, or the last one when the
-    page is scrolled to the end. One IntersectionObserver, with enough thresholds to report while sections move. */
-function useCurrentSection(root: React.RefObject<HTMLDivElement | null>, pinned: React.RefObject<boolean>, onChange: (id: SectionId) => void) {
-  useEffect(() => {
-    const el = root.current;
-    const scroller = el?.closest<HTMLElement>(".screen");
-    if (!el || !scroller || typeof IntersectionObserver !== "function") return;
-    const sections = SECTIONS.map((id) => document.getElementById(id)).filter((s): s is HTMLElement => !!s);
-    const pick = () => {
-      if (pinned.current) return;
-      const line = (el.querySelector(".set-ruler")?.getBoundingClientRect().bottom ?? scroller.getBoundingClientRect().top) + 48;
-      let current: SectionId = SECTIONS[0];
-      if (scroller.scrollTop > 0 && scroller.scrollTop + scroller.clientHeight >= scroller.scrollHeight - 2) current = SECTIONS[SECTIONS.length - 1];
-      else for (const s of sections) if (s.getBoundingClientRect().top <= line) current = s.id as SectionId;
-      onChange(current);
-    };
-    const io = new IntersectionObserver(pick, { root: scroller, threshold: Array.from({ length: 21 }, (_, i) => i / 20) });
-    sections.forEach((s) => io.observe(s));
-    return () => io.disconnect();
-    // onChange only sets state
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [root, pinned]);
+function SectionIcon({ id }: { id: SectionId }) {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round">{ICONS[id]}</svg>
+  );
 }
 
 export default function Settings() {
-  const root = useRef<HTMLDivElement>(null);
-  const pinned = useRef(false);
-  const [current, setCurrent] = useState<SectionId>("account");
-  useCurrentSection(root, pinned, setCurrent);
-
-  // A click on the ruler: the playhead goes there at once and stays while the page scrolls to the section.
-  function go(id: string) {
-    const target = document.getElementById(id);
-    if (!target) return;
-    setCurrent(id as SectionId);
-    pinned.current = true;
-    const scroller = target.closest<HTMLElement>(".screen");
-    const reduce = window.matchMedia?.("(prefers-reduced-motion: reduce)").matches;
-    const release = () => {
-      pinned.current = false;
-      scroller?.removeEventListener("scrollend", release);
-    };
-    scroller?.addEventListener("scrollend", release);
-    window.setTimeout(release, reduce ? 50 : 900);
-    target.scrollIntoView({ behavior: reduce ? "auto" : "smooth", block: "start" });
-    target.focus({ preventScroll: true });
-  }
-
   return (
     <Screen narrow>
       <h1 className="title">{t("settings.title")}</h1>
-      <div className="settings" ref={root}>
-        <div className="set-ruler">
-          <Ruler
-            label={t("settings.sections")}
-            segments={SECTIONS.map((id) => ({ id, label: t(`settings.nav.${id}`) }))}
-            active={current}
-            onPick={go}
-          />
-        </div>
+      <div className="settings">
         <AccountSection />
         <GeneralSection />
         <AiSection />

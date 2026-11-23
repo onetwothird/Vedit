@@ -1,45 +1,33 @@
-/* Sign in: the product on the left (the Home hero, playing), the ways in on the right inside 9:16 crop marks.
-   The mode switch is the editor ruler; its playhead marks which one you are in. One surface, no cards. */
+/* Sign in: the product on the left (the Home hero, playing), the ways in on the right.
+   The mode switch is the app's segmented control, full width. One surface, no cards. */
 .signin { display: grid; grid-template-columns: minmax(0, 1.15fr) minmax(440px, 1fr); height: 100vh; overflow-y: auto; background: var(--panel); }
 
 .signin-show {
   position: relative; display: flex; flex-direction: column; justify-content: space-between; gap: 32px;
   padding: 32px 48px 40px; background: var(--bg); border-right: 1px solid var(--line); overflow: hidden;
 }
-.signin-brand { display: flex; align-items: center; gap: 10px; }
-.signin-word { font: 400 24px var(--pixel); font-synthesis: none; color: var(--ink); }
+.signin-brand { display: flex; align-items: center; gap: 9px; line-height: 1; }
+.signin-word { font: 400 22px/1 var(--pixel); font-synthesis: none; letter-spacing: .01em; color: var(--ink); }
 .signin-art { display: grid; place-items: center; }
 .signin-art .hero-art { justify-self: center; max-width: 720px; }
 .signin-line { max-width: 34ch; font: 600 22px/1.3 var(--sans); letter-spacing: -0.015em; color: var(--ink); }
 
 .signin-main { display: flex; flex-direction: column; align-items: center; justify-content: center; padding: 24px; min-width: 0; }
 
-/* The form column sits in a 9:16 frame drawn only by its four corner marks, the same marks the app draws on
-   vertical framing: 1px, 14px arms. No fill, no shadow. */
+/* The form column: no frame, no card. */
 .signin-card {
-  --mark: var(--line-2);
-  position: relative; width: 100%; max-width: 400px; aspect-ratio: 9 / 16;
+  position: relative; width: 100%; max-width: 400px;
   display: flex; flex-direction: column; justify-content: center; padding: 32px;
-  background:
-    linear-gradient(var(--mark), var(--mark)) 0 0 / 14px 1px,
-    linear-gradient(var(--mark), var(--mark)) 0 0 / 1px 14px,
-    linear-gradient(var(--mark), var(--mark)) 100% 0 / 14px 1px,
-    linear-gradient(var(--mark), var(--mark)) 100% 0 / 1px 14px,
-    linear-gradient(var(--mark), var(--mark)) 0 100% / 14px 1px,
-    linear-gradient(var(--mark), var(--mark)) 0 100% / 1px 14px,
-    linear-gradient(var(--mark), var(--mark)) 100% 100% / 14px 1px,
-    linear-gradient(var(--mark), var(--mark)) 100% 100% / 1px 14px;
-  background-repeat: no-repeat;
 }
 .signin-card > * { flex-shrink: 0; }
-/* Room for two lines, text set on the bottom one: switching modes grows the title upward and the ruler stays put. */
+/* Room for two lines, text set on the bottom one: switching modes grows the title upward and the switch stays put. */
 .signin-title {
   display: flex; align-items: flex-end; min-height: 2.2em;
   font: 400 40px/1.1 var(--pixel); font-synthesis: none; letter-spacing: 0; color: var(--ink);
 }
 
-.signin-card .ruler { margin: 24px 0 24px; }
-.signin-card .ruler-seg { flex-basis: 0; }
+.signin-modes { display: flex; margin: 24px 0; }
+.signin-modes .seg-tab { flex: 1 1 0; height: 32px; padding: 0 12px; font-size: 13px; }
 
 .signin-social { display: flex; flex-direction: column; gap: 8px; }
 .social {
@@ -86,9 +74,10 @@
   font-size: 13px; line-height: 1.5; color: var(--ink);
 }
 
-/* Phones and narrow windows: no product panel. A compact strip instead: the wordmark over a short waveform that
-   the playhead sweeps across once. */
-.signin-strip { display: none; }
+/* A short waveform over the form that the playhead sweeps across once. On phones and narrow windows, where the
+   product panel is hidden, the wordmark sits above it. */
+.signin-strip { width: 100%; max-width: 400px; padding: 0 32px; }
+.signin-strip .signin-brand { display: none; }
 .signin-wave { position: relative; height: 56px; margin-top: 16px; overflow: hidden; color: var(--line-2); }
 .signin-wave svg { display: block; width: 100%; height: 100%; fill: currentColor; }
 .signin-sweep { position: absolute; inset: 0; transform: translateX(62%); }
@@ -106,8 +95,9 @@
   .signin { grid-template-columns: minmax(0, 1fr); }
   .signin-show { display: none; }
   .signin-main { justify-content: flex-start; padding: 24px 16px 32px; }
-  .signin-strip { display: block; width: 100%; max-width: 400px; margin-bottom: 16px; }
-  .signin-card { aspect-ratio: auto; justify-content: flex-start; }
+  .signin-strip { padding: 0; margin-bottom: 16px; }
+  .signin-strip .signin-brand { display: flex; }
+  .signin-card { justify-content: flex-start; }
 }
 @media (max-width: 480px) {
   .signin-card { padding: 28px 20px; }
