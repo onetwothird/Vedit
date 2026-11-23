@@ -1,4 +1,4 @@
-import { useEffect, useId, useLayoutEffect, useRef, useState, type ReactNode } from "react";
+import { useEffect, useId, useRef, useState, type ReactNode } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { useAuth } from "../auth/auth";
 import Avatar from "../components/Avatar";
@@ -669,98 +669,11 @@ function SectionIcon({ id }: { id: SectionId }) {
   );
 }
 
-/** The sections as a sticky row of pills, drawn like the top bar's steps; the current one gets the .step.on look.
-    The row scrolls sideways inside itself on phones and keeps the current pill in view. */
-function SectionTabs({ current, onPick }: { current: SectionId; onPick(id: SectionId): void }) {
-  const row = useRef<HTMLDivElement>(null);
-  useLayoutEffect(() => {
-    const el = row.current;
-    const on = el?.querySelector<HTMLElement>('[aria-current="true"]');
-    if (!el || !on || el.scrollWidth <= el.clientWidth) return;
-    const at = on.getBoundingClientRect().left - el.getBoundingClientRect().left + el.scrollLeft;
-    const left = at - 16;
-    const right = at + on.offsetWidth + 16 - el.clientWidth;
-    if (el.scrollLeft > left || el.scrollLeft < right) {
-      const reduce = window.matchMedia?.("(prefers-reduced-motion: reduce)").matches;
-      el.scrollTo({ left: el.scrollLeft > left ? left : right, behavior: reduce ? "auto" : "smooth" });
-    }
-  }, [current]);
-  return (
-    <nav className="set-tabs" aria-label={t("settings.sections")}>
-      <div ref={row} className="set-tabs-row">
-        {SECTIONS.map((id) => (
-          <a
-            key={id}
-            href={`#${id}`}
-            className={current === id ? "step set-tab on" : "step set-tab"}
-            aria-current={current === id ? "true" : undefined}
-            onClick={(e) => {
-              e.preventDefault(); // the app routes on the hash, so the link scrolls instead of navigating
-              onPick(id);
-            }}
-          >
-            <span className="dot" aria-hidden="true"><SectionIcon id={id} /></span>
-            {t(`settings.nav.${id}`)}
-          </a>
-        ))}
-      </div>
-    </nav>
-  );
-}
-
-/** Which section is current: the last one whose top has passed just under the sticky tabs, or the last one when the
-    page is scrolled to the end. One IntersectionObserver, with enough thresholds to report while sections move. */
-function useCurrentSection(root: React.RefObject<HTMLDivElement | null>, pinned: React.RefObject<boolean>, onChange: (id: SectionId) => void) {
-  useEffect(() => {
-    const el = root.current;
-    const scroller = el?.closest<HTMLElement>(".screen");
-    if (!el || !scroller || typeof IntersectionObserver !== "function") return;
-    const sections = SECTIONS.map((id) => document.getElementById(id)).filter((s): s is HTMLElement => !!s);
-    const pick = () => {
-      if (pinned.current) return;
-      const line = (el.querySelector(".set-tabs")?.getBoundingClientRect().bottom ?? scroller.getBoundingClientRect().top) + 48;
-      let current: SectionId = SECTIONS[0];
-      if (scroller.scrollTop > 0 && scroller.scrollTop + scroller.clientHeight >= scroller.scrollHeight - 2) current = SECTIONS[SECTIONS.length - 1];
-      else for (const s of sections) if (s.getBoundingClientRect().top <= line) current = s.id as SectionId;
-      onChange(current);
-    };
-    const io = new IntersectionObserver(pick, { root: scroller, threshold: Array.from({ length: 21 }, (_, i) => i / 20) });
-    sections.forEach((s) => io.observe(s));
-    return () => io.disconnect();
-    // onChange only sets state
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [root, pinned]);
-}
-
 export default function Settings() {
-  const root = useRef<HTMLDivElement>(null);
-  const pinned = useRef(false);
-  const [current, setCurrent] = useState<SectionId>("account");
-  useCurrentSection(root, pinned, setCurrent);
-
-  // A click on a tab: it becomes current at once and stays so while the page scrolls to the section.
-  function go(id: SectionId) {
-    const target = document.getElementById(id);
-    if (!target) return;
-    setCurrent(id);
-    pinned.current = true;
-    const scroller = target.closest<HTMLElement>(".screen");
-    const reduce = window.matchMedia?.("(prefers-reduced-motion: reduce)").matches;
-    const release = () => {
-      pinned.current = false;
-      scroller?.removeEventListener("scrollend", release);
-    };
-    scroller?.addEventListener("scrollend", release);
-    window.setTimeout(release, reduce ? 50 : 900);
-    target.scrollIntoView({ behavior: reduce ? "auto" : "smooth", block: "start" });
-    target.focus({ preventScroll: true });
-  }
-
   return (
     <Screen narrow>
       <h1 className="title">{t("settings.title")}</h1>
-      <div className="settings" ref={root}>
-        <SectionTabs current={current} onPick={go} />
+      <div className="settings">
         <AccountSection />
         <GeneralSection />
         <AiSection />
