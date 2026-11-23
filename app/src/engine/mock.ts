@@ -390,7 +390,7 @@ export function createMockEngine(opts: { tickMs?: number; persist?: Pick<Storage
       const job = newJob(pid, "export");
       job.result = { renders, files: [] };
       // test trigger: window.__veditMockFail = ["h02"] makes the next export of that clip fail once, as a bad render would
-      const doomed = (globalThis as { __veditMockFail?: string[] }).__veditMockFail;
+      const doomed = import.meta.env.VITE_ENGINE === "mock" ? (globalThis as { __veditMockFail?: string[] }).__veditMockFail : undefined;
       const bad = doomed?.find((h) => body.clips.includes(h));
       if (bad) doomed!.splice(doomed!.indexOf(bad), 1);
       const failure = bad

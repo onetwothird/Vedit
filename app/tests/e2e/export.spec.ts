@@ -119,3 +119,32 @@ for (const scheme of ["dark", "light"] as const) {
     await check();
   });
 }
+
+test("Cancel stops the clips still waiting; finished ones stay and can be retried one by one", async ({ page }) => {
+  await page.goto(URL);
+  await only(page, ["Nobody tells you this when you start", "The ₱500 mistake on my first gig", "Why I almost quit after a year"]);
+  await page.getByRole("button", { name: "Export 3 clips" }).click();
+  await page.getByRole("button", { name: "Cancel export" }).click();
+  await expect(page.getByRole("heading", { name: /\d exported, \d failed/ })).toBeVisible({ timeout: 20_000 });
+  await expect(page.getByText("Cancelled").first()).toBeVisible();
+  const retry = page.getByRole("button", { name: "Try again" });
+  await retry.first().dblclick(); // a double click starts one job, not two
+  await expect(page.getByRole("button", { name: "Change options" })).toBeVisible({ timeout: 20_000 });
+  await expect(page.getByText("01 Nobody tells you this when you start.mp4")).toHaveCount(1);
+});
+
+test("coming back to a running export waits for it instead of starting a duplicate", async ({ page }) => {
+  await page.goto(URL);
+  await page.getByRole("checkbox", { name: "Square 1:1" }).check({ force: true });
+  await page.getByRole("checkbox", { name: "Wide 16:9" }).check({ force: true });
+  await only(page, ["Nobody tells you this when you start", "The ₱500 mistake on my first gig"]);
+  await page.getByRole("button", { name: "Export 2 clips" }).click();
+  await page.evaluate(() => { location.hash = "#/p/mock-1/pick"; }); // leave without a reload: the engine keeps working
+  await expect(page.getByRole("heading", { name: /clips found/ })).toBeVisible();
+  await page.evaluate(() => { location.hash = "#/p/mock-1/export"; });
+  const go = page.getByRole("button", { name: /^Export \d+ clips?$/ });
+  await expect(page.getByText("An export of this video is still running.")).toBeVisible();
+  await expect(go).toBeDisabled();
+  await expect(page.getByText("An export of this video is still running.")).toBeHidden({ timeout: 20_000 });
+  await expect(go).toBeEnabled();
+});

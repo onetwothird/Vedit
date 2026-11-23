@@ -15,4 +15,4 @@
 .q-fail { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
 .q-fail .error { flex: 1; min-width: 160px; }
 .q-row .secondary:disabled { opacity: .55; cursor: not-allowed; }
-.settings :is(.secondary, .primary):focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.settings .set-sec .secondary:focus-visible, .settings .secondary:focus-visible { outline: 2px solid var(--ink); outline-offset: 2px; }

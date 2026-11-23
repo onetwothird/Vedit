@@ -437,23 +437,31 @@ class Engine:
         """Finished files (+ .srt) and, on failure, which render failed. Always removes the temp edits."""
         with self._meta_lock:
             plan = self._exports.pop(job.id, [])
-        stages = [e["stage"] for e in plan]
+        by_stage = {}
+        for i, e in enumerate(plan):
+            by_stage[e["stage"]] = i
+            by_stage[e["stage"].replace("render ", "thumb ")] = i
         if job.state == "done":
             finished, failed = plan, None
         else:
-            at = stages.index(job.stage) if job.stage in stages else 0
-            finished = plan[:at]
-            failed = plan[at] if job.state == "failed" and plan else None
-        files = []
+            at = by_stage.get(job.stage, 0)
+            in_thumb = job.stage.startswith("thumb ")  # its video was already rendered
+            finished = plan[:at + 1] if in_thumb else plan[:at]
+            failed = plan[at] if job.state == "failed" and plan and not in_thumb else None
+        files, warnings = [], []
         for e in finished:
             out = Path(e["path"])
             files.append(str(out))
             for extra in (".srt", ".jpg"):
                 if out.with_suffix(extra).is_file():
                     files.append(str(out.with_suffix(extra)))
+            if e.get("thumb") and job.state == "done" and not out.with_suffix(".jpg").is_file():
+                warnings.append({"hid": e["hid"], "aspect": e["aspect"], "kind": "thumbnail"})
         for e in plan:
             Path(e["tmp"]).unlink(missing_ok=True)
         result = {"renders": _public_renders(plan), "files": files}
+        if warnings:
+            result["warnings"] = warnings
         if failed is not None:
             result["failed"] = {"hid": failed["hid"], "aspect": failed["aspect"]}
         return result
@@ -475,6 +483,24 @@ class Engine:
                 loop.call_soon_threadsafe(_offer, q, msg)
             except RuntimeError:  # loop already closed
                 self.remove_client((loop, q))
+
+
+def _safe_out_dir(raw: str) -> Path:
+    """A local absolute folder with no parent steps, no UNC and no device path; created when missing."""
+    flat = raw.replace("\\", "/")
+    if flat.startswith("//"):
+        raise ValueError("out_dir must be a local folder, not a network or device path")
+    path = Path(raw)
+    if not path.is_absolute() or ".." in flat.split("/"):
+        raise ValueError("out_dir must be an absolute folder without '..'")
+    path = path.resolve()
+    if path.exists() and not path.is_dir():
+        raise ValueError("out_dir is a file, not a folder")
+    try:
+        path.mkdir(parents=True, exist_ok=True)
+    except OSError:
+        raise ValueError("out_dir could not be created") from None
+    return path
 
 
 def _public_renders(plan: list[dict]) -> list[dict]:
@@ -746,10 +772,7 @@ def create_app(token: str, queue: JobQueue | None = None) -> FastAPI:
             wd = workdir_for(p.source)
             out_dir = output_dir(Path(p.source))
             if body.out_dir:
-                chosen = Path(body.out_dir)
-                if not chosen.is_absolute() or str(chosen).startswith("\\\\"):
-                    raise ValueError("out_dir must be an absolute local folder")
-                out_dir = chosen
+                out_dir = _safe_out_dir(body.out_dir)
             plan = []
             for i, hid in enumerate(body.clips, body.first_number):
                 clip = _find_clip(p, hid)
@@ -775,10 +798,10 @@ def create_app(token: str, queue: JobQueue | None = None) -> FastAPI:
             stage = f"render {k}/{n}"
             share = 1.0 / n
             steps.append((stage, py_cmd("render.py", str(tmp), *crf), share * (0.9 if body.thumbnail else 1.0)))
-            if body.thumbnail:  # same stage name, so a failure here still points at this clip
-                steps.append((stage, [ffmpeg_bin("ffmpeg"), "-y", "-v", "error", "-ss", "0.5", "-i", str(path),
-                                      "-frames:v", "1", "-q:v", "2", str(path.with_suffix(".jpg"))], share * 0.1))
-            renders.append({"stage": stage, "hid": hid, "aspect": aspect, "path": str(path), "tmp": str(tmp)})
+            if body.thumbnail:  # its own stage, and the script never fails the job
+                steps.append((f"thumb {k}/{n}", py_cmd("thumb_frame.py", str(path), str(path.with_suffix(".jpg"))), share * 0.1))
+            renders.append({"stage": stage, "hid": hid, "aspect": aspect, "path": str(path), "tmp": str(tmp),
+                            "thumb": body.thumbnail})
         return _job_dict(engine.submit(pid, "export", steps, renders=renders))
 
     @app.get("/jobs/{job_id}")

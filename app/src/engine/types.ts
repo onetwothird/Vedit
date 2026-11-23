@@ -71,6 +71,8 @@ export interface RenderPlanEntry {
 export interface ExportResult {
   files: string[];
   failed?: { hid: string; aspect: string };
+  /** The video finished but something extra did not (a thumbnail). */
+  warnings?: { hid: string; aspect: string; kind: "thumbnail" }[];
   renders: RenderPlanEntry[];
 }
 

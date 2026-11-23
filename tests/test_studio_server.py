@@ -452,12 +452,64 @@ def test_export_options_folder_srt_thumbnail_and_numbering(client, auth, fake_qu
     out = dest / output_name(3, h["title"], "9:16")
     assert job["result"]["renders"][0]["path"] == str(out)
     steps = fake_queue.steps
-    assert [s[0] for s in steps] == ["render 1/1", "render 1/1"] and sum(s[2] for s in steps) == pytest.approx(1.0)
+    assert [s[0] for s in steps] == ["render 1/1", "thumb 1/1"] and sum(s[2] for s in steps) == pytest.approx(1.0)
     assert steps[1][1][-1] == str(out.with_suffix(".jpg"))
     assert load_json(steps[0][1][-1])["captions"]["srt"] is False
     bad = client.post(f"/projects/{pid}/export", headers=auth,
                       json={"clips": [h["id"]], "out_dir": "relative/folder"})
     assert bad.status_code == 400
+
+
+def test_export_out_dir_is_checked_and_created(client, auth, fake_queue, analyzed_project, tmp_path):
+    pid, h = analyzed_project["id"], analyzed_project["highlights"][0]
+
+    def post(folder):
+        return client.post(f"/projects/{pid}/export", headers=auth, json={"clips": [h["id"]], "out_dir": str(folder)})
+
+    for bad in (str(tmp_path / "a" / ".." / "b"), r"\\server\share\x", "//server/share/x", r"\\?\C:\x", "relative"):
+        r = client.post(f"/projects/{pid}/export", headers=auth, json={"clips": [h["id"]], "out_dir": bad})
+        assert r.status_code == 400, bad
+    afile = tmp_path / "file.txt"
+    afile.write_text("x")
+    assert post(afile).status_code == 400
+    fresh = tmp_path / "new" / "Mga Bidyo ñ"
+    assert not fresh.exists()
+    assert post(fresh).status_code == 200 and fresh.is_dir()
+
+
+def test_thumbnail_failure_keeps_the_video_and_is_a_warning(client, auth, app, fake_queue, analyzed_project, tmp_path):
+    pid, h = analyzed_project["id"], analyzed_project["highlights"][0]
+    job = client.post(f"/projects/{pid}/export", headers=auth,
+                      json={"clips": [h["id"]], "formats": ["9:16", "1:1"], "thumbnail": True, "out_dir": str(tmp_path)}).json()
+    assert [s[0] for s in fake_queue.steps] == ["render 1/2", "thumb 1/2", "render 2/2", "thumb 2/2"]
+    outs = [tmp_path / output_name(1, h["title"], a) for a in ("9:16", "1:1")]
+    for o in outs:
+        o.write_bytes(b"")
+    outs[0].with_suffix(".jpg").write_bytes(b"")  # only the second clip's thumbnail is missing
+    fake_queue.finish(job["id"])
+    app.state.engine.wait_idle()
+    last = client.get(f"/jobs/{job['id']}", headers=auth).json()
+    assert last["state"] == "done" and "failed" not in last["result"]
+    assert str(outs[1]) in last["result"]["files"] and str(outs[0].with_suffix(".jpg")) in last["result"]["files"]
+    assert last["result"]["warnings"] == [{"hid": h["id"], "aspect": "1:1", "kind": "thumbnail"}]
+
+
+def test_cancel_during_thumbnail_keeps_that_clips_video(client, auth, app, fake_queue, analyzed_project, tmp_path):
+    pid, h = analyzed_project["id"], analyzed_project["highlights"][0]
+    job = client.post(f"/projects/{pid}/export", headers=auth,
+                      json={"clips": [h["id"]], "formats": ["9:16", "1:1"], "thumbnail": True, "out_dir": str(tmp_path)}).json()
+    first = tmp_path / output_name(1, h["title"], "9:16")
+    first.write_bytes(b"")
+    fake_queue.emit(job["id"], state="running", stage="thumb 1/2")
+    fake_queue.emit(job["id"], state="cancelled")
+    app.state.engine.wait_idle()
+    got = client.get(f"/jobs/{job['id']}", headers=auth).json()
+    assert got["result"]["files"] == [str(first)] and "failed" not in got["result"]
+
+
+def test_thumb_frame_time():
+    from thumb_frame import frame_time
+    assert frame_time(10) == 0.5 and frame_time(0.4) == 0.2 and frame_time(0) == 0.0
 
 
 @pytest.mark.parametrize("end_state", ["failed", "cancelled"])

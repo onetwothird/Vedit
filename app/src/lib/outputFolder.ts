@@ -2,7 +2,9 @@
 
 const sepOf = (path: string): string => (path.includes("\\") ? "\\" : "/");
 
-export const joinPath = (dir: string, name: string): string => (/[\/]$/.test(dir) ? dir : dir + sepOf(dir)) + name;
+/** `dir` + `name` with `sep` between them (the folder's own separator by default), never doubled. */
+export const joinPath = (dir: string, name: string, sep: string = sepOf(dir)): string =>
+  (/[\\/]$/.test(dir) ? dir : dir + sep) + name;
 
 /** `<folder of the video>/<video name without extension> - vedit`, written with the video path's own separators. */
 export function defaultOutputFolder(source: string): string {
@@ -12,5 +14,5 @@ export function defaultOutputFolder(source: string): string {
   const dot = file.lastIndexOf(".");
   const stem = dot > 0 ? file.slice(0, dot) : file;
   const folder = `${stem} - vedit`;
-  return dir ? joinPath(dir, folder) : folder;
+  return dir ? joinPath(dir, folder, sepOf(source)) : folder;
 }

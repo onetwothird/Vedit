@@ -106,12 +106,6 @@
   "clips.sort.order": "In order",
   "clips.score": "Score {n} out of 100",
   "clips.keep": "Keep {title}",
-  "placeholder.pick": "Pick clips",
-  "placeholder.edit": "Edit",
-  "placeholder.export": "Export",
-  "placeholder.settings": "Settings",
-  "placeholder.clips": "{n} clips found",
-  "placeholder.soon": "This screen is coming soon.",
   "edit.title": "Edit",
   "edit.missing": "This clip isn't available.",
   "edit.back": "Back to Pick clips",
@@ -233,6 +227,7 @@
   "auth.error.rate_limited": "Too many tries in a row. Wait a minute, then try again.",
   "auth.error.network": "Can't reach the account service. Check your internet connection and try again.",
   "auth.error.social_cancelled": "Sign in was cancelled. Pick a way to sign in to try again.",
+  "auth.error.social_failed": "That sign in didn't go through. Try again, or use your email.",
   "auth.error.social_unavailable": "Google and Facebook sign in come with the installer. Use your email for now.",
   "auth.error.unknown": "Something went wrong signing in. Try again.",
   "menu.account.signin": "Sign in",
@@ -361,5 +356,9 @@
   "export.row.show": "Show in folder",
   "export.row.show.error": "Could not open the folder.",
   "export.show.browser": "Showing files in a folder works in the installed app.",
-  "export.again": "Change options"
+  "export.again": "Change options",
+  "export.cancel": "Cancel export",
+  "export.busy": "An export of this video is still running. You can start another when it finishes or is cancelled.",
+  "export.row.pct": "{pct}%",
+  "export.row.thumbwarn": "The video is saved, but the thumbnail could not be."
 }
