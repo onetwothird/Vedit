@@ -1,26 +1,29 @@
-/* The vedit mark: a pixel "v" (same grid as the Geist Pixel wordmark) whose lower half is shifted
-   half a pixel to the right, like a jump cut. The same drawing is public/favicon.svg and the app icon. */
+import { useId } from "react";
 
-const TOP: [number, number][] = [[0, 0], [6, 0], [0, 1], [6, 1], [1, 2], [5, 2]];
-const BOTTOM: [number, number][] = [[1, 3], [5, 3], [2, 4], [4, 4], [3, 5]];
-const X0 = 2.25;
-const Y0 = 2.72;
-const CUT = 0.56;
-const SHIFT = 0.5;
+/* The vedit mark: a "v" made of two clips on the timeline, split by a cut down the middle. The left clip is ink,
+   the right one green (the playhead's colour). The same drawing is public/favicon.svg and the app icon
+   (src-tauri/icons/icon-source.svg; regenerate the icon files with `npx tauri icon` from a 1024px render of it). */
 
-export const LOGO_PIXELS = [
-  ...TOP.map(([c, r]) => [X0 + c, Y0 + r] as const),
-  ...BOTTOM.map(([c, r]) => [X0 + c + SHIFT, Y0 + r + CUT] as const),
-];
+const LEFT = [7.1, 6.2] as const; // top of each arm (stroke centre)
+const RIGHT = [16.9, 6.2] as const;
+const POINT = [12, 18.6] as const; // where the arms meet
+const WIDTH = 4.4;
+const CUT = 1.1; // the gap between the two clips
+
+const arm = (from: readonly [number, number]) => `M${from[0]} ${from[1]} ${POINT[0]} ${POINT[1]}`;
 
 export default function Logo({ size = 24, className }: { size?: number; className?: string }) {
+  const id = useId().replace(/:/g, "");
   return (
-    <svg className={className} width={size} height={size} viewBox="0 0 12 12" aria-hidden="true">
-      <rect width="12" height="12" rx="2.7" fill="#141518" />
-      <rect x="0.25" y="0.25" width="11.5" height="11.5" rx="2.5" fill="none" stroke="#ffffff1f" strokeWidth="0.5" />
-      {LOGO_PIXELS.map(([x, y]) => (
-        <rect key={`${x}-${y}`} x={x + 0.06} y={y + 0.06} width="0.88" height="0.88" rx="0.12" fill="#4ade80" />
-      ))}
+    <svg className={className} width={size} height={size} viewBox="0 0 24 24" aria-hidden="true">
+      <defs>
+        <clipPath id={`${id}l`}><rect width={12 - CUT / 2} height="24" /></clipPath>
+        <clipPath id={`${id}r`}><rect x={12 + CUT / 2} width={12 - CUT / 2} height="24" /></clipPath>
+      </defs>
+      <rect width="24" height="24" rx="5.4" fill="#141518" />
+      <rect x="0.5" y="0.5" width="23" height="23" rx="4.9" fill="none" stroke="#ffffff1f" />
+      <path d={arm(LEFT)} stroke="#ececea" strokeWidth={WIDTH} strokeLinecap="round" fill="none" clipPath={`url(#${id}l)`} />
+      <path d={arm(RIGHT)} stroke="#4ade80" strokeWidth={WIDTH} strokeLinecap="round" fill="none" clipPath={`url(#${id}r)`} />
     </svg>
   );
 }
