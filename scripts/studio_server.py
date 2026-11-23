@@ -110,6 +110,20 @@ def brand_file() -> Path:
     return (Path(local) / "vedit" if local else Path.home() / ".vedit") / "brand.json"
 
 
+def read_brand() -> dict:
+    """The saved brand kit, or {} when there is none or the file is unreadable or not a JSON object."""
+    try:
+        data = load_json(brand_file())
+    except (OSError, ValueError):
+        return {}
+    return data if isinstance(data, dict) else {}
+
+
+def usable_brand_file() -> Path | None:
+    f = brand_file()
+    return f if read_brand() and f.exists() else None
+
+
 def _http_get(url: str, headers: dict) -> int:
     import httpx  # lazy, like highlights_llm
     return httpx.get(url, headers=headers, timeout=15).status_code
@@ -389,7 +403,7 @@ class Engine:
             if any(_overlap_share(h, c.highlight) > OVERLAP_DROP for c in preserved):
                 continue
             try:
-                edl = clip_edl(wd, h, p.platform, language, brand_file() if brand_file().exists() else None)
+                edl = clip_edl(wd, h, p.platform, language, usable_brand_file())
             except ValueError as e:
                 print(f"vedit: skipping highlight {hid}: {e}", file=sys.stderr)
                 continue
@@ -614,15 +628,19 @@ def create_app(token: str, queue: JobQueue | None = None) -> FastAPI:
 
     @app.get("/brand")
     def get_brand():
-        f = brand_file()
-        saved = load_json(f) if f.exists() else {}
+        saved = read_brand()
         return {k: saved.get(k) if isinstance(saved.get(k), str) else "" for k in BRAND_KEYS}
 
     @app.put("/brand")
     def put_brand(body: BrandBody):
-        kit = {k: v for k, v in body.model_dump().items() if v.strip()}
+        kit = read_brand()  # keys Settings does not edit (caption_style, replace, ...) survive
+        for k, v in body.model_dump().items():
+            if v.strip():
+                kit[k] = v
+            else:
+                kit.pop(k, None)
         _atomic_write_json(brand_file(), kit)
-        return {k: kit.get(k, "") for k in BRAND_KEYS}
+        return {k: kit[k] if isinstance(kit.get(k), str) else "" for k in BRAND_KEYS}
 
     @app.get("/projects/recent")
     def recent():

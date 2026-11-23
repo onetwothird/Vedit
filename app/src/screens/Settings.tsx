@@ -267,7 +267,7 @@ function AiSection() {
             type={shown ? "text" : "password"}
             value={key}
             onChange={(e) => setKey(e.target.value)}
-            placeholder={saved ? "••••••••••••" : ""}
+            placeholder={saved ? t("settings.ai.placeholder") : ""}
             autoComplete="off"
             spellCheck={false}
           />
@@ -414,10 +414,10 @@ function ModelsSection() {
 const EMPTY_BRAND: Brand = { font: "", caption_color: "", highlight: "", logo: "", intro: "", outro: "", music: "" };
 type FileKey = "logo" | "intro" | "outro" | "music";
 const FILE_KINDS: Record<FileKey, { name: string; extensions: string[]; accept: string }> = {
-  logo: { name: "Image", extensions: ["png", "jpg", "jpeg", "webp", "svg"], accept: "image/*" },
-  intro: { name: "Video", extensions: ["mp4", "mov", "m4v", "mkv", "webm"], accept: "video/*" },
-  outro: { name: "Video", extensions: ["mp4", "mov", "m4v", "mkv", "webm"], accept: "video/*" },
-  music: { name: "Audio", extensions: ["mp3", "m4a", "aac", "wav", "flac", "ogg"], accept: "audio/*" },
+  logo: { name: "settings.dialog.image", extensions: ["png", "jpg", "jpeg", "webp", "svg"], accept: "image/*" },
+  intro: { name: "settings.dialog.video", extensions: ["mp4", "mov", "m4v", "mkv", "webm"], accept: "video/*" },
+  outro: { name: "settings.dialog.video", extensions: ["mp4", "mov", "m4v", "mkv", "webm"], accept: "video/*" },
+  music: { name: "settings.dialog.audio", extensions: ["mp3", "m4a", "aac", "wav", "flac", "ogg"], accept: "audio/*" },
 };
 
 function FileField({ id, label, value, kind, onChange }: { id: string; label: string; value: string; kind: FileKey; onChange(v: string): void }) {
@@ -427,7 +427,7 @@ function FileField({ id, label, value, kind, onChange }: { id: string; label: st
   async function choose() {
     if (isTauri()) {
       try {
-        const path = await pickFileNative(spec.name, spec.extensions);
+        const path = await pickFileNative(t(spec.name), spec.extensions);
         if (path) onChange(path);
       } catch {
         // the dialog failed to open: nothing changes
@@ -518,7 +518,7 @@ function BrandSection() {
         <div className="field">
           <label className="field-label" htmlFor={`${base}-hl`}>{t("settings.brand.highlight")}</label>
           <div className="set-color">
-            <input id={`${base}-hl`} className="ed-color" type="color" value={brand.highlight || "#ffc72c"} onChange={(e) => set({ highlight: e.target.value })} />
+            <input id={`${base}-hl`} className="ed-color" type="color" value={brand.highlight || "#ffffff"} onChange={(e) => set({ highlight: e.target.value })} />
             <span className="mono">{brand.highlight || t("settings.brand.none")}</span>
           </div>
         </div>

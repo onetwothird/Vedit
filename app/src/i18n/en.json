@@ -316,5 +316,9 @@
   "settings.updates.installing": "Installing…",
   "settings.updates.ready": "The update is installed.",
   "settings.updates.restart": "Restart to update",
-  "settings.updates.error": "Could not check for updates. Try again later."
+  "settings.updates.error": "Could not check for updates. Try again later.",
+  "settings.dialog.image": "Image",
+  "settings.dialog.video": "Video",
+  "settings.dialog.audio": "Audio",
+  "settings.ai.placeholder": "••••••••••••"
 }

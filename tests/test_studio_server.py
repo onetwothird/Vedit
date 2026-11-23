@@ -829,3 +829,25 @@ def test_brand_round_trip(client, auth, home):
     assert client.get("/brand", headers=auth).json() == kit
     saved = json.loads((home / "brand.json").read_text(encoding="utf-8"))
     assert saved == {"font": "Poppins", "caption_color": "#ffffff", "highlight": "#ffc72c", "logo": "C:/b/logo.png"}
+
+
+def test_brand_put_keeps_keys_settings_does_not_edit(client, auth, home):
+    home.mkdir(parents=True, exist_ok=True)
+    (home / "brand.json").write_text(json.dumps({"font": "Old", "caption_style": "pop", "uppercase": True,
+                                                 "replace": {"a": "b"}}), encoding="utf-8")
+    body = {"font": "New", "caption_color": "", "highlight": "", "logo": "", "intro": "", "outro": "", "music": ""}
+    client.put("/brand", headers=auth, json=body)
+    saved = json.loads((home / "brand.json").read_text(encoding="utf-8"))
+    assert saved == {"font": "New", "caption_style": "pop", "uppercase": True, "replace": {"a": "b"}}
+
+
+@pytest.mark.parametrize("text", ["{not json", "[1, 2]", ""])
+def test_bad_brand_file_is_treated_as_empty(client, auth, home, text):
+    import studio_server
+    home.mkdir(parents=True, exist_ok=True)
+    (home / "brand.json").write_text(text, encoding="utf-8")
+    r = client.get("/brand", headers=auth)
+    assert r.status_code == 200 and set(r.json().values()) == {""}
+    assert studio_server.usable_brand_file() is None
+    assert client.put("/brand", headers=auth, json={**r.json(), "font": "Fix"}).status_code == 200
+    assert studio_server.usable_brand_file() is not None
