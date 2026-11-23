@@ -436,7 +436,7 @@ See [`docs/USAGE.md`](docs/USAGE.md) for a step-by-step guide.
 
 ## Contributing
 
-Contributions are welcome. Read [CONTRIBUTING.md](CONTRIBUTING.md) to get started.
+Contributions are welcome. Read [CONTRIBUTING.md](CONTRIBUTING.md) to get started. To report a security problem privately, see [SECURITY.md](SECURITY.md).
 
 ```bash
 pip install -e ".[all,dev]"
