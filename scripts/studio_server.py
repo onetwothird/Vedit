@@ -84,6 +84,10 @@ class ExportBody(BaseModel):
     clips: list[str]
     formats: list[str] = ["9:16"]
     quality: Literal["normal", "high"] = "normal"
+    out_dir: Optional[str] = None  # absolute folder for the files; default: "<name> - vedit" next to the video
+    srt: bool = True  # also write the .srt subtitle file
+    thumbnail: bool = False  # also save a .jpg frame beside each video
+    first_number: int = Field(1, ge=1, le=999)  # the "NN" the first clip's file name starts at (a retry keeps its number)
 
 
 BRAND_KEYS = ("font", "caption_color", "highlight", "logo", "intro", "outro", "music")
@@ -444,8 +448,9 @@ class Engine:
         for e in finished:
             out = Path(e["path"])
             files.append(str(out))
-            if out.with_suffix(".srt").is_file():
-                files.append(str(out.with_suffix(".srt")))
+            for extra in (".srt", ".jpg"):
+                if out.with_suffix(extra).is_file():
+                    files.append(str(out.with_suffix(extra)))
         for e in plan:
             Path(e["tmp"]).unlink(missing_ok=True)
         result = {"renders": _public_renders(plan), "files": files}
@@ -740,8 +745,13 @@ def create_app(token: str, queue: JobQueue | None = None) -> FastAPI:
             p = _project(pid)
             wd = workdir_for(p.source)
             out_dir = output_dir(Path(p.source))
+            if body.out_dir:
+                chosen = Path(body.out_dir)
+                if not chosen.is_absolute() or str(chosen).startswith("\\\\"):
+                    raise ValueError("out_dir must be an absolute local folder")
+                out_dir = chosen
             plan = []
-            for i, hid in enumerate(body.clips, 1):
+            for i, hid in enumerate(body.clips, body.first_number):
                 clip = _find_clip(p, hid)
                 if not _valid_hid(hid):
                     raise ValueError(f"unsafe clip id {hid!r}")
@@ -752,6 +762,8 @@ def create_app(token: str, queue: JobQueue | None = None) -> FastAPI:
                     path = out_dir / output_name(i, clip.highlight.get("title", ""), aspect)
                     out.update(aspect=aspect, path=str(path))
                     e["output"] = out
+                    if not body.srt:
+                        e["captions"] = {**(e.get("captions") or {}), "srt": False}
                     plan.append((hid, aspect, e, path))
         n = len(plan)
         crf = ["--crf", HIGH_CRF] if body.quality == "high" else []
@@ -761,7 +773,11 @@ def create_app(token: str, queue: JobQueue | None = None) -> FastAPI:
             tmp = wd / f"export-{tag}-{hid}-{aspect.replace(':', 'x')}.edl.json"
             _atomic_write_json(tmp, e)
             stage = f"render {k}/{n}"
-            steps.append((stage, py_cmd("render.py", str(tmp), *crf), 1.0 / n))
+            share = 1.0 / n
+            steps.append((stage, py_cmd("render.py", str(tmp), *crf), share * (0.9 if body.thumbnail else 1.0)))
+            if body.thumbnail:  # same stage name, so a failure here still points at this clip
+                steps.append((stage, [ffmpeg_bin("ffmpeg"), "-y", "-v", "error", "-ss", "0.5", "-i", str(path),
+                                      "-frames:v", "1", "-q:v", "2", str(path.with_suffix(".jpg"))], share * 0.1))
             renders.append({"stage": stage, "hid": hid, "aspect": aspect, "path": str(path), "tmp": str(tmp)})
         return _job_dict(engine.submit(pid, "export", steps, renders=renders))
 

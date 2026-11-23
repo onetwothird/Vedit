@@ -122,3 +122,9 @@ export async function removeAiKey(provider: AiProvider): Promise<void> {
   if (isTauri()) await keyCommand("delete_ai_key", { provider });
   else memoryKeys.delete(provider);
 }
+
+/** Opens Explorer with the file selected. Desktop app only; throws if the file is gone. */
+export async function showInFolder(path: string): Promise<void> {
+  const { invoke } = await import("@tauri-apps/api/core");
+  await invoke("show_in_folder", { path });
+}

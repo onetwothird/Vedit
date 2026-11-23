@@ -1,9 +1,9 @@
 import { HashRouter, Navigate, Route, Routes } from "react-router-dom";
 import Edit from "./screens/Edit";
+import Export from "./screens/Export";
 import Home from "./screens/Home";
 import Import from "./screens/Import";
 import Pick from "./screens/Pick";
-import Placeholder from "./screens/Placeholder";
 import Settings from "./screens/Settings";
 import SignIn from "./screens/SignIn";
 
@@ -17,7 +17,7 @@ export default function AppRouter() {
         <Route path="/p/:id/import" element={<Import />} />
         <Route path="/p/:id/pick" element={<Pick />} />
         <Route path="/p/:id/edit/:hid" element={<Edit />} />
-        <Route path="/p/:id/export" element={<Placeholder titleKey="placeholder.export" step={4} />} />
+        <Route path="/p/:id/export" element={<Export />} />
         <Route path="/settings" element={<Settings />} />
         <Route path="*" element={<Navigate to="/" replace />} />
       </Routes>

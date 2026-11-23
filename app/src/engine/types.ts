@@ -208,6 +208,14 @@ export interface ExportBody {
   clips: string[];
   formats?: Aspect[];
   quality?: "normal" | "high";
+  /** Absolute folder for the files; the engine's default is "<name> - vedit" beside the video. */
+  out_dir?: string;
+  /** Also write the .srt subtitle file (default true). */
+  srt?: boolean;
+  /** Also save a .jpg frame beside each video (default false). */
+  thumbnail?: boolean;
+  /** The number the first clip's file name starts at (default 1); a retried clip keeps its own. */
+  first_number?: number;
 }
 
 export type ModelStatus = Record<string, { installed: boolean; size_mb: number }>;

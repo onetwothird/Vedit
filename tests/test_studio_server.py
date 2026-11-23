@@ -441,6 +441,25 @@ def test_export_steps_paths_and_result(client, auth, app, fake_queue, analyzed_p
     assert dup.status_code == 400 and dup.json()["code"] == "bad_request"
 
 
+def test_export_options_folder_srt_thumbnail_and_numbering(client, auth, fake_queue, analyzed_project, tmp_path):
+    pid, h = analyzed_project["id"], analyzed_project["highlights"][0]
+    dest = tmp_path / "Mga Video ñ"
+    r = client.post(f"/projects/{pid}/export", headers=auth,
+                    json={"clips": [h["id"]], "formats": ["9:16"], "out_dir": str(dest), "srt": False,
+                          "thumbnail": True, "first_number": 3})
+    assert r.status_code == 200
+    job = r.json()
+    out = dest / output_name(3, h["title"], "9:16")
+    assert job["result"]["renders"][0]["path"] == str(out)
+    steps = fake_queue.steps
+    assert [s[0] for s in steps] == ["render 1/1", "render 1/1"] and sum(s[2] for s in steps) == pytest.approx(1.0)
+    assert steps[1][1][-1] == str(out.with_suffix(".jpg"))
+    assert load_json(steps[0][1][-1])["captions"]["srt"] is False
+    bad = client.post(f"/projects/{pid}/export", headers=auth,
+                      json={"clips": [h["id"]], "out_dir": "relative/folder"})
+    assert bad.status_code == 400
+
+
 @pytest.mark.parametrize("end_state", ["failed", "cancelled"])
 def test_export_failure_reports_finished_files(client, auth, app, fake_queue, analyzed_project, tiny_video,
                                               end_state):
