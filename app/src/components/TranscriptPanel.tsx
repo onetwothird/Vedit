@@ -20,6 +20,8 @@ export interface TranscriptPanelProps {
   onRestore(w0: number, w1: number): void;
   onFix(wrong: string, right: string): void;
   onPlayFrom(w: number): void;
+  /** Space on a word: play or pause, as everywhere else on the screen. */
+  onTogglePlay(): void;
 }
 
 type Sel = { anchor: number; focus: number };
@@ -35,7 +37,7 @@ const clock = (s: number): string => {
 };
 
 /** The clip's words: click to cut, restore or fix one, shift-click for a range, and the count of what is cut. */
-function TranscriptPanel({ words, w0, w1, kept, replace, now, active, onCut, onRestore, onFix, onPlayFrom }: TranscriptPanelProps) {
+function TranscriptPanel({ words, w0, w1, kept, replace, now, active, onCut, onRestore, onFix, onPlayFrom, onTogglePlay }: TranscriptPanelProps) {
   const [sel, setSel] = useState<Sel | null>(null);
   const [menu, setMenu] = useState<"menu" | "fix" | null>(null);
   const [pos, setPos] = useState<{ left: number; top: number } | null>(null);
@@ -44,6 +46,7 @@ function TranscriptPanel({ words, w0, w1, kept, replace, now, active, onCut, onR
   const pop = useRef<HTMLDivElement>(null);
   const fixInput = useRef<HTMLInputElement>(null);
   const els = useRef(new Map<number, HTMLButtonElement>());
+  const root = useRef<HTMLDivElement>(null);
 
   // another clip starts with nothing selected
   useEffect(() => {
@@ -87,26 +90,29 @@ function TranscriptPanel({ words, w0, w1, kept, replace, now, active, onCut, onR
     close();
   }
 
-  // Delete cuts the selection, F2 fixes the word, Esc closes the popover and then drops the selection
+  // Delete cuts the selection (only with focus in the transcript), F2 fixes the word, Esc closes the popover and then
+  // drops the selection
   useEffect(() => {
     if (!active) return;
     const onKey = (e: globalThis.KeyboardEvent) => {
       if (e.defaultPrevented || e.ctrlKey || e.metaKey || e.altKey || typing(e.target)) return;
-      if ((e.key === "Delete" || e.key === "Backspace") && sel) {
+      const inside = !!root.current?.contains(e.target as Node);
+      if ((e.key === "Delete" || e.key === "Backspace") && sel && inside) {
         if (!allCut) onCut(lo, hi);
         setMenu(null);
       } else if (e.key === "F2" && sel) {
         setSel({ anchor: sel.focus, focus: sel.focus });
         setMenu("fix");
       } else if (e.key === "Escape" && (menu || sel)) {
-        if (menu) close();
+        setMenu(null);
+        if (menu) els.current.get(sel!.focus)?.focus();
         else setSel(null);
       } else return;
       e.preventDefault();
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  });
+  }, [active, sel, menu, allCut, lo, hi, onCut]);
 
   // a click anywhere else closes the popover
   useEffect(() => {
@@ -127,6 +133,12 @@ function TranscriptPanel({ words, w0, w1, kept, replace, now, active, onCut, onR
   }
 
   function onWordsKey(e: KeyboardEvent<HTMLDivElement>) {
+    // Space plays and pauses here too; a word is a button, so the player leaves Space on it alone (Enter opens it)
+    if (e.key === " " && (e.target as HTMLElement).classList.contains("w")) {
+      e.preventDefault();
+      if (!e.repeat) onTogglePlay();
+      return;
+    }
     const d = e.key === "ArrowLeft" ? -1 : e.key === "ArrowRight" ? 1 : 0;
     if (!d || !(e.target as HTMLElement).classList.contains("w")) return;
     e.preventDefault(); // the player's own arrow keys skip; here they move between words
@@ -187,10 +199,16 @@ function TranscriptPanel({ words, w0, w1, kept, replace, now, active, onCut, onR
     : count === 1 ? t("edit.tx.cut1") : t("edit.tx.cutN", { n: count });
 
   return (
-    <div className="ed-tx">
+    <div className="ed-tx" ref={root}>
       <div className="ed-tx-scroll" ref={scroll}>
         <p className="hint">{t("edit.tx.hint")}</p>
-        <div className="tx" role="group" aria-label={t("edit.tx.words")} onKeyDown={onWordsKey}>
+        <div
+          className="tx"
+          role="group"
+          aria-label={t("edit.tx.words")}
+          onKeyDown={onWordsKey}
+          onKeyUp={(e) => e.key === " " && (e.target as HTMLElement).classList.contains("w") && e.preventDefault()}
+        >
           {items}
         </div>
         {menu && sel && focusWord && (

@@ -47,7 +47,7 @@ test("screenshots", async ({ page }) => {
 test("pick screenshots", async ({ page }) => {
   test.setTimeout(60_000);
   await page.setViewportSize({ width: 1440, height: 900 });
-  const heading = page.getByRole("heading", { name: "12 clips found · 8 kept" });
+  const heading = page.getByRole("heading", { name: "12 clips found, 8 kept" });
 
   await page.goto("/#/");
   await page.evaluate(() => localStorage.setItem("vedit.theme", "dark"));
@@ -67,7 +67,7 @@ test("pick screenshots", async ({ page }) => {
   await page.getByRole("button", { name: "Find more clips" }).click();
   await expect(page.getByRole("button", { name: /Finding more clips/ })).toBeVisible();
   await shot(page, "pick-finding-light", "t16");
-  await expect(page.getByRole("heading", { name: "18 clips found · 14 kept" })).toBeVisible({ timeout: 15_000 });
+  await expect(page.getByRole("heading", { name: "18 clips found, 14 kept" })).toBeVisible({ timeout: 15_000 });
 
   await page.evaluate(() => document.documentElement.classList.remove("light"));
   await page.goto("/#/p/new/import");

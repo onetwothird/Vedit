@@ -249,10 +249,9 @@ export default function Pick() {
                 )}
               </div>
               <h2 className="preview-title">{current.highlight.title}</h2>
-              <p className="preview-meta mono">
-                {t("pick.length", { len: formatLength(current.highlight.end - current.highlight.start) })}
-                {" · "}
-                {t("pick.score", { n: Math.round(current.highlight.score) })}
+              <p className="preview-meta">
+                <span>{t("pick.length", { len: formatLength(current.highlight.end - current.highlight.start) })}</span>
+                <span>{t("pick.score", { n: Math.round(current.highlight.score) })}</span>
               </p>
             </>
           )}

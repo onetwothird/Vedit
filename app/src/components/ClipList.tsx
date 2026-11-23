@@ -63,10 +63,10 @@ export default function ClipList({ clips, currentId, sort, film, onSort, onSelec
                 tabIndex={h.id === tabbable ? 0 : -1}
                 onClick={() => onSelect(h.id)}
               >
-                <FilmFrame film={film} t={h.start} width={64} className="thumb" />
+                <FilmFrame film={film} t={h.start} width={80} className="thumb" />
                 <span className="clip-text">
                   <span className="clip-title">{h.title}</span>
-                  <span className="clip-meta mono">
+                  <span className="clip-meta">
                     <span>{formatLength(h.end - h.start)}</span>
                     <span className="score" title={t("clips.score", { n: Math.round(h.score) })}>
                       <span className="bar" aria-hidden="true"><i style={{ width: `${Math.max(0, Math.min(100, h.score))}%` }} /></span>

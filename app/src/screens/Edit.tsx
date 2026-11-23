@@ -9,7 +9,7 @@ import TranscriptPanel from "../components/TranscriptPanel";
 import { useClipStore } from "../edit/edlStore";
 import { keptWords } from "../edit/inverse";
 import { captionSpans, wordSlot } from "../edit/lanes";
-import { keptRanges } from "../edit/timeline";
+import { keptRanges, OUTPUT_ASPECTS } from "../edit/timeline";
 import { useUndoKeys } from "../edit/useUndoKeys";
 import { engine } from "../engine/client";
 import type { Aspect, EditSection, Edl, Project, Transcript } from "../engine/types";
@@ -45,7 +45,6 @@ export default function Edit() {
   const [sort, setSort] = useState<ClipSort>("best");
   const [keepError, setKeepError] = useState(false);
   const [tab, setTab] = useState<InspectorTab>("transcript");
-  const [shape, setShape] = useState<Aspect | null>(null);
   const [outT, setOutT] = useState(0);
   const [stageBox, setStageBox] = useState({ width: 480, height: 520 });
   const player = useRef<PlayerHandle>(null);
@@ -59,21 +58,35 @@ export default function Edit() {
   const apply = useClipStore((s) => s.apply);
   useUndoKeys();
 
+  const [transcriptFailed, setTranscriptFailed] = useState(false);
+  const [attempt, setAttempt] = useState(0); // bumped by Try again
+
   useEffect(() => {
     if (!id) return;
     let live = true;
     setProject(null);
     setMissing(false);
     engine.getProject(id).then((p) => live && setProject(p), () => live && setMissing(true));
-    engine.transcript(id).then((tr) => live && setTranscript(tr), () => undefined);
     return () => {
       live = false;
     };
   }, [id]);
 
   useEffect(() => {
+    if (!id) return;
+    let live = true;
+    setTranscriptFailed(false);
+    engine.transcript(id).then(
+      (tr) => live && setTranscript(tr),
+      () => live && setTranscriptFailed(true),
+    );
+    return () => {
+      live = false;
+    };
+  }, [id, attempt]);
+
+  useEffect(() => {
     if (!id || !hid) return;
-    setShape(null);
     setOutT(0);
     void useClipStore.getState().load(id, hid);
   }, [id, hid]);
@@ -116,14 +129,22 @@ export default function Edit() {
   // where the edit is, in source time: the local port of the engine's kept ranges, against the real transcript
   const edl = view?.edl;
   const kept = useMemo(() => (edl ? keptWords(edl) : new Set<number>()), [edl]);
-  const ranges = useMemo<Range[]>(() => {
-    if (!edl || !transcript) return [];
+  const { ranges, rangesError } = useMemo<{ ranges: Range[]; rangesError?: string }>(() => {
+    if (!edl || !transcript) return { ranges: [] };
     try {
-      return keptRanges(edl, transcript);
-    } catch {
-      return [];
+      return { ranges: keptRanges(edl, transcript) };
+    } catch (e) {
+      return { ranges: [], rangesError: e instanceof Error ? e.message : String(e) };
     }
   }, [edl, transcript]);
+  // a store error with no view is the clip failing to load; with a view it is an edit the engine refused
+  const clipFailed = !!error && !view;
+  const loadFailed = clipFailed || transcriptFailed;
+  const retry = () => {
+    if (!id || !hid) return;
+    setAttempt((n) => n + 1);
+    void useClipStore.getState().load(id, hid);
+  };
   const srcT = ranges.length ? toSourceTime(ranges, outT) : h?.start ?? 0;
   const captions = useMemo(() => {
     if (!view) return [];
@@ -152,6 +173,7 @@ export default function Edit() {
   const onRestore = useCallback((a: number, b: number) => apply({ op: "restore", w0: a, w1: b }), [apply]);
   const onFix = useCallback((wrong: string, right: string) => apply({ op: "fix_word", wrong, right }), [apply]);
   const onPatch = useCallback((section: EditSection, patch: Record<string, unknown>) => apply({ op: "patch", section, patch }), [apply]);
+  const onTogglePlay = useCallback(() => player.current?.toggle(), []);
   const onPlayFrom = useCallback((w: number) => {
     if (!words[w]) return;
     seekSource(words[w].start);
@@ -224,7 +246,7 @@ export default function Edit() {
   }
 
   const outputAspect = edl?.output?.aspect as Aspect | undefined;
-  const aspect: Aspect = shape ?? (outputAspect && ["9:16", "1:1", "4:5", "16:9"].includes(outputAspect) ? outputAspect : "9:16");
+  const aspect: Aspect = outputAspect && (OUTPUT_ASPECTS as readonly string[]).includes(outputAspect) ? outputAspect : "9:16";
   const ready = !!(project && h && view && edl);
 
   return (
@@ -240,7 +262,7 @@ export default function Edit() {
               <div className="seg" role="radiogroup" aria-label={t("edit.shape")}>
                 {SHAPES.map((s) => (
                   <label key={s} className="seg-opt">
-                    <input type="radio" name="shape" checked={aspect === s} onChange={() => setShape(s)} />
+                    <input type="radio" name="shape" checked={aspect === s} onChange={() => onPatch("output", { aspect: s })} />
                     <span>{s}</span>
                   </label>
                 ))}
@@ -263,7 +285,14 @@ export default function Edit() {
               />
             )}
           </div>
-          {error && <p className="error" role="alert">{t("edit.error.save", { msg: error })}</p>}
+          {loadFailed && (
+            <div className="ed-load-error" role="alert">
+              <p className="error">{t(clipFailed ? "edit.error.load" : "edit.error.transcript")}</p>
+              <button type="button" className="secondary" onClick={retry}>{t("edit.retry")}</button>
+            </div>
+          )}
+          {error && view && <p className="error" role="alert">{t("edit.error.save", { msg: error })}</p>}
+          {rangesError && <p className="error" role="alert">{t("edit.error.ranges", { msg: rangesError })}</p>}
         </section>
 
         {ready && edl && h ? (
@@ -285,6 +314,7 @@ export default function Edit() {
                 onRestore={onRestore}
                 onFix={onFix}
                 onPlayFrom={onPlayFrom}
+                onTogglePlay={onTogglePlay}
               />
             }
           />

@@ -55,17 +55,10 @@ function seedTranscript(): Transcript {
 const round = (n: number): number => Math.round(n * 1000) / 1000;
 const copy = <T>(x: T): T => JSON.parse(JSON.stringify(x)) as T;
 
-// A small coloured sprite grid standing in for the real thumbnails: one numbered frame per 5 seconds.
+// Real thumbnails: public/mock/filmstrip.jpg is 120 frames (192x108, 20x6 grid, one per 5 s) cut from the
+// Pexels podcast clip, one camera angle per 30 s clip (wide, then each speaker close up).
 function mockFilmstrip(): FilmstripInfo {
-  const every = 5, width = 64, height = 36, count = 120, cols = 20, rows = 6;
-  let cells = "";
-  for (let i = 0; i < count; i++) {
-    const x = (i % cols) * width, y = Math.floor(i / cols) * height;
-    cells += `<rect x="${x}" y="${y}" width="${width}" height="${height}" fill="hsl(${(i * 37) % 360} 22% ${22 + (i % 4) * 4}%)"/>`
-      + `<circle cx="${x + 32}" cy="${y + 15}" r="6" fill="#9a9ba0"/><rect x="${x + 22}" y="${y + 24}" width="20" height="14" rx="7" fill="#7b7c81"/>`;
-  }
-  const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${cols * width}" height="${rows * height}">${cells}</svg>`;
-  return { every, height, width, count, cols, rows, image: `data:image/svg+xml;utf8,${encodeURIComponent(svg)}` };
+  return { every: 5, width: 192, height: 108, count: 120, cols: 20, rows: 6, image: "/mock/filmstrip.jpg" };
 }
 
 // ---- word-range edit logic ------------------------------------------------------------------------------------
@@ -192,8 +185,24 @@ export interface MockEngine extends Engine {
   onJob(listener: (job: Job) => void): () => void;
 }
 
-export function createMockEngine(opts: { tickMs?: number } = {}): MockEngine {
+export function createMockEngine(opts: { tickMs?: number; persist?: Pick<Storage, "getItem" | "setItem"> } = {}): MockEngine {
   const tickMs = opts.tickMs ?? 120;
+  // clip edits outlive a page reload, as the real engine's edit files do (the app's mock passes sessionStorage)
+  const SAVED = "vedit.mock.edls";
+  const saved = (): Record<string, Edl> => {
+    try {
+      return JSON.parse(opts.persist?.getItem(SAVED) ?? "{}") as Record<string, Edl>;
+    } catch {
+      return {};
+    }
+  };
+  const save = (key: string, edl: Edl): void => {
+    try {
+      opts.persist?.setItem(SAVED, JSON.stringify({ ...saved(), [key]: edl }));
+    } catch {
+      /* storage full or blocked: edits last until the reload */
+    }
+  };
   const TICKS = 4; // progress steps per stage
   const transcript = seedTranscript();
   const edls = new Map<string, Edl>(); // `${pid}/${hid}`
@@ -219,7 +228,7 @@ export function createMockEngine(opts: { tickMs?: number } = {}): MockEngine {
       };
       let edl: Edl = { clips: [{ src: "main", words: [w0, w1] }], output: { aspect: "9:16", fps: 30 }, captions: { style: "pop" } };
       for (const f of HARD_FILLERS) edl = applyOp(edl, { op: "cut", w0: w0 + f, w1: w0 + f });
-      edls.set(`${pid}/${id}`, edl);
+      edls.set(`${pid}/${id}`, saved()[`${pid}/${id}`] ?? edl);
       return { highlight, kept, edl_file: `clip-${id}.edl.json` };
     });
   }
@@ -348,6 +357,7 @@ export function createMockEngine(opts: { tickMs?: number } = {}): MockEngine {
         throw new EngineError(400, "bad_request", "the edit would have no speech left");
       }
       edls.set(key, next);
+      save(key, next);
       return clipView(next, transcript);
     },
     async setKept(pid, hid, kept) {
@@ -405,4 +415,12 @@ export function createMockEngine(opts: { tickMs?: number } = {}): MockEngine {
   };
 }
 
-export const mockEngine: MockEngine = createMockEngine();
+const sessionStore = (): Storage | undefined => {
+  try {
+    return typeof sessionStorage === "undefined" ? undefined : sessionStorage;
+  } catch {
+    return undefined;
+  }
+};
+
+export const mockEngine: MockEngine = createMockEngine({ persist: sessionStore() });

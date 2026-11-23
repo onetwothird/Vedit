@@ -15,6 +15,8 @@ export interface PlayerHandle {
   seekOutput(t: number): void;
   /** Move by `delta` seconds of the edited clip (negative goes back). */
   skip(delta: number): void;
+  /** Play if paused, else pause (what Space does). */
+  toggle(): void;
 }
 
 export interface PlayerProps {
@@ -102,7 +104,7 @@ export default function Player({ view, src, aspect, fit = { width: 360, height: 
   const pause = useCallback(() => video.current?.pause(), []);
   const toggle = useCallback(() => (video.current?.paused ?? true ? play() : pause()), [play, pause]);
   const skip = useCallback((d: number) => seekOutput(outRef.current + d), [seekOutput]);
-  useImperativeHandle(ref, () => ({ play, pause, seekOutput, skip }), [play, pause, seekOutput, skip]);
+  useImperativeHandle(ref, () => ({ play, pause, seekOutput, skip, toggle }), [play, pause, seekOutput, skip, toggle]);
 
   // a new file starts over
   useEffect(() => {

@@ -62,7 +62,7 @@ export function createClipStore(eng: ClipEngine): UseBoundStore<StoreApi<ClipSta
         if (job.gen !== generation) return;
         transcript = tr;
         confirmed = { view, past: confirmed?.past ?? [], future: confirmed?.future ?? [] };
-        set({ view });
+        set({ view, error: undefined }); // a load that works clears an earlier load failure
       } catch (e) {
         if (job.gen === generation) set({ error: message(e) });
       }

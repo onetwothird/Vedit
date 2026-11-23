@@ -1,0 +1,68 @@
+/* Sign in: the product on the left (the Home hero, playing), the ways in on the right. One surface, no cards. */
+.signin { display: grid; grid-template-columns: minmax(0, 1.15fr) minmax(380px, 1fr); min-height: 100vh; background: var(--panel); }
+
+.signin-show {
+  position: relative; display: flex; flex-direction: column; justify-content: space-between; gap: 32px;
+  padding: 32px 48px 40px; background: var(--bg); border-right: 1px solid var(--line); overflow: hidden;
+}
+.signin-show::before {
+  content: ""; position: absolute; inset: 0; pointer-events: none; opacity: .6;
+  background-image: radial-gradient(var(--line) 1px, transparent 1px); background-size: 18px 18px;
+  mask-image: radial-gradient(ellipse 70% 60% at 50% 50%, #000 30%, transparent 75%);
+}
+.signin-show > * { position: relative; }
+.signin-brand { display: flex; align-items: center; gap: 10px; }
+.signin-word { font: 400 24px var(--pixel); font-synthesis: none; color: var(--ink); }
+.signin-art { display: grid; place-items: center; }
+.signin-art .hero-art { justify-self: center; max-width: 720px; }
+.signin-line { max-width: 34ch; font: 600 22px/1.3 var(--sans); letter-spacing: -0.015em; color: var(--ink); }
+
+.signin-main { display: grid; place-items: center; padding: 40px 24px; }
+.signin-card { width: 100%; max-width: 380px; display: flex; flex-direction: column; }
+.signin-brand.small { display: none; margin-bottom: 28px; }
+.signin-title { font: 600 26px/1.2 var(--sans); letter-spacing: -0.02em; color: var(--ink); }
+.signin-sub { margin-top: 8px; font-size: 13.5px; line-height: 1.55; color: var(--body); }
+
+.signin-social { display: flex; flex-direction: column; gap: 10px; margin-top: 28px; }
+.social {
+  display: flex; align-items: center; justify-content: center; gap: 10px; height: 44px; border-radius: var(--r-control);
+  border: 1px solid var(--line-2); background: var(--bg); color: var(--ink); font: 500 14px var(--sans);
+  transition: background-color .15s, border-color .15s;
+}
+.social svg { width: 18px; height: 18px; }
+.social:hover:not(:disabled) { background: var(--chip); border-color: color-mix(in srgb, var(--ink) 25%, var(--line-2)); }
+.social:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.social:disabled { opacity: .6; cursor: progress; }
+
+.signin-or { display: flex; align-items: center; gap: 12px; margin: 22px 0; font-size: 12px; color: var(--body); }
+.signin-or::before, .signin-or::after { content: ""; flex: 1; height: 1px; background: var(--line); }
+
+.signin-form { display: flex; flex-direction: column; gap: 14px; }
+.field-text { display: flex; flex-direction: column; gap: 6px; }
+.field-text > span { font: 500 12.5px var(--sans); color: var(--body); }
+.field-text input {
+  height: 42px; padding: 0 12px; border-radius: var(--r-control); border: 1px solid var(--line-2);
+  background: var(--bg); color: var(--ink); font: 400 14px var(--sans); transition: border-color .15s;
+}
+.field-text input:hover { border-color: color-mix(in srgb, var(--ink) 25%, var(--line-2)); }
+.field-text input:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; border-color: transparent; }
+.field-text small { font-size: 12px; color: var(--body); }
+.signin-submit { justify-content: center; height: 44px; margin-top: 4px; font-size: 14px; }
+
+.signin-switch { margin-top: 18px; font-size: 13px; color: var(--body); }
+.link { color: var(--ink); font: inherit; font-weight: 600; text-decoration: underline; text-underline-offset: 3px; text-decoration-color: var(--line-2); }
+.link:hover { text-decoration-color: currentColor; }
+.link:focus-visible, .signin-skip:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: 4px; }
+.signin-skip { align-self: flex-start; margin-top: 28px; padding: 0; font: 500 13px var(--sans); color: var(--body); }
+.signin-skip:hover { color: var(--ink); }
+
+@media (max-width: 980px) {
+  .signin { grid-template-columns: 1fr; }
+  .signin-show { display: none; }
+  .signin-brand.small { display: flex; }
+}
+
+.signin-form .notice {
+  padding: 10px 12px; border-radius: var(--r-control); background: var(--chip);
+  font-size: 13px; line-height: 1.5; color: var(--ink);
+}

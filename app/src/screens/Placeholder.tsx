@@ -29,7 +29,7 @@ export default function Placeholder({ titleKey, step }: { titleKey: string; step
   }, [id]);
 
   return (
-    <Screen bar={{ fileName: file, saved: !!file, step, editHid: hid }}>
+    <Screen bar={{ fileName: file, saved: !!file, step, editHid: hid }} narrow>
       <h1 className="title">{t(titleKey)}</h1>
       {clips !== undefined && <p className="note-text">{t("placeholder.clips", { n: clips })}</p>}
       <p className="note-text">{t("placeholder.soon")}</p>

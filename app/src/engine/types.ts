@@ -171,7 +171,7 @@ export interface ClipView {
   captions: CaptionTrack;
 }
 
-export type EditSection = "captions" | "audio" | "color" | "framing";
+export type EditSection = "captions" | "audio" | "color" | "framing" | "output";
 
 export type ClipOp =
   | { op: "cut"; w0: number; w1: number }
