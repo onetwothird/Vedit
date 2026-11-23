@@ -613,3 +613,6 @@ html.theme-fade, html.theme-fade * { transition: background-color .3s ease, bord
 /* the preview's colour filter and vignette */
 .pv-filter { position: absolute; width: 0; height: 0; }
 .pv-vignette { position: absolute; inset: 0; pointer-events: none; background: radial-gradient(ellipse at center, transparent 52%, rgba(0, 0, 0, .55) 100%); }
+
+/* the browser demo says so, so nobody mistakes its sample clip for their own video */
+.top .demo { flex: none; font-size: 11px; line-height: 1; padding: 4px 8px; border-radius: var(--r-chip); background: var(--chip-2); color: var(--ink); border: 1px solid var(--line-2); cursor: help; }
