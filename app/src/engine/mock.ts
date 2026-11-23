@@ -405,6 +405,11 @@ export function createMockEngine(opts: { tickMs?: number; persist?: Pick<Storage
       if (!j) throw notFound(`job ${id}`);
       return snapshot(j);
     },
+    async activeJobs(project, kind) {
+      return [...jobs.values()]
+        .filter((j) => (j.state === "queued" || j.state === "running") && (!project || j.project_id === project) && (!kind || j.kind === kind))
+        .map(snapshot);
+    },
     async cancelJob(id) {
       const j = jobs.get(id);
       if (!j) throw notFound(`job ${id}`);

@@ -2,8 +2,8 @@ import { useEffect, useId, useRef, useState, type ReactNode } from "react";
 import { Link, useParams } from "react-router-dom";
 import Screen from "../components/Screen";
 import { engine, isTauri } from "../engine/client";
-import { useJob, useJobs } from "../engine/events";
-import type { Aspect, ExportBody, ExportResult, Project, ProjectClip } from "../engine/types";
+import { jobStore, useJob, useJobs } from "../engine/events";
+import type { Aspect, ExportBody, ExportResult, Job, Project, ProjectClip } from "../engine/types";
 import { t } from "../i18n/t";
 import { sortClips } from "../lib/clips";
 import { baseName, pickFolderNative, showInFolder } from "../lib/native";
@@ -13,6 +13,17 @@ import { getSettings } from "../lib/prefs";
 type Quality = "normal" | "high";
 
 const ACTIVE = ["queued", "running"];
+
+/** Every queued or running export job of the project, straight from the engine and into the live job store. */
+async function seedActive(pid: string): Promise<Job[]> {
+  try {
+    const list = await engine.activeJobs(pid, "export");
+    list.forEach((j) => jobStore.upsert(j, "http"));
+    return list;
+  } catch {
+    return [];
+  }
+}
 
 const FORMATS: { value: Aspect; label: string }[] = [
   { value: "9:16", label: "export.format.916" },
@@ -139,9 +150,9 @@ export default function Export() {
       (p) => {
         if (!alive) return;
         setProject(p);
-        const last = p.last_job;
-        // coming back to a running export: pull its state in so it is shown (and Export waits for it)
-        if (last && last.kind === "export" && ACTIVE.includes(last.state)) engine.getJob(last.id).catch(() => undefined);
+        // coming back to a running export (after a reload the live events may not have arrived yet): ask the engine
+        // for every active export of this project, so they are shown and Export waits for all of them
+        void seedActive(p.id);
       },
       () => alive && setMissing(true),
     );
@@ -188,6 +199,10 @@ export default function Export() {
   async function start() {
     if (!id || starting || blocked || !chosen.length || !formats.size) return;
     setStarting(true);
+    if ((await seedActive(id)).length) { // jobs we had not heard of are running: wait for them instead
+      if (live.current) setStarting(false);
+      return;
+    }
     cancelled.current = false;
     setRows([]);
     // the engine runs the jobs one after another, so every clip is queued at once
@@ -217,8 +232,10 @@ export default function Export() {
   /** Stops the clips still waiting or rendering; the ones already finished stay. */
   async function cancel() {
     cancelled.current = true;
-    const ids = (rows ?? []).map((r) => r.jobId).concat(oldJobs.map((j) => j.id));
-    await Promise.all(ids.filter((j): j is string => !!j && ACTIVE.includes(jobs.get(j)?.state ?? "")).map((j) => engine.cancelJob(j).catch(() => undefined)));
+    // ask the engine again: jobs this screen never heard of must be cancelled too, or they would still write the files
+    const fresh = id ? await seedActive(id) : [];
+    const ids = new Set([...(rows ?? []).map((r) => r.jobId), ...oldJobs.map((j) => j.id), ...fresh.map((j) => j.id)]);
+    await Promise.all([...ids].filter((j): j is string => !!j && (!jobs.get(j) || ACTIVE.includes(jobs.get(j)!.state))).map((j) => engine.cancelJob(j).catch(() => undefined)));
   }
 
   async function changeFolder() {

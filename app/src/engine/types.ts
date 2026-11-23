@@ -272,6 +272,8 @@ export interface Engine {
   exportClips(pid: string, body: ExportBody): Promise<Job>;
   getJob(id: string): Promise<Job>;
   cancelJob(id: string): Promise<Job>;
+  /** Every job still queued or running, optionally of one project and kind (a reloaded app asks for these). */
+  activeJobs(project?: string, kind?: JobKind): Promise<Job[]>;
   models(): Promise<ModelStatus>;
   downloadModel(name: string): Promise<Job>;
   deleteModel(name: string): Promise<ModelStatus>;

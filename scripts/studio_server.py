@@ -455,7 +455,8 @@ class Engine:
             for extra in (".srt", ".jpg"):
                 if out.with_suffix(extra).is_file():
                     files.append(str(out.with_suffix(extra)))
-            if e.get("thumb") and job.state == "done" and not out.with_suffix(".jpg").is_file():
+            thumb_ran = job.state == "done" or (job.state == "failed" and e is finished[-1] and job.stage.startswith("thumb "))
+            if e.get("thumb") and thumb_ran and not out.with_suffix(".jpg").is_file():
                 warnings.append({"hid": e["hid"], "aspect": e["aspect"], "kind": "thumbnail"})
         for e in plan:
             Path(e["tmp"]).unlink(missing_ok=True)
@@ -798,11 +799,19 @@ def create_app(token: str, queue: JobQueue | None = None) -> FastAPI:
             stage = f"render {k}/{n}"
             share = 1.0 / n
             steps.append((stage, py_cmd("render.py", str(tmp), *crf), share * (0.9 if body.thumbnail else 1.0)))
-            if body.thumbnail:  # its own stage, and the script never fails the job
+            if body.thumbnail:
+                path.with_suffix(".jpg").unlink(missing_ok=True)  # an older thumbnail must not hide a new failure
+                # its own stage, and the script never fails the job
                 steps.append((f"thumb {k}/{n}", py_cmd("thumb_frame.py", str(path), str(path.with_suffix(".jpg"))), share * 0.1))
             renders.append({"stage": stage, "hid": hid, "aspect": aspect, "path": str(path), "tmp": str(tmp),
                             "thumb": body.thumbnail})
         return _job_dict(engine.submit(pid, "export", steps, renders=renders))
+
+    @app.get("/jobs")
+    def list_jobs(project: Optional[str] = None, kind: Optional[str] = None):
+        """Jobs still queued or running, optionally of one project and kind (a reloaded app asks for these)."""
+        return [_job_dict(engine.job_snapshot(j.id)) for j in engine.active_jobs()
+                if (project is None or j.project_id == project) and (kind is None or j.kind == kind)]
 
     @app.get("/jobs/{job_id}")
     def get_job(job_id: str):

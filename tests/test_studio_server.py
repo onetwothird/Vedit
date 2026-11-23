@@ -512,6 +512,41 @@ def test_thumb_frame_time():
     assert frame_time(10) == 0.5 and frame_time(0.4) == 0.2 and frame_time(0) == 0.0
 
 
+def test_jobs_list_knows_every_active_export_of_a_project(client, auth, app, fake_queue, analyzed_project, tmp_path):
+    pid, h = analyzed_project["id"], analyzed_project["highlights"][0]
+    ids = [client.post(f"/projects/{pid}/export", headers=auth,
+                       json={"clips": [h["id"]], "out_dir": str(tmp_path), "first_number": n}).json()["id"] for n in (1, 2)]
+    app.state.engine.wait_idle()
+    got = client.get(f"/jobs?project={pid}&kind=export", headers=auth).json()  # what a reloaded app asks for
+    assert sorted(j["id"] for j in got) == sorted(ids) and all(j["result"]["renders"] for j in got)
+    assert client.get("/jobs?project=nope", headers=auth).json() == []
+    assert client.get(f"/jobs?project={pid}&kind=analyze", headers=auth).json() == []
+    fake_queue.finish(ids[0])
+    app.state.engine.wait_idle()
+    left = client.get(f"/jobs?project={pid}", headers=auth).json()
+    assert [j["id"] for j in left] == [ids[1]]
+    assert client.get("/jobs").status_code == 401
+
+
+def test_thumb_frame_never_fails_and_clears_a_stale_jpg(tmp_path):
+    import subprocess, sys
+    script = Path(__file__).resolve().parent.parent / "scripts" / "thumb_frame.py"
+    stale = tmp_path / "a.jpg"
+    stale.write_bytes(b"old")
+    r = subprocess.run([sys.executable, str(script), str(tmp_path / "missing.mp4"), str(stale)], capture_output=True)
+    assert r.returncode == 0 and not stale.exists()
+    assert subprocess.run([sys.executable, str(script)], capture_output=True).returncode == 0  # even bad arguments
+
+
+def test_export_removes_a_stale_thumbnail_before_the_job_runs(client, auth, fake_queue, analyzed_project, tmp_path):
+    pid, h = analyzed_project["id"], analyzed_project["highlights"][0]
+    stale = tmp_path / output_name(1, h["title"], "9:16")
+    stale.with_suffix(".jpg").write_bytes(b"old")
+    client.post(f"/projects/{pid}/export", headers=auth,
+                json={"clips": [h["id"]], "thumbnail": True, "out_dir": str(tmp_path)})
+    assert not stale.with_suffix(".jpg").exists()
+
+
 @pytest.mark.parametrize("end_state", ["failed", "cancelled"])
 def test_export_failure_reports_finished_files(client, auth, app, fake_queue, analyzed_project, tiny_video,
                                               end_state):

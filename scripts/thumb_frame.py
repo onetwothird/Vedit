@@ -8,9 +8,6 @@ import subprocess
 import sys
 from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).parent))
-from common import ffmpeg_bin, ffprobe  # noqa: E402
-
 
 def frame_time(duration: float) -> float:
     """0.5 s in, or the middle of a clip shorter than 1 s."""
@@ -20,6 +17,9 @@ def frame_time(duration: float) -> float:
 def main() -> None:
     video, out = sys.argv[1], sys.argv[2]
     try:
+        Path(out).unlink(missing_ok=True)  # an older thumbnail must never stand in for this one
+        sys.path.insert(0, str(Path(__file__).parent))
+        from common import ffmpeg_bin, ffprobe
         try:
             at = frame_time(float(ffprobe(video)["duration"]))
         except (Exception, SystemExit):
@@ -31,4 +31,8 @@ def main() -> None:
 
 
 if __name__ == "__main__":
-    main()
+    try:
+        main()
+    except BaseException as e:  # whatever happens, the finished video stays a finished video
+        print(f"[thumb] crashed: {e}", file=sys.stderr)
+    sys.exit(0)
