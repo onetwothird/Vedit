@@ -221,7 +221,7 @@ export interface ExportBody {
   clips: string[];
   formats?: Aspect[];
   quality?: "normal" | "high";
-  /** Absolute folder for the files; the engine's default is "<name> - vedit" beside the video. */
+  /** Absolute folder for the files; the engine's default is "<name> - Vedit" beside the video. */
   out_dir?: string;
   /** Also write the .srt subtitle file (default true). */
   srt?: boolean;

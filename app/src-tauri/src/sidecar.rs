@@ -434,7 +434,7 @@ mod tests {
 
     #[test]
     fn engine_env_with_ffmpeg() {
-        let dir = PathBuf::from(r"C:\Program Files\vedit Studio\bin");
+        let dir = PathBuf::from(r"C:\Program Files\Vedit Studio\bin");
         assert_eq!(
             engine_env("abc", Some(dir.clone())),
             vec![

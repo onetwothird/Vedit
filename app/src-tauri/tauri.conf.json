@@ -1,6 +1,6 @@
 {
   "$schema": "../node_modules/@tauri-apps/cli/config.schema.json",
-  "productName": "vedit Studio",
+  "productName": "Vedit Studio",
   "version": "0.1.0",
   "identifier": "studio.vedit.app",
   "build": {
@@ -13,7 +13,7 @@
     "windows": [
       {
         "label": "main",
-        "title": "vedit Studio",
+        "title": "Vedit Studio",
         "width": 1280,
         "height": 800,
         "minWidth": 960,

@@ -80,7 +80,7 @@ def test_output_name_length_and_trimming():
 
 
 def test_output_dir(tmp_path):
-    assert output_dir(tmp_path / "ep12.mp4") == tmp_path / "ep12 - vedit"
+    assert output_dir(tmp_path / "ep12.mp4") == tmp_path / "ep12 - Vedit"
 
 
 def test_save_is_atomic(tmp_path, home, monkeypatch):

@@ -84,7 +84,7 @@ describe("Pick", () => {
   it("shows the no-speech state and goes home from it", async () => {
     fake.getProject.mockResolvedValue(project([]));
     await mount({ analyze: { clips: 0, new: 0, reason: "no_speech" } });
-    expect(text()).toContain("No speech found in this video. vedit finds clips from what people say.");
+    expect(text()).toContain("No speech found in this video. Vedit finds clips from what people say.");
     await act(async () => (host.querySelector("a.secondary[href='/']") as HTMLElement).click());
     expect(loc()).toBe("/");
   });
@@ -171,6 +171,6 @@ describe("Pick", () => {
     fake.getProject.mockResolvedValue(project(Array.from({ length: 60 }, (_, i) => clip(`x${i}`, i * 100, 50))));
     await mount({ analyze: { clips: 60, new: 60 } });
     expect((button("Find more clips") as HTMLButtonElement).disabled).toBe(true);
-    expect(text()).toContain("You have the most clips vedit can find (60).");
+    expect(text()).toContain("You have the most clips Vedit can find (60).");
   });
 });

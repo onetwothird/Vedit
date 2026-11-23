@@ -5,7 +5,7 @@ test.use({ storageState: { cookies: [], origins: [] } });
 
 test("first run opens sign in, and Skip for now goes to Home and stays skipped", async ({ page }) => {
   await page.goto("/#/");
-  await expect(page.getByRole("heading", { name: "Sign in to vedit" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Sign in to Vedit" })).toBeVisible();
   await page.getByRole("button", { name: "Skip for now" }).click();
   await expect(page.getByRole("heading", { name: "What are you making?" })).toBeVisible();
   await page.reload();
@@ -20,13 +20,13 @@ test("Continue with Google signs in and the header menu shows the account, then 
   await expect(page.getByText("Demo Creator")).toBeVisible();
   await expect(page.getByText("Free plan")).toBeVisible();
   await page.getByRole("button", { name: "Sign out" }).click();
-  await expect(page.getByRole("heading", { name: "Sign in to vedit" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Sign in to Vedit" })).toBeVisible();
 });
 
 test("email: create an account, sign out, sign back in; errors explain what to fix", async ({ page }) => {
   await page.goto("/#/signin");
   await page.getByRole("tab", { name: "Create an account" }).click();
-  await expect(page.getByRole("heading", { name: "Create your vedit account" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Create your Vedit account" })).toBeVisible();
   await expect(page.getByRole("tab", { name: "Create an account" })).toHaveAttribute("aria-selected", "true");
   await page.getByLabel("Name").fill("Ana Reyes");
   await page.getByLabel("Email").fill("ana@example");
@@ -54,7 +54,7 @@ test("email: create an account, sign out, sign back in; errors explain what to f
 test("sign in fits a phone screen without sideways scrolling", async ({ page }) => {
   await page.setViewportSize({ width: 375, height: 812 });
   await page.goto("/#/signin");
-  await expect(page.getByRole("heading", { name: "Sign in to vedit" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Sign in to Vedit" })).toBeVisible();
   expect(await page.evaluate(() => document.documentElement.scrollWidth === innerWidth)).toBe(true);
 });
 
@@ -65,8 +65,8 @@ test("the mode switch is a tablist the arrow keys move along", async ({ page }) 
   await signin.focus();
   await page.keyboard.press("ArrowRight");
   await expect(page.getByRole("tab", { name: "Create an account" })).toBeFocused();
-  await expect(page.getByRole("heading", { name: "Create your vedit account" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Create your Vedit account" })).toBeVisible();
   await expect(page.getByLabel("Name")).toBeVisible();
   await page.keyboard.press("ArrowLeft");
-  await expect(page.getByRole("heading", { name: "Sign in to vedit" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Sign in to Vedit" })).toBeVisible();
 });

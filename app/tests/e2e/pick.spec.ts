@@ -62,7 +62,7 @@ test("a video with no speech shows the empty state and goes back home", async ({
   await page.goto("/#/p/new/import");
   await page.locator('input[type="file"]').setInputFiles(file("silent.mp4"));
   await page.getByRole("button", { name: "Start" }).click();
-  await expect(page.getByText("No speech found in this video. vedit finds clips from what people say.")).toBeVisible({ timeout: 20_000 });
+  await expect(page.getByText("No speech found in this video. Vedit finds clips from what people say.")).toBeVisible({ timeout: 20_000 });
   await page.getByRole("link", { name: "Choose another video" }).click();
   await expect(page).toHaveURL(/#\/$/);
 });

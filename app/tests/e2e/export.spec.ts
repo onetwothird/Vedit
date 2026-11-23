@@ -28,7 +28,7 @@ test("starts with the kept clips on, 9:16, Normal, and both extras saved next to
   await expect(page.getByRole("checkbox", { name: "Subtitles (.srt)" })).toBeChecked();
   await expect(page.getByRole("checkbox", { name: "Thumbnail (.jpg)" })).toBeChecked();
 
-  await expect(page.getByTestId("export-folder")).toHaveText("C:/Videos/podcast-ep12 - vedit");
+  await expect(page.getByTestId("export-folder")).toHaveText("C:/Videos/podcast-ep12 - Vedit");
   await expect(page.getByRole("button", { name: "Change folder" })).toBeDisabled(); // browser: the folder dialog is desktop only
   await expect(page.getByRole("button", { name: "Export 8 clips" })).toBeEnabled();
 
