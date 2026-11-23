@@ -388,7 +388,7 @@ html.theme-fade, html.theme-fade * { transition: background-color .3s ease, bord
 .screen:has(.edit) { scrollbar-gutter: auto; }
 .edit {
   display: grid; height: 100%; min-height: 0;
-  grid-template-columns: 268px minmax(0, 1fr) 340px; grid-template-rows: minmax(0, 1fr) auto; /* the timeline takes what its lanes need; the player gives way */
+  grid-template-columns: 268px minmax(0, 1fr) 380px; grid-template-rows: minmax(0, 1fr) auto; /* the timeline takes what its lanes need; the player gives way */
   grid-template-areas: "clips player insp" "clips tl tl";
 }
 .ed-clips { grid-area: clips; border-right: 1px solid var(--line); display: flex; flex-direction: column; min-height: 0; min-width: 0; }
@@ -417,10 +417,20 @@ html.theme-fade, html.theme-fade * { transition: background-color .3s ease, bord
 .ed-player .stage { flex: 1; min-height: 0; max-width: none; padding: 16px; overflow: hidden; }
 
 /* inspector */
-.ed-tabs { display: flex; gap: 2px; padding: 8px 8px 0; border-bottom: 1px solid var(--line); overflow-x: auto; }
-.ed-tab { padding: 8px 12px; font-size: 13px; color: var(--muted); border-bottom: 2px solid transparent; margin-bottom: -1px; white-space: nowrap; }
-.ed-tab:hover { color: var(--ink); }
-.ed-tab[aria-selected="true"] { color: var(--ink); border-bottom-color: var(--accent); }
+/* the tool rail: every Edit tool in one column, the chosen tool's settings beside it */
+.ed-insp { flex-direction: row; }
+.ed-rail { flex: none; width: 68px; display: flex; flex-direction: column; gap: 2px; padding: 8px 6px; border-right: 1px solid var(--line); overflow-y: auto; scrollbar-width: none; }
+.ed-tool {
+  display: flex; flex-direction: column; align-items: center; gap: 4px; padding: 8px 2px 7px; border-radius: var(--r-control);
+  color: var(--muted); font-size: 11px; line-height: 1.1; text-align: center;
+}
+.ed-tool svg { width: 20px; height: 20px; }
+.ed-tool:hover { color: var(--ink); background: var(--chip); }
+.ed-tool[aria-selected="true"] { color: var(--ink); background: var(--chip-2); }
+.ed-tool[aria-selected="true"] svg { color: var(--accent); }
+.ed-tool:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+.ed-panes { flex: 1; min-width: 0; min-height: 0; display: flex; flex-direction: column; }
+.ed-panel-title { font: 500 14px var(--sans); color: var(--ink); margin: 0 0 6px; }
 .ed-panel { flex: 1; min-height: 0; overflow: auto; padding: 14px 16px; }
 .ed-panel.tx-panel { padding: 0; display: flex; flex-direction: column; overflow: hidden; }
 .ed-panel[hidden] { display: none; }
@@ -472,17 +482,6 @@ html.theme-fade, html.theme-fade * { transition: background-color .3s ease, bord
 .tl-zoom .icon svg { width: 15px; height: 15px; }
 .tl-zoom input { accent-color: var(--accent); width: 96px; margin: 0 4px; }
 .tl-tools .divider { width: 1px; height: 18px; background: var(--line); margin: 0 6px; }
-.tl-add {
-  display: inline-flex; align-items: center; gap: 6px; height: 32px; padding: 0 12px 0 9px; margin-left: 2px;
-  border: 1px solid var(--line); border-radius: var(--r-control); background: var(--chip); color: var(--ink);
-  font: inherit; font-size: 12.5px; cursor: pointer;
-}
-.tl-add svg { width: 16px; height: 16px; }
-.tl-add.text svg { color: #a78bfa; }
-.tl-add.broll svg { color: #38bdf8; }
-.tl-add:hover:not(:disabled) { background: var(--chip-2); }
-.tl-add:disabled { opacity: .45; cursor: not-allowed; }
-.tl-add:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 .tl-body { display: grid; grid-template-columns: 78px minmax(0, 1fr); flex: none; }
 .tl-names { display: grid; grid-template-rows: 18px 26px 26px 28px 44px 28px; row-gap: 6px; font-size: 11px; color: var(--muted); align-items: center; }
 .tl-scroll { overflow-x: auto; overflow-y: hidden; min-width: 0; padding-top: 3px; scrollbar-width: thin; }
@@ -521,29 +520,24 @@ html.theme-fade, html.theme-fade * { transition: background-color .3s ease, bord
 .tl-ovb-edge.start { left: 0; }
 .tl-ovb-edge.end { right: 0; }
 .tl-ovb.on .tl-ovb-edge { background: color-mix(in srgb, var(--ink) 45%, transparent); }
-.tl-props { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; padding: 6px 8px; margin-bottom: 6px; border: 1px solid var(--line); border-radius: var(--r-control); background: var(--bg); }
-.tl-props .seg-opt span { padding: 5px 10px; }
-.tl-props-text { flex: 1 1 200px; min-width: 140px; height: 32px; padding: 0 10px; border-radius: var(--r-chip); border: 1px solid var(--line-2); background: var(--panel); color: var(--ink); font: 500 13px var(--sans); }
-.tl-props-text:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
-.tl-props-name { font-size: 12px; color: var(--ink); max-width: 220px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.tl-props-len { font-size: 11.5px; color: var(--muted); }
-.tl-props-end { display: flex; gap: 6px; margin-left: auto; }
-.tl-props-end .secondary { height: 32px; font-size: 12.5px; padding: 0 12px; }
 
 /* Text and b-roll over the preview, as the export draws them. */
 .pv-ov { position: absolute; inset: 0; pointer-events: none; }
-.pv-ov-text { position: absolute; left: 6%; right: 6%; display: flex; justify-content: center; text-align: center; font-family: "Poppins", var(--sans); font-weight: 700; line-height: 1.2; color: #fff; }
-.pv-ov-text span { background: rgb(0 0 0 / .55); padding: .2em .4em; border-radius: 2px; }
+/* text layers, matching render.py's drawtext: Poppins Bold, one dark box padded a third of the font size, lines centred,
+   wrapped inside 88% of the frame */
+.pv-ov-text { position: absolute; left: 6%; right: 6%; display: flex; justify-content: center; text-align: center; font-family: "Poppins", var(--sans); font-weight: 700; line-height: 1.4; color: #fff; margin: 0; }
+.pv-ov-text span { display: inline-block; max-width: 100%; background: rgb(0 0 0 / .55); padding: .333em; white-space: pre-line; overflow-wrap: anywhere; }
 .pv-ov-text.top { top: 12%; }
 .pv-ov-text.center { top: 50%; transform: translateY(-50%); }
 .pv-ov-text.bottom { bottom: 30%; }
 .pv-ov-media { position: absolute; object-fit: cover; }
 .pv-ov-media.full { inset: 0; width: 100%; height: 100%; }
+/* the export's margin is 4% of the frame's width on every side (--m, set by OverlayLayer) */
 .pv-ov-media.pip { width: 35%; height: auto; aspect-ratio: auto; }
-.pv-ov-media.pip.top-right { top: 4%; right: 4%; }
-.pv-ov-media.pip.top-left { top: 4%; left: 4%; }
-.pv-ov-media.pip.bottom-left { bottom: 4%; left: 4%; }
-.pv-ov-media.pip.bottom-right { bottom: 4%; right: 4%; }
+.pv-ov-media.pip.top-right { top: var(--m); right: var(--m); }
+.pv-ov-media.pip.top-left { top: var(--m); left: var(--m); }
+.pv-ov-media.pip.bottom-left { bottom: var(--m); left: var(--m); }
+.pv-ov-media.pip.bottom-right { bottom: var(--m); right: var(--m); }
 .pv-ov-media.pip.center { top: 50%; left: 50%; transform: translate(-50%, -50%); }
 .pv-ov-media.missing { display: grid; place-items: center; background: rgb(0 0 0 / .6); color: #fff; font-size: 11px; }
 .pv-ov-media.missing.pip { aspect-ratio: 16 / 9; }
@@ -561,6 +555,10 @@ html.theme-fade, html.theme-fade * { transition: background-color .3s ease, bord
   .ed-player .stage { flex: none; height: min(560px, 70vh); }
   .ed-insp { border-left: 0; border-top: 1px solid var(--line); }
   .ed-insp .ed-panel { flex: none; max-height: 440px; }
+  /* the tool rail turns into a row above the tool's settings, scrolling sideways when it runs out of room */
+  .ed-insp { flex-direction: column; }
+  .ed-rail { width: auto; flex-direction: row; padding: 6px 8px; border-right: 0; border-bottom: 1px solid var(--line); overflow-x: auto; overflow-y: hidden; }
+  .ed-tool { flex: none; min-width: 64px; }
   .ed-clips { border-right: 0; border-top: 1px solid var(--line); }
   .ed-clips .clips { max-height: 360px; }
   .ed-tl { min-height: 220px; }
@@ -582,3 +580,36 @@ html.theme-fade, html.theme-fade * { transition: background-color .3s ease, bord
 @media (max-width: 480px) {
   .content.narrow .title { font-size: 28px; margin-bottom: 16px; }
 }
+
+/* Text and B-roll tools */
+.ly-add {
+  display: flex; align-items: center; justify-content: center; gap: 8px; width: 100%; height: 40px; margin: 4px 0 10px;
+  border: 1px dashed var(--line-2); border-radius: var(--r-control); color: var(--ink); font-size: 13px;
+}
+.ly-add svg { width: 16px; height: 16px; }
+.ly-add:hover { background: var(--chip); border-style: solid; }
+.ly-add:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.ly-list { list-style: none; padding: 0; margin: 0 0 6px; display: flex; flex-direction: column; gap: 4px; }
+.ly-item {
+  width: 100%; display: flex; justify-content: space-between; align-items: center; gap: 10px; padding: 8px 10px 8px 12px;
+  border-radius: var(--r-chip); background: var(--chip); color: var(--ink); font-size: 13px; text-align: left;
+  border-left: 3px solid #a78bfa;
+}
+.ly-item.image, .ly-item.video { border-left-color: #38bdf8; }
+.ly-item:hover { background: var(--chip-2); }
+.ly-item[aria-pressed="true"] { background: var(--chip-2); box-shadow: inset 0 0 0 1px var(--line-2); }
+.ly-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ly-when { flex: none; font-size: 11px; color: var(--muted); }
+.ly-edit { margin-top: 8px; padding-top: 4px; border-top: 1px solid var(--line); }
+.ly-field { display: flex; flex-direction: column; gap: 6px; padding: 10px 0; border-bottom: 1px solid var(--line); }
+.ly-field textarea {
+  resize: vertical; min-height: 56px; padding: 8px 10px; border-radius: var(--r-chip); border: 1px solid var(--line-2);
+  background: var(--bg); color: var(--ink); font: 500 14px/1.35 var(--sans);
+}
+.ly-field textarea:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+.ly-actions { display: flex; justify-content: space-between; align-items: center; gap: 10px; flex-wrap: wrap; padding: 10px 0; }
+.ly-actions .hint { flex: 1 1 160px; }
+
+/* the preview's colour filter and vignette */
+.pv-filter { position: absolute; width: 0; height: 0; }
+.pv-vignette { position: absolute; inset: 0; pointer-events: none; background: radial-gradient(ellipse at center, transparent 52%, rgba(0, 0, 0, .55) 100%); }

@@ -30,12 +30,36 @@ from edl import Timeline  # noqa: E402
 
 TEXT_FONT = Path(__file__).resolve().parent.parent / "fonts" / "Poppins-Bold.ttf"
 TEXT_Y = {"top": "h*0.12", "center": "(h-text_h)/2", "bottom": "h*0.70-text_h"}
+TEXT_WIDTH = 0.88  # of the frame: the box, padding included, stays inside this (the preview's left/right 6%)
+
+
+def wrap_text(text: str, fs: int, max_w: float) -> str:
+    """Break text into lines that fit max_w pixels in the text font at size fs, at spaces (a word longer than a line
+    gets a line of its own). Line breaks the user typed are kept. Without the font file or Pillow, one line."""
+    try:
+        from PIL import ImageFont
+        font = ImageFont.truetype(str(TEXT_FONT), fs)
+    except Exception:
+        return text
+    out = []
+    for para in text.split("\n"):
+        line = ""
+        for word in para.split():
+            trial = f"{line} {word}" if line else word
+            if line and font.getlength(trial) > max_w:
+                out.append(line)
+                line = word
+            else:
+                line = trial
+        out.append(line)
+    return "\n".join(out)
 
 
 def _text_overlays(tl, fc: list[str], vlab: str, OW: int, OH: int) -> str:
-    """Text overlays as drawtext filters: white bold text on a dark box, centred, at the top, middle or bottom. The text
+    """The editor's text layers as drawtext filters: white bold text on a dark box, centred, at the top, middle or bottom. The text
     goes through a file so nothing in it can break the filter graph; expansion is off so % is literal."""
-    items = [o for o in (tl.edl.get("overlays") or []) if o.get("type") == "text"]
+    # the editor's text layers (they carry an id); hand-written text overlays go through the captions file instead
+    items = [o for o in (tl.edl.get("overlays") or []) if o.get("type") == "text" and o.get("id")]
     if not items:
         return vlab
     cache = tl.dir / ".render_cache"
@@ -48,11 +72,12 @@ def _text_overlays(tl, fc: list[str], vlab: str, OW: int, OH: int) -> str:
             continue
         dur = float(ov.get("duration", 3))
         txt = cache / f"text{k}.txt"
-        txt.write_text(str(ov.get("text", "")), encoding="utf-8")
         fs = max(12, round(OH * 0.05 * float(ov.get("size", 1))))
+        pad = max(6, fs // 3)
+        txt.write_text(wrap_text(str(ov.get("text", "")), fs, OW * TEXT_WIDTH - 2 * pad), encoding="utf-8")
         y = TEXT_Y.get(ov.get("position", "top"), TEXT_Y["top"])
         fc.append(f"[{vlab}]drawtext=textfile='{filter_path(txt)}'{font}:expansion=none:fontsize={fs}:fontcolor=white:"
-                  f"box=1:boxcolor=black@0.55:boxborderw={max(6, fs // 3)}:x=(w-text_w)/2:y={y}:"
+                  f"text_align=C:box=1:boxcolor=black@0.55:boxborderw={pad}:x=(w-text_w)/2:y={y}:"
                   f"enable='between(t,{at:.3f},{at + dur:.3f})'[vt{k}]")
         vlab = f"vt{k}"
     return vlab

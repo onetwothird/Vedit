@@ -150,6 +150,9 @@ def cut_words(edl: dict, w0: int, w1: int) -> dict:
     return e
 
 
+CLIP_WIDE = ("crop_x", "speed")  # set on every clip by the framing patch, so a restored piece takes them too
+
+
 def restore_words(edl: dict, w0: int, w1: int) -> dict:
     """Put words w0..w1 back as a words clip in source order, merging neighbours that become contiguous."""
     _check_range(w0, w1)
@@ -168,6 +171,10 @@ def restore_words(edl: dict, w0: int, w1: int) -> dict:
         pos = touching[0][0]
     else:
         new = {"src": src, "words": [w0, w1]}
+        # a clip-wide setting (framing, speed) carries over from the clip's other pieces
+        for k in CLIP_WIDE:
+            if same and k in same[0][1]:
+                new[k] = deepcopy(same[0][1][k])
         drop = set()
         after = [i for i, c in same if c["words"][0] > w1]
         pos = after[0] if after else (same[-1][0] + 1 if same else len(clips))
@@ -198,7 +205,7 @@ def fix_word(edl: dict, wrong: str, right: str) -> dict:
 
 
 def patch_section(edl: dict, section: Section, patch: dict) -> dict:
-    """Shallow-merge `patch` into a section. "framing" maps crop_x/zoom onto every clip and fit onto the edl;
+    """Shallow-merge `patch` into a section. "framing" maps crop_x/zoom/speed onto every clip and fit onto the edl;
     "output" takes only the aspect (one of OUTPUT_ASPECTS), the shape the clip is previewed and saved in.
     A null value removes the key (the undo of setting a key that was absent)."""
     e = deepcopy(edl)
@@ -210,9 +217,12 @@ def patch_section(edl: dict, section: Section, patch: dict) -> dict:
             else:
                 sec[k] = deepcopy(v)
     elif section == "framing":
-        bad = set(patch) - {"crop_x", "zoom", "fit"}
+        bad = set(patch) - {"crop_x", "zoom", "fit", "speed"}
         if bad:
             raise ValueError(f"unknown framing keys: {sorted(bad)}")
+        sp = patch.get("speed")
+        if sp is not None and (isinstance(sp, bool) or not isinstance(sp, (int, float)) or not 0.5 <= sp <= 4):
+            raise ValueError("speed must be a number from 0.5 to 4")
         if "fit" in patch:
             if patch["fit"] is None:
                 e.pop("fit", None)

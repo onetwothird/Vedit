@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useImperativeHandle, useMemo, useRef, useState, type ReactNode, type Ref } from "react";
+import { useCallback, useEffect, useId, useImperativeHandle, useMemo, useRef, useState, type ReactNode, type Ref } from "react";
 import type { Aspect, ClipView, Overlay } from "../engine/types";
 import { t } from "../i18n/t";
 import { getSafeZone, setSafeZone } from "../lib/prefs";
@@ -203,6 +203,8 @@ export default function Player({ view, src, aspect, fit = { width: 360, height: 
   const { cropX, zoom } = clipFraming(view.edl.clips[idx]);
   const bands = safeZoneBands(aspect);
   const only = exportOnly(view.edl);
+  const look = previewColor(view.edl.color);
+  const filterId = `pv-color-${useId().replace(/:/g, "")}`;
   const shown = ready && !failed;
 
   return (
@@ -215,7 +217,11 @@ export default function Player({ view, src, aspect, fit = { width: 360, height: 
             src={src}
             preload="auto"
             playsInline
-            style={{ ...(size ? cropStyle(aspect, size.w, size.h, cropX, zoom) : { position: "absolute", inset: 0 }), opacity: shown ? 1 : 0 }}
+            style={{
+              ...(size ? cropStyle(aspect, size.w, size.h, cropX, zoom) : { position: "absolute", inset: 0 }),
+              opacity: shown ? 1 : 0,
+              filter: look.filter ? `url(#${filterId})` : undefined,
+            }}
             onLoadedMetadata={(e) => {
               setSize({ w: e.currentTarget.videoWidth, h: e.currentTarget.videoHeight });
               seekOutput(outRef.current);
@@ -226,8 +232,22 @@ export default function Player({ view, src, aspect, fit = { width: 360, height: 
             onError={() => setFailed(true)}
           />
         )}
+        {look.filter && (
+          <svg className="pv-filter" aria-hidden="true">
+            <filter id={filterId} colorInterpolationFilters="sRGB">
+              <feComponentTransfer>
+                {(["R", "G", "B"] as const).map((ch) => {
+                  const F = `feFunc${ch}` as const;
+                  return <F key={ch} type="linear" slope={look.contrast} intercept={0.5 - 0.5 * look.contrast + look.brightness} />;
+                })}
+              </feComponentTransfer>
+              <feColorMatrix type="saturate" values={String(look.saturation)} />
+            </filter>
+          </svg>
+        )}
+        {shown && look.vignette && <div className="pv-vignette" aria-hidden="true" />}
         {shown && (
-          <OverlayLayer overlays={(view.edl.overlays as Overlay[] | undefined) ?? []} ranges={ovRanges} out={out} frameHeight={fh} playing={playing} />
+          <OverlayLayer overlays={(view.edl.overlays as Overlay[] | undefined) ?? []} ranges={ovRanges} out={out} frameWidth={fw} frameHeight={fh} playing={playing} />
         )}
         {shown && <CaptionOverlay track={view.captions} outT={captionClock(view.captions, out)} frameHeight={fh} />}
         {shown && safe && (
@@ -276,4 +296,13 @@ export default function Player({ view, src, aspect, fit = { width: 360, height: 
       )}
     </div>
   );
+}
+
+/** The export's colour settings (ffmpeg eq: contrast around mid grey, brightness as an offset, then saturation) as the
+    numbers the preview's SVG filter takes. */
+export function previewColor(color: unknown): { filter: boolean; brightness: number; contrast: number; saturation: number; vignette: boolean } {
+  const c = (color && typeof color === "object" ? color : {}) as Record<string, unknown>;
+  const n = (k: string, d: number) => (typeof c[k] === "number" ? (c[k] as number) : d);
+  const brightness = n("brightness", 0), contrast = n("contrast", 1), saturation = n("saturation", 1);
+  return { filter: brightness !== 0 || contrast !== 1 || saturation !== 1, brightness, contrast, saturation, vignette: c.vignette === true };
 }

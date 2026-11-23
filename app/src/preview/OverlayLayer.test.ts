@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { Overlay } from "../engine/types";
-import { activeOverlays, overlayStart } from "./OverlayLayer";
+import { activeOverlays, brollOpacity, overlayStart } from "./OverlayLayer";
+import { previewColor } from "./Player";
 
 const text = (id: string, t: number, duration = 2): Overlay => ({ id, type: "text", at: { src: "main", t }, duration, text: id, position: "top" });
 const img = (id: string, t: number, duration = 2): Overlay => ({ id, type: "image", at: { src: "main", t }, duration, path: `${id}.png`, mode: "full" });
@@ -33,5 +34,20 @@ describe("activeOverlays", () => {
   });
   it("skips an overlay whose moment was cut", () => {
     expect(activeOverlays([text("a", 16)], RANGES, 0)).toEqual([]);
+  });
+});
+
+describe("matching the export", () => {
+  it("fades b-roll in and out over 0.25 s like render.py", () => {
+    expect(brollOpacity(0, 2)).toBe(0);
+    expect(brollOpacity(0.125, 2)).toBeCloseTo(0.5);
+    expect(brollOpacity(1, 2)).toBe(1);
+    expect(brollOpacity(1.9, 2)).toBeCloseTo(0.4);
+    expect(brollOpacity(0, 2, 0)).toBe(1);
+  });
+
+  it("reads the colour settings the export uses, with no filter at the defaults", () => {
+    expect(previewColor(undefined)).toMatchObject({ filter: false, vignette: false });
+    expect(previewColor({ saturation: 0, vignette: true })).toMatchObject({ filter: true, saturation: 0, contrast: 1, brightness: 0, vignette: true });
   });
 });

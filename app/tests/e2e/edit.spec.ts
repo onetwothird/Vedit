@@ -196,15 +196,17 @@ test("keyboard shortcuts", async ({ page }) => {
 
 test("add a text layer, edit it, drag it, see it on the video, then undo", async ({ page }) => {
   await open(page);
-  await page.getByRole("button", { name: "Text", exact: true }).click();
+  await page.getByRole("tab", { name: "Text", exact: true }).click();
+  const tool = page.getByRole("tabpanel", { name: "Text" });
+  await tool.getByRole("button", { name: "Add text at the playhead" }).click();
   const block = page.locator(".tl-ov-text .tl-ovb");
   await expect(block).toHaveCount(1);
   await expect(page.locator(".pv-ov-text")).toHaveText("Your text");
 
-  const field = page.getByRole("textbox", { name: "Text" });
+  const field = tool.getByRole("textbox", { name: "Text" });
   await field.fill("Wait for it");
   await field.press("Enter");
-  await page.locator(".tl-props").getByRole("radio", { name: "Middle" }).check();
+  await tool.getByRole("radio", { name: "Middle" }).check();
   await expect(page.locator(".pv-ov-text.center")).toHaveText("Wait for it");
 
   const box = (await block.boundingBox())!;
@@ -214,9 +216,10 @@ test("add a text layer, edit it, drag it, see it on the video, then undo", async
   await page.mouse.up();
   await expect.poll(async () => (await block.boundingBox())!.x).toBeGreaterThan(box.x + 60);
 
-  await page.getByRole("button", { name: "Duplicate layer" }).click();
+  await tool.getByRole("button", { name: "Duplicate" }).click();
   await expect(block).toHaveCount(2);
-  await page.getByRole("button", { name: "Delete layer" }).click();
+  await expect(tool.locator(".ly-item")).toHaveCount(2);
+  await tool.getByRole("button", { name: "Delete", exact: true }).click();
   await expect(block).toHaveCount(1);
 
   // undo every step back to before the layer was added

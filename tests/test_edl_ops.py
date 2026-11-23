@@ -135,7 +135,6 @@ def test_kept_ranges_pad_and_time_clips(pipeline_workdir):
     assert got[1][0] == max(0.0, W[2]["start"])
     assert got[1][1] == pytest.approx(W[3]["end"], abs=1 / 30)
 
-
 def test_clip_edl_stays_inside_highlight(en_podcast_wd):
     hs, _ = find_highlights(en_podcast_wd)
     h = hs[0]
@@ -267,3 +266,19 @@ def test_patch_section_overlays_replace_and_clean():
 def test_patch_section_overlays_rejects_bad_items(bad):
     with pytest.raises(ValueError):
         patch_section(E, "overlays", {"items": [bad]})
+
+
+def test_patch_section_framing_speed_and_bad_speed():
+    edl = {"clips": [{"src": "main", "words": [0, 3]}, {"src": "main", "words": [5, 8]}]}
+    out = patch_section(edl, "framing", {"speed": 1.25})
+    assert [c["speed"] for c in out["clips"]] == [1.25, 1.25]
+    assert "speed" not in patch_section(out, "framing", {"speed": None})["clips"][0]
+    for bad in (0.1, 9, "fast", True):
+        with pytest.raises(ValueError):
+            patch_section(edl, "framing", {"speed": bad})
+
+
+def test_restore_keeps_clip_wide_speed_and_framing():
+    edl = {"clips": [{"src": "main", "words": [0, 3], "speed": 1.5, "crop_x": 0.4}]}
+    out = restore_words(edl, 8, 9)  # touches nothing: a new piece
+    assert out["clips"][1] == {"src": "main", "words": [8, 9], "speed": 1.5, "crop_x": 0.4}

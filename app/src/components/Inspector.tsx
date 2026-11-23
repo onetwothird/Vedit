@@ -1,11 +1,25 @@
 import { useEffect, useId, useRef, useState, type KeyboardEvent, type ReactNode } from "react";
 import { isTauri } from "../engine/client";
-import type { Edl, EditSection } from "../engine/types";
+import type { Aspect, Edl, EditSection } from "../engine/types";
+import { OUTPUT_ASPECTS } from "../edit/timeline";
+import { BrollTool, TextTool, type LayerToolProps } from "./LayerTools";
 import { t } from "../i18n/t";
 import { AUDIO_ACCEPT, baseName, pickAudioNative } from "../lib/native";
 
-export type InspectorTab = "transcript" | "captions" | "framing" | "sound";
-export const TABS: InspectorTab[] = ["transcript", "captions", "framing", "sound"];
+export type InspectorTab = "transcript" | "captions" | "text" | "broll" | "sound" | "framing" | "color" | "speed";
+export const TABS: InspectorTab[] = ["transcript", "captions", "text", "broll", "sound", "framing", "color", "speed"];
+
+/* One icon per tool, drawn on the same 24px grid and stroke as the timeline's tools. */
+const TOOL_ICON: Record<InspectorTab, string> = {
+  transcript: "M5 6h14M5 10h14M5 14h9M5 18h6",
+  captions: "M3 6h18v12H3zM7 11h3M7 14h6M13 11h4M15 14h2",
+  text: "M5 7V5h14v2M12 5v14M9 19h6",
+  broll: "M4 5h16v14H4zM4 16l5-5 4 4 2-2 5 5M15 9.5h.01",
+  sound: "M4 10v4M8 7v10M12 4v16M16 8v8M20 11v2",
+  framing: "M8 3H5a2 2 0 0 0-2 2v3M16 3h3a2 2 0 0 1 2 2v3M8 21H5a2 2 0 0 1-2-2v-3M16 21h3a2 2 0 0 0 2-2v-3M9 8h6v8H9z",
+  color: "M12 3a9 9 0 1 0 0 18c1.2 0 2-.8 2-1.8 0-.5-.2-.9-.5-1.2-.3-.3-.5-.7-.5-1.2 0-1 .8-1.8 1.8-1.8H17a4 4 0 0 0 4-4C21 6.6 17 3 12 3zM7.5 11.5h.01M10 7.5h.01M15 7.5h.01",
+  speed: "M12 14l4-5M4.9 19a9 9 0 1 1 14.2 0",
+};
 
 export interface InspectorProps {
   edl: Edl;
@@ -14,6 +28,10 @@ export interface InspectorProps {
   /** The Transcript tab's content. */
   transcript: ReactNode;
   onPatch(section: EditSection, patch: Record<string, unknown>): void;
+  /** The Text and B-roll tools' layers, playhead and clip bounds. */
+  layers: LayerToolProps;
+  /** The shape the clip is saved in, also switched above the preview. */
+  aspect: Aspect;
 }
 
 type Rec = Record<string, unknown>;
@@ -156,7 +174,7 @@ function Captions({ edl, onPatch }: Pick<InspectorProps, "edl" | "onPatch">) {
   );
 }
 
-function Framing({ edl, onPatch }: Pick<InspectorProps, "edl" | "onPatch">) {
+function Framing({ edl, onPatch, aspect }: Pick<InspectorProps, "edl" | "onPatch" | "aspect">) {
   const clip = rec(edl.clips[0]);
   const cx = clip.crop_x;
   const face = cx === "auto" || (typeof cx === "number" && Math.abs(cx - 0.5) > 1e-3);
@@ -165,6 +183,11 @@ function Framing({ edl, onPatch }: Pick<InspectorProps, "edl" | "onPatch">) {
   const fit = (edl.fit as string | undefined) ?? "crop";
   return (
     <>
+      <Choice
+        label={t("edit.shape")} name="shape" value={aspect}
+        options={OUTPUT_ASPECTS.map((a) => ({ value: a as Aspect, label: a }))}
+        onChange={(v) => onPatch("output", { aspect: v })}
+      />
       <Choice
         label={t("edit.frame.face")} name="face" value={face} options={onOff(t("edit.frame.face"))}
         onChange={(v) => onPatch("framing", { crop_x: v ? "auto" : 0.5 })}
@@ -252,13 +275,60 @@ function Sound({ edl, onPatch }: Pick<InspectorProps, "edl" | "onPatch">) {
   );
 }
 
-/** The right pane: Transcript, Captions, Framing and Sound tabs. Every setting is one `patch` op on the clip. */
-export default function Inspector({ edl, tab, onTab, transcript, onPatch }: InspectorProps) {
+const COLOR_DEFAULT = { brightness: 0, contrast: 1, saturation: 1 };
+type ColorKey = keyof typeof COLOR_DEFAULT;
+
+/** Brightness, contrast and saturation (ffmpeg's eq filter on export, a CSS filter in the preview), sharpen and vignette. */
+function ColorTool({ edl, onPatch }: Pick<InspectorProps, "edl" | "onPatch">) {
+  const c = rec(edl.color);
+  const num = (k: ColorKey) => (typeof c[k] === "number" ? (c[k] as number) : COLOR_DEFAULT[k]);
+  const patch = (p: Rec) => onPatch("color", p);
+  // a value back at its default is removed, so a reset clip has no colour settings at all
+  const set = (k: ColorKey, v: number) => patch({ [k]: Math.abs(v - COLOR_DEFAULT[k]) < 1e-6 ? null : Math.round(v * 100) / 100 });
+  const pct = (v: number, base: number) => `${v - base >= 0 ? "+" : "\u2212"}${Math.round(Math.abs(v - base) * 100)}`;
+  const changed = ["brightness", "contrast", "saturation", "sharpen", "vignette"].some((k) => c[k] !== undefined);
+  return (
+    <>
+      <Slider label={t("edit.color.brightness")} value={num("brightness")} min={-0.2} max={0.2} step={0.01} format={(v) => pct(v, 0)} onCommit={(v) => set("brightness", v)} />
+      <Slider label={t("edit.color.contrast")} value={num("contrast")} min={0.7} max={1.4} step={0.01} format={(v) => pct(v, 1)} onCommit={(v) => set("contrast", v)} />
+      <Slider label={t("edit.color.saturation")} value={num("saturation")} min={0} max={2} step={0.01} format={(v) => pct(v, 1)} onCommit={(v) => set("saturation", v)} />
+      <Choice label={t("edit.color.sharpen")} name="sharpen" value={c.sharpen === true} options={onOff(t("edit.color.sharpen"))} onChange={(v) => patch({ sharpen: v || null })} />
+      <Choice label={t("edit.color.vignette")} name="vignette" value={c.vignette === true} options={onOff(t("edit.color.vignette"))} onChange={(v) => patch({ vignette: v || null })} />
+      <div className="ed-row">
+        <span className="hint">{t("edit.color.hint")}</span>
+        <button type="button" className="secondary" disabled={!changed} onClick={() => patch({ brightness: null, contrast: null, saturation: null, sharpen: null, vignette: null })}>
+          {t("edit.color.reset")}
+        </button>
+      </div>
+    </>
+  );
+}
+
+const SPEEDS = [1, 1.1, 1.25, 1.5, 2];
+
+/** How fast the clip plays. Speech keeps its pitch; captions and layers follow. */
+function SpeedTool({ edl, onPatch }: Pick<InspectorProps, "edl" | "onPatch">) {
+  const speed = Number(rec(edl.clips[0]).speed ?? 1);
+  return (
+    <>
+      <Choice
+        label={t("edit.speed")} name="speed" value={SPEEDS.includes(speed) ? speed : 1}
+        options={SPEEDS.map((v) => ({ value: v, label: `${v}\u00d7` }))}
+        onChange={(v) => onPatch("framing", { speed: v === 1 ? null : v })}
+      />
+      <p className="hint">{t("edit.speed.hint")}</p>
+    </>
+  );
+}
+
+/** The right pane: one rail with every tool (transcript, captions, text, b-roll, sound, framing, colour, speed) and
+    the chosen tool's settings. Every setting is one `patch` op on the clip. */
+export default function Inspector({ edl, tab, onTab, transcript, onPatch, layers, aspect }: InspectorProps) {
   const id = useId();
   const tabs = useRef(new Map<InspectorTab, HTMLButtonElement>());
 
   function onKey(e: KeyboardEvent<HTMLDivElement>) {
-    const d = e.key === "ArrowRight" ? 1 : e.key === "ArrowLeft" ? -1 : 0;
+    const d = e.key === "ArrowDown" || e.key === "ArrowRight" ? 1 : e.key === "ArrowUp" || e.key === "ArrowLeft" ? -1 : 0;
     if (!d) return;
     e.preventDefault();
     const next = TABS[(TABS.indexOf(tab) + d + TABS.length) % TABS.length];
@@ -268,14 +338,14 @@ export default function Inspector({ edl, tab, onTab, transcript, onPatch }: Insp
 
   return (
     <aside className="ed-insp" aria-label={t("edit.tabs")}>
-      <div className="ed-tabs" role="tablist" aria-label={t("edit.tabs")} onKeyDown={onKey}>
+      <div className="ed-rail" role="tablist" aria-label={t("edit.tabs")} aria-orientation="vertical" onKeyDown={onKey}>
         {TABS.map((k) => (
           <button
             key={k}
             type="button"
             role="tab"
             id={`${id}-${k}-tab`}
-            className="ed-tab"
+            className="ed-tool"
             aria-selected={tab === k}
             aria-controls={`${id}-${k}`}
             tabIndex={tab === k ? 0 : -1}
@@ -285,25 +355,35 @@ export default function Inspector({ edl, tab, onTab, transcript, onPatch }: Insp
             }}
             onClick={() => onTab(k)}
           >
-            {t(`edit.tab.${k}`)}
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+              <path d={TOOL_ICON[k]} />
+            </svg>
+            <span>{t(`edit.tab.${k}`)}</span>
           </button>
         ))}
       </div>
-      {TABS.map((k) => (
-        <div
-          key={k}
-          role="tabpanel"
-          id={`${id}-${k}`}
-          aria-labelledby={`${id}-${k}-tab`}
-          className={`ed-panel${k === "transcript" ? " tx-panel" : ""}`}
-          hidden={tab !== k}
-        >
-          {k === "transcript" && transcript}
-          {k === "captions" && <Captions edl={edl} onPatch={onPatch} />}
-          {k === "framing" && <Framing edl={edl} onPatch={onPatch} />}
-          {k === "sound" && <Sound edl={edl} onPatch={onPatch} />}
-        </div>
-      ))}
+      <div className="ed-panes">
+        {TABS.map((k) => (
+          <div
+            key={k}
+            role="tabpanel"
+            id={`${id}-${k}`}
+            aria-labelledby={`${id}-${k}-tab`}
+            className={`ed-panel${k === "transcript" ? " tx-panel" : ""}`}
+            hidden={tab !== k}
+          >
+            {k !== "transcript" && <h2 className="ed-panel-title">{t(`edit.tab.${k}`)}</h2>}
+            {k === "transcript" && transcript}
+            {k === "captions" && <Captions edl={edl} onPatch={onPatch} />}
+            {k === "text" && <TextTool {...layers} />}
+            {k === "broll" && <BrollTool {...layers} />}
+            {k === "sound" && <Sound edl={edl} onPatch={onPatch} />}
+            {k === "framing" && <Framing edl={edl} onPatch={onPatch} aspect={aspect} />}
+            {k === "color" && <ColorTool edl={edl} onPatch={onPatch} />}
+            {k === "speed" && <SpeedTool edl={edl} onPatch={onPatch} />}
+          </div>
+        ))}
+      </div>
     </aside>
   );
 }

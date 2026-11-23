@@ -252,7 +252,9 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
             events.append(f"Dialogue: 0,{ass_time(s)},{ass_time(e)},Cap,,0,0,0,,{pop}{' '.join(parts)}")
 
     for ov in tl.edl.get("overlays") or []:
-        if ov.get("type") != "text":
+        # layers made in the editor carry an id and are drawn by render.py (drawtext, matching the preview); these
+        # are the hand-written ones (titles, lower-thirds) from edl.json
+        if ov.get("type") != "text" or ov.get("id"):
             continue
         start = tl.anchor(ov.get("at", 0))
         if start is None:

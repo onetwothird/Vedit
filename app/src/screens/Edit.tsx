@@ -45,6 +45,7 @@ export default function Edit() {
   const [sort, setSort] = useState<ClipSort>("best");
   const [keepError, setKeepError] = useState(false);
   const [tab, setTab] = useState<InspectorTab>("transcript");
+  const [layer, setLayer] = useState<string | null>(null); // the selected text or b-roll, shared by the timeline and tools
   const [outT, setOutT] = useState(0);
   const [stageBox, setStageBox] = useState({ width: 480, height: 520 });
   const player = useRef<PlayerHandle>(null);
@@ -90,6 +91,7 @@ export default function Edit() {
   useEffect(() => {
     if (!id || !hid) return;
     setOutT(0);
+    setLayer(null);
     void useClipStore.getState().load(id, hid);
   }, [id, hid]);
 
@@ -176,6 +178,13 @@ export default function Edit() {
   const onFix = useCallback((wrong: string, right: string) => apply({ op: "fix_word", wrong, right }), [apply]);
   const onOverlays = useCallback((items: Overlay[]) => apply({ op: "patch", section: "overlays", patch: { items } }), [apply]);
   const onPatch = useCallback((section: EditSection, patch: Record<string, unknown>) => apply({ op: "patch", section, patch }), [apply]);
+  // selecting a layer on the timeline opens its tool, so its settings are always where you look for them
+  const onLayer = useCallback((lid: string | null) => {
+    setLayer(lid);
+    if (!lid) return;
+    const o = ((useClipStore.getState().view?.edl.overlays as Overlay[] | undefined) ?? []).find((x, i) => (x.id ?? `o-${i}`) === lid);
+    if (o) setTab(o.type === "text" ? "text" : "broll");
+  }, []);
   const onTogglePlay = useCallback(() => player.current?.toggle(), []);
   const onPlayFrom = useCallback((w: number) => {
     if (!words[w]) return;
@@ -304,6 +313,17 @@ export default function Edit() {
             tab={tab}
             onTab={setTab}
             onPatch={onPatch}
+            aspect={aspect}
+            layers={{
+              overlays: (edl.overlays as Overlay[] | undefined) ?? [],
+              onOverlays,
+              layer,
+              onLayer,
+              playhead: srcT,
+              t0: words[h.w0]?.start ?? h.start,
+              t1: words[h.w1] ? wordSlot(words, h.w1, h.w1)[1] : h.end,
+              onSeek: seekSource,
+            }}
             transcript={
               <TranscriptPanel
                 words={words}
@@ -356,6 +376,8 @@ export default function Edit() {
             onRedo={() => useClipStore.getState().redo()}
             canUndo={canUndo}
             canRedo={canRedo}
+            layer={layer}
+            onLayer={onLayer}
           />
         ) : (
           <section className="ed-tl" aria-label={t("edit.tl.label")} aria-busy="true" />

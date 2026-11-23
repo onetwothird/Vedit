@@ -203,13 +203,14 @@ describe("text and b-roll layers", () => {
     expect($(".tl-ov-broll .tl-ovb").textContent).toBe("shot.png");
   });
 
-  it("adds text at the playhead and selects it", () => {
-    const onOverlays = vi.fn();
-    render({ playhead: 2, onOverlays });
-    act(() => btn("Add text at the playhead").click());
-    const items = onOverlays.mock.calls[0][0];
-    expect(items).toHaveLength(1);
-    expect(items[0]).toMatchObject({ type: "text", text: "Your text", position: "top", at: { t: 2 } });
+  it("shows the layer the tools picked and hands a click back to them", () => {
+    const onLayer = vi.fn();
+    render({ overlays: OV, onOverlays: vi.fn(), layer: "b1", onLayer });
+    expect($(".tl-ov-broll .tl-ovb").getAttribute("aria-pressed")).toBe("true");
+    expect($(".tl-ov-text .tl-ovb").getAttribute("aria-pressed")).toBe("false");
+    pointer($(".tl-ov-text .tl-ovb"), "pointerdown", 1.5 * pxPerSec);
+    pointer($(".tl-ov-text .tl-ovb"), "pointerup", 1.5 * pxPerSec);
+    expect(onLayer).toHaveBeenCalledWith("t1");
   });
 
   it("drags a layer later as one edit", () => {

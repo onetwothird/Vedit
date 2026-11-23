@@ -1,4 +1,4 @@
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, type CSSProperties } from "react";
 import type { Overlay } from "../engine/types";
 import { overlayUrl } from "../lib/overlayMedia";
 import { toOutputTime, type Range } from "./playback";
@@ -18,17 +18,26 @@ export function activeOverlays(overlays: readonly Overlay[], ranges: Range[], ou
 }
 
 /** Text and b-roll drawn over the preview frame, matching what the export draws. */
-export default function OverlayLayer({ overlays, ranges, out, frameHeight, playing }: {
+const FADE = 0.25; // seconds b-roll fades in and out (render.py's default "fade")
+
+/** How visible b-roll is `since` seconds into its `duration`: the export's fade in and out. */
+export function brollOpacity(since: number, duration: number, fade = FADE): number {
+  if (fade <= 0) return 1;
+  return Math.max(0, Math.min(1, since / fade, (duration - since) / fade));
+}
+
+export default function OverlayLayer({ overlays, ranges, out, frameWidth, frameHeight, playing }: {
   overlays: readonly Overlay[];
   ranges: Range[];
   out: number;
+  frameWidth: number;
   frameHeight: number;
   playing: boolean;
 }) {
   const shown = activeOverlays(overlays, ranges, out);
   if (!shown.length) return null;
   return (
-    <div className="pv-ov" aria-hidden="true">
+    <div className="pv-ov" aria-hidden="true" style={{ "--m": `${Math.round(frameWidth * 0.04)}px` } as CSSProperties}>
       {shown.map(({ o, since }, i) =>
         o.type === "text" ? (
           <p key={o.id ?? i} className={`pv-ov-text ${o.position}`} style={{ fontSize: Math.max(10, frameHeight * 0.05 * (o.size ?? 1)) }}>
@@ -54,10 +63,11 @@ function Broll({ o, since, playing }: { o: Extract<Overlay, { type: "image" | "v
     if (playing) v.play().catch(() => undefined);
     else v.pause();
   }, [since, playing, o.src_in]);
-  if (!url) return <div className={`${cls} missing`}><span>{o.path.split(/[\\/]/).pop()}</span></div>;
+  const style = { opacity: brollOpacity(since, o.duration) };
+  if (!url) return <div className={`${cls} missing`} style={style}><span>{o.path.split(/[\\/]/).pop()}</span></div>;
   return o.type === "image" ? (
-    <img className={cls} src={url} alt="" />
+    <img className={cls} src={url} alt="" style={style} />
   ) : (
-    <video ref={video} className={cls} src={url} muted playsInline preload="auto" />
+    <video ref={video} className={cls} src={url} muted playsInline preload="auto" style={style} />
   );
 }
