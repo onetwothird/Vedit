@@ -64,6 +64,16 @@ describe("useUndoKeys", () => {
     expect(store.undo).not.toHaveBeenCalled();
   });
 
+  it("still undoes from a radio, checkbox, slider or colour control, which have no text to undo", () => {
+    for (const type of ["radio", "checkbox", "range", "color"]) {
+      const el = document.createElement("input");
+      el.type = type;
+      host.append(el);
+      press({ key: "z", ctrlKey: true }, el);
+    }
+    expect(store.undo).toHaveBeenCalledTimes(4);
+  });
+
   it("stops listening on unmount", async () => {
     await act(async () => root.render(<div />));
     press({ key: "z", ctrlKey: true });

@@ -1,0 +1,172 @@
+// @vitest-environment jsdom
+import { act } from "react";
+import { createRoot, type Root } from "react-dom/client";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import type { CaptionTrack, TranscriptWord } from "../engine/types";
+import { captionSpans, laneSegments, rulerTicks, snapToWord, speechEnergy } from "../edit/lanes";
+
+(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
+
+import Timeline, { FALLBACK_WIDTH, type TimelineProps } from "./Timeline";
+
+// six words, one per second: word i is spoken from i to i + 0.9
+const WORDS: TranscriptWord[] = Array.from({ length: 6 }, (_, i) => ({ text: `w${i}`, start: i, end: i + 0.9 }));
+const ALL = new Set([0, 1, 2, 3, 4, 5]);
+
+describe("lanes", () => {
+  it("splits the clip's words into kept runs and cut gaps that tile the source time", () => {
+    expect(laneSegments(WORDS, 0, 5, new Set([0, 1, 3, 4, 5]))).toEqual([
+      { kind: "kept", w0: 0, w1: 1, start: 0, end: 2 },
+      { kind: "gap", w0: 2, w1: 2, start: 2, end: 3 },
+      { kind: "kept", w0: 3, w1: 5, start: 3, end: 5.9 },
+    ]);
+  });
+
+  it("only looks at the clip's own words", () => {
+    expect(laneSegments(WORDS, 2, 3, ALL)).toEqual([{ kind: "kept", w0: 2, w1: 3, start: 2, end: 3.9 }]);
+  });
+
+  it("snaps a start edge to the nearest word start and an end edge to the nearest word end, inside the clip", () => {
+    expect(snapToWord(WORDS, 0, 5, 2.4, "start")).toBe(2);
+    expect(snapToWord(WORDS, 0, 5, 2.6, "start")).toBe(3);
+    expect(snapToWord(WORDS, 0, 5, 2.6, "end")).toBe(2); // word 2 ends at 2.9
+    expect(snapToWord(WORDS, 0, 5, -10, "start")).toBe(0);
+    expect(snapToWord(WORDS, 1, 4, 99, "end")).toBe(4);
+  });
+
+  it("puts ruler ticks far enough apart to read", () => {
+    expect(rulerTicks(60, 10)).toEqual([0, 10, 20, 30, 40, 50, 60]); // 10 px a second: a tick every 10 s
+    expect(rulerTicks(4, 100)).toEqual([0, 1, 2, 3, 4]);
+  });
+
+  it("gives speech a higher level than silence", () => {
+    const words: TranscriptWord[] = [{ text: "a", start: 0, end: 1 }];
+    const bars = speechEnergy(words, 0, 2, 4);
+    expect(bars).toHaveLength(4);
+    expect(Math.min(bars[0], bars[1])).toBeGreaterThan(Math.max(bars[2], bars[3]));
+    for (const b of bars) {
+      expect(b).toBeGreaterThanOrEqual(0);
+      expect(b).toBeLessThanOrEqual(1);
+    }
+  });
+
+  it("places each caption event at its source time, across a cut", () => {
+    const track = {
+      lead_in: 0,
+      events: [
+        { start: 0, end: 1, words: [{ text: "a" }, { text: "b" }] },
+        { start: 2.5, end: 3.5, words: [{ text: "c" }] },
+      ],
+    } as unknown as CaptionTrack;
+    // kept source 0..2 then 5..8: output 2.5 is source 5.5
+    expect(captionSpans(track, [[0, 2], [5, 8]])).toEqual([
+      { start: 0, end: 1, text: "a b" },
+      { start: 5.5, end: 6.5, text: "c" },
+    ]);
+  });
+});
+
+let host: HTMLElement;
+let root: Root;
+beforeEach(() => {
+  host = document.createElement("div");
+  document.body.appendChild(host);
+  root = createRoot(host);
+});
+afterEach(() => {
+  act(() => root.unmount());
+  host.remove();
+});
+
+function render(over: Partial<TimelineProps> = {}) {
+  const props: TimelineProps = {
+    words: WORDS, w0: 0, w1: 5, kept: new Set([0, 1, 3, 4, 5]),
+    captions: [{ start: 0, end: 1.9, text: "W0 W1" }, { start: 3, end: 5, text: "W3 W4" }],
+    music: null, playhead: 0, onSeek: vi.fn(), onTrim: vi.fn(), ...over,
+  };
+  act(() => root.render(<Timeline {...props} />));
+  return props;
+}
+const $ = <T extends Element = HTMLElement>(sel: string) => host.querySelector<T>(sel)!;
+const pointer = (el: Element, type: string, clientX: number) =>
+  act(() => void el.dispatchEvent(new MouseEvent(type, { clientX, clientY: 5, bubbles: true, cancelable: true, button: 0 })));
+const press = (el: Element, key: string) =>
+  act(() => void el.dispatchEvent(new KeyboardEvent("keydown", { key, bubbles: true, cancelable: true })));
+// with no layout in jsdom the lane is FALLBACK_WIDTH wide over 5.9 s at zoom 1
+const pxPerSec = FALLBACK_WIDTH / 5.9;
+
+describe("Timeline", () => {
+  it("draws a caption block per caption event, the kept video with a waveform, and a gap per cut", () => {
+    render();
+    expect([...host.querySelectorAll(".tl-cap")].map((e) => e.textContent)).toEqual(["W0 W1", "W3 W4"]);
+    expect(host.querySelectorAll(".tl-seg.kept")).toHaveLength(2);
+    expect(host.querySelectorAll(".tl-gap")).toHaveLength(1);
+    expect(host.querySelectorAll(".tl-seg.kept svg rect").length).toBeGreaterThan(0);
+  });
+
+  it("shows the music file in the music lane, or that there is none", () => {
+    render();
+    expect($(".tl-music").textContent).toContain("No music");
+    render({ music: "C:/music/lofi.mp3" });
+    expect($(".tl-music").textContent).toContain("lofi.mp3");
+  });
+
+  it("seeks where the lanes are clicked, and while the playhead is dragged", () => {
+    const p = render();
+    const lanes = $(".tl-content");
+    pointer(lanes, "pointerdown", 2.5 * pxPerSec);
+    expect(p.onSeek).toHaveBeenLastCalledWith(expect.closeTo(2.5, 2));
+    pointer(lanes, "pointermove", 4 * pxPerSec);
+    expect(p.onSeek).toHaveBeenLastCalledWith(expect.closeTo(4, 2));
+    pointer(lanes, "pointerup", 4 * pxPerSec);
+    pointer(lanes, "pointermove", 1 * pxPerSec);
+    expect(p.onSeek).toHaveBeenCalledTimes(2);
+  });
+
+  it("puts the playhead at its source time", () => {
+    render({ playhead: 3 });
+    expect(parseFloat($(".tl-playhead").style.left)).toBeCloseTo(3 * pxPerSec, 2);
+  });
+
+  it("in Trim mode, dragging the start edge trims to the nearest word", () => {
+    const p = render();
+    expect(host.querySelector(".tl-handle")).toBeNull();
+    act(() => $<HTMLButtonElement>("button[aria-label=Trim]").click());
+    const start = $("[data-edge=start]");
+    pointer(start, "pointerdown", 0);
+    pointer(start, "pointermove", 1.3 * pxPerSec);
+    pointer(start, "pointerup", 1.3 * pxPerSec);
+    expect(p.onTrim).toHaveBeenCalledWith(1, 5);
+  });
+
+  it("in Trim mode, dragging the end edge snaps to the nearest word end", () => {
+    const p = render();
+    act(() => $<HTMLButtonElement>("button[aria-label=Trim]").click());
+    const end = $("[data-edge=end]");
+    pointer(end, "pointerdown", 5.9 * pxPerSec);
+    pointer(end, "pointerup", 3.7 * pxPerSec);
+    expect(p.onTrim).toHaveBeenCalledWith(0, 3); // word 3 ends at 3.9
+  });
+
+  it("moves a trim edge by one word with the arrow keys", () => {
+    const p = render();
+    act(() => $<HTMLButtonElement>("button[aria-label=Trim]").click());
+    press($("[data-edge=start]"), "ArrowRight");
+    expect(p.onTrim).toHaveBeenLastCalledWith(1, 5);
+    press($("[data-edge=end]"), "ArrowLeft");
+    expect(p.onTrim).toHaveBeenLastCalledWith(0, 4);
+  });
+
+  it("widens the lanes with the zoom slider", () => {
+    render();
+    const content = $(".tl-content");
+    expect(content.style.width).toBe(`${FALLBACK_WIDTH}px`);
+    const zoom = $<HTMLInputElement>("input[type=range]");
+    act(() => {
+      const set = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")!.set!;
+      set.call(zoom, "3");
+      zoom.dispatchEvent(new Event("input", { bubbles: true }));
+    });
+    expect(content.style.width).toBe(`${FALLBACK_WIDTH * 3}px`);
+  });
+});

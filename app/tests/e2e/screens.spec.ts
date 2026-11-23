@@ -104,3 +104,30 @@ test("player screenshots", async ({ page }) => {
   await page.getByRole("button", { name: "Safe zone" }).click();
   await shot(page, "safezone", "t18");
 });
+
+test("edit screenshots", async ({ page }) => {
+  test.setTimeout(60_000);
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await page.goto("/#/");
+  await page.evaluate(() => localStorage.setItem("vedit.theme", "dark"));
+  await page.goto("/#/p/mock-1/edit/h01");
+  await page.reload();
+  await expect(page.locator('.tx [data-w="0"]')).toBeVisible();
+  await page.waitForTimeout(600);
+  await shot(page, "edit-dark", "t19");
+  await page.locator('.tx [data-w="3"]').click();
+  await shot(page, "edit-word-popover-dark", "t19");
+  await page.keyboard.press("Escape");
+  await page.getByRole("tab", { name: "Captions" }).click();
+  await page.evaluate(() => document.documentElement.classList.add("light"));
+  await page.waitForTimeout(400);
+  await shot(page, "edit-captions-light", "t19");
+  await page.getByRole("tab", { name: "Sound" }).click();
+  await shot(page, "edit-sound-light", "t19");
+  await page.getByRole("tab", { name: "Framing" }).click();
+  await page.getByRole("button", { name: "Trim", exact: true }).click();
+  await shot(page, "edit-framing-trim-light", "t19");
+  await page.setViewportSize({ width: 375, height: 812 });
+  await page.waitForTimeout(400);
+  await shot(page, "edit-375-light", "t19");
+});
