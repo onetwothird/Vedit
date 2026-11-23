@@ -177,6 +177,9 @@ def _plan(tl: Timeline):
                           "hl_end": g[k + 1]["ostart"] if k + 1 < len(g) else g_end,
                           "speaker": w.get("speaker")})
         events.append({"start": g[0]["ostart"], "end": g_end, "words": words})
+    # output time at which the edited clips begin: an intro bumper pushes every caption time (and the whole timeline)
+    # later by its length, but the live preview skips bumpers, so it subtracts this
+    lead_in = next((c["t0"] for c in tl.clips if not c.get("_bumper")), 0.0)
     public = {
         "style": style, "font": font, "size_frac": size / H, "baseline_frac": margin_v, "uppercase": bool(upper),
         "color": _hex(cfg.get("color", "#FFFFFF")), "highlight": _hex(cfg.get("highlight", "#FFD400")),
@@ -186,6 +189,7 @@ def _plan(tl: Timeline):
         "back_color": "#000000" if box else None,
         "back_alpha": round(1 - 0x70 / 255, 4) if box else None,  # ASS &H70 = 44% transparent
         "speaker_colors": spk,
+        "lead_in": round(lead_in, 4),
         "events": events,
     }
     return public, _Plan(cfg, W, H, style, bool(upper), size, margin_v, font, outline, act, groups)

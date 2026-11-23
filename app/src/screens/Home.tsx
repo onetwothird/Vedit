@@ -1,12 +1,21 @@
 import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
+import FilmFrame from "../components/FilmFrame";
 import Screen from "../components/Screen";
 import { engine } from "../engine/client";
 import type { Project } from "../engine/types";
 import { t } from "../i18n/t";
 import { baseName } from "../lib/native";
+import { useFilmstrip } from "../lib/useFilmstrip";
+import { BatchArt, ClipArt, PhotosArt, ReelArt, VlogArt } from "./home/HomeArt";
+import "./home/home.css";
 
-const TILES = ["clip", "vlog", "reel", "photos", "batch"] as const;
+const SOON = [
+  { key: "vlog", Art: VlogArt },
+  { key: "reel", Art: ReelArt },
+  { key: "photos", Art: PhotosArt },
+  { key: "batch", Art: BatchArt },
+] as const;
 
 type Recent = { status: "loading" } | { status: "error" } | { status: "ready"; projects: Project[] };
 
@@ -34,28 +43,34 @@ export default function Home() {
   return (
     <Screen>
       <h1 className="title">{t("home.title")}</h1>
-      <ul className="tiles" aria-label={t("home.tiles.label")}>
-        {TILES.map((key) => {
-          const title = t(`home.tile.${key}.title`);
-          const desc = t(`home.tile.${key}.desc`);
-          return (
-            <li key={key}>
-              {key === "clip" ? (
-                <Link className="tile active" to="/p/new/import" data-tile>
-                  <span className="tile-title">{title}</span>
-                  <span className="tile-desc">{desc}</span>
-                  <span className="tile-go" aria-hidden="true">→</span>
-                </Link>
-              ) : (
-                <div className="tile soon" role="group" aria-disabled="true" aria-label={title} data-tile>
-                  <span className="tile-title">{title}</span>
-                  <span className="tile-desc">{desc}</span>
-                  <span className="badge">{t("home.soon")}</span>
-                </div>
-              )}
-            </li>
-          );
-        })}
+      <ul className="home-modes" aria-label={t("home.tiles.label")}>
+        <li>
+          <Link className="mode-hero" to="/p/new/import" data-tile>
+            <span>
+              <span className="m-title">{t("home.tile.clip.title")}</span>
+              <span className="m-desc">{t("home.tile.clip.desc")}</span>
+              <span className="m-cta">{t("home.tile.clip.cta")}</span>
+            </span>
+            <ClipArt />
+          </Link>
+        </li>
+        <li>
+          <ul className="mode-soon-row">
+            {SOON.map(({ key, Art }) => {
+              const title = t(`home.tile.${key}.title`);
+              return (
+                <li key={key}>
+                  <div className="mode-soon" role="group" aria-disabled="true" aria-label={title} data-tile>
+                    <Art />
+                    <span className="m-title">{title}</span>
+                    <span className="m-desc">{t(`home.tile.${key}.desc`)}</span>
+                    <span className="m-soon">{t("home.soon")}</span>
+                  </div>
+                </li>
+              );
+            })}
+          </ul>
+        </li>
       </ul>
 
       <section className="recent" aria-labelledby="recent-h">
@@ -67,23 +82,30 @@ export default function Home() {
         )}
         {recent.status === "ready" && recent.projects.length > 0 && (
           <ul className="recent-list">
-            {recent.projects.map((p) => {
-              const n = p.clips.length;
-              return (
-                <li key={p.id}>
-                  <Link className="recent-item" to={n > 0 ? `/p/${p.id}/pick` : `/p/${p.id}/import`}>
-                    <span className="r-name">{baseName(p.source)}</span>
-                    <span className="r-meta mono">{formatDate(p.created)}</span>
-                    <span className="r-meta mono">
-                      {n > 0 ? t(n === 1 ? "home.recent.clips.one" : "home.recent.clips.other", { n }) : t("home.recent.noclips")}
-                    </span>
-                  </Link>
-                </li>
-              );
-            })}
+            {recent.projects.map((p) => <RecentItem key={p.id} p={p} />)}
           </ul>
         )}
       </section>
     </Screen>
+  );
+}
+
+/** One recent project: its first frame, file name, then date and clip count underneath. */
+function RecentItem({ p }: { p: Project }) {
+  const film = useFilmstrip(p.id);
+  const n = p.clips.length;
+  return (
+    <li>
+      <Link className="recent-item" to={n > 0 ? `/p/${p.id}/pick` : `/p/${p.id}/import`}>
+        <span className="r-thumb">
+          <FilmFrame film={film} t={p.clips[0]?.highlight.start ?? 0} fit={{ width: 232, height: 130 }} />
+        </span>
+        <span className="r-name" title={baseName(p.source)}>{baseName(p.source)}</span>
+        <span className="r-meta">
+          <span>{formatDate(p.created)}</span>
+          <span>{n > 0 ? t(n === 1 ? "home.recent.clips.one" : "home.recent.clips.other", { n }) : t("home.recent.noclips")}</span>
+        </span>
+      </Link>
+    </li>
   );
 }

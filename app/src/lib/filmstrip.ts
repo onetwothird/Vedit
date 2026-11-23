@@ -38,3 +38,9 @@ export function spriteStyle(film: FilmstripInfo, t: number, displayWidth: number
     backgroundRepeat: "no-repeat",
   };
 }
+
+/** Display width at which a frame covers the whole box boxW x boxH (the overflow is cropped by the caller). */
+export function coverWidth(film: Pick<FilmstripInfo, "width" | "height"> | null, boxW: number, boxH: number): number {
+  const aspect = film && film.width > 0 && film.height > 0 ? film.width / film.height : 16 / 9;
+  return Math.max(1, Math.ceil(Math.max(boxW, boxH * aspect)));
+}

@@ -747,3 +747,16 @@ def test_model_delete_and_busy(client, auth, app, fake_queue, tmp_path, monkeypa
     app.state.engine.wait_idle()
     r = client.delete("/models/small", headers=auth)
     assert r.status_code == 200 and r.json()["small"]["installed"] is False and not (tmp_path / "m" / "small").exists()
+
+
+def test_patch_null_and_same_fix_remove_keys_over_http(client, auth, analyzed_project):
+    pid, hid = analyzed_project["id"], analyzed_project["highlights"][0]["id"]
+    url = f"/projects/{pid}/clips/{hid}"
+    sent = client.patch(url, headers=auth, json={"op": "patch", "section": "captions", "patch": {"zz_key": 5}})
+    assert sent.json()["edl"]["captions"]["zz_key"] == 5
+    r = client.patch(url, headers=auth, json={"op": "patch", "section": "captions", "patch": {"zz_key": None}})
+    assert r.status_code == 200 and "zz_key" not in r.json()["edl"]["captions"]
+    assert "zz_key" not in client.get(url, headers=auth).json()["edl"]["captions"]  # persisted
+    client.patch(url, headers=auth, json={"op": "fix_word", "wrong": "FFmpeg", "right": "ffmpeg"})
+    r = client.patch(url, headers=auth, json={"op": "fix_word", "wrong": "FFmpeg", "right": "FFmpeg"})
+    assert r.status_code == 200 and "FFmpeg" not in r.json()["edl"]["captions"]["replace"]

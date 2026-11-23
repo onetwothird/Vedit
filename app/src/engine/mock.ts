@@ -125,10 +125,16 @@ function applyOp(edl: Edl, op: ClipOp): Edl {
   }
 }
 
+const SAMPLE_SEC = 12; // public/mock/sample.mp4 is this long; every mock clip plays from its start
+
 function clipView(edl: Edl, tr: Transcript): ClipView {
   const ranges = wordRanges(edl);
+  // the mock source is one short sample, so a clip's times are made relative to its first word and held inside it
+  const base = ranges.length ? Math.floor(ranges[0][0] / PASSAGE_LEN) * CLIP_SPAN_SEC : 0;
   const replace = ((edl.captions ?? {}) as { replace?: Record<string, string> }).replace ?? {};
-  const kept_ranges = ranges.map(([a, b]) => [tr.words[a]?.start ?? 0, tr.words[b]?.end ?? 0] as [number, number]);
+  const kept_ranges = ranges
+    .map(([a, b]) => [(tr.words[a]?.start ?? 0) - base, Math.min((tr.words[b]?.end ?? 0) - base, SAMPLE_SEC)] as [number, number])
+    .filter(([a, b]) => b > a);
   const spoken: { text: string; start: number; end: number; speaker: string | null }[] = [];
   let t = 0;
   for (const [a, b] of ranges) {

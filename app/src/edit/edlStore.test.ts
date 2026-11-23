@@ -281,6 +281,90 @@ describe("clip store", () => {
     expect(s().view!.edl.clips).toHaveLength(2);
   });
 
+  it("a half-failed multi-op undo shows the server view, clears history and sets the error", async () => {
+    const start: Edl = { clips: [{ src: "main", words: [0, 5] }, { src: "main", words: [7, 13] }] };
+    const { s, srv, idle } = await setup(start);
+    s().apply({ op: "trim", w_first: 3, w_last: 9 });
+    await idle();
+    srv.manual();
+    s().undo(); // restore 0-2, then restore 10-13
+    await vi.waitFor(() => expect(srv.held).toHaveLength(1));
+    srv.held.shift()!.ok();
+    await vi.waitFor(() => expect(srv.held).toHaveLength(1));
+    srv.held.shift()!.fail("boom");
+    await idle();
+    expect(s().error).toBe("boom");
+    expect(s().past).toEqual([]);
+    expect(s().future).toEqual([]);
+    expect(s().view!.edl).toEqual(srv.edl()); // the half-undone server state, not the pre-undo view
+    expect(s().view!.edl.clips).toEqual([{ src: "main", words: [0, 5] }, { src: "main", words: [7, 9] }]);
+  });
+
+  it("an edit made during a rollback waits for it, then applies to the rolled-back state", async () => {
+    const start: Edl = { clips: [{ src: "main", words: [0, 5] }, { src: "main", words: [7, 13] }] };
+    const { s, srv, idle } = await setup(start);
+    s().apply({ op: "trim", w_first: 3, w_last: 9 });
+    await idle();
+    srv.manual();
+    let release!: () => void;
+    srv.engine.clip.mockImplementationOnce(() => new Promise<ClipView>((r) => { release = () => r(srv.view()); }));
+    s().undo();
+    await vi.waitFor(() => expect(srv.held).toHaveLength(1));
+    srv.held.shift()!.ok();
+    await vi.waitFor(() => expect(srv.held).toHaveLength(1));
+    srv.held.shift()!.fail("boom");
+    await vi.waitFor(() => expect(release).toBeDefined()); // the re-fetch is in flight
+    s().apply({ op: "cut", w0: 4, w1: 4 });
+    expect(s().saving).toBe(true);
+    expect(srv.held).toHaveLength(0);
+    release();
+    await vi.waitFor(() => expect(srv.held).toHaveLength(1));
+    srv.held.shift()!.ok();
+    await idle();
+    expect(s().past).toHaveLength(1);
+    expect(s().error).toBeUndefined();
+    expect(s().view!.edl).toEqual(srv.edl());
+    expect(s().view!.edl.clips).toEqual([{ src: "main", words: [0, 3] }, { src: "main", words: [5, 5] }, { src: "main", words: [7, 9] }]);
+  });
+
+  it("a reload of the same clip waits behind pending edits, and an edit after it still gets sent", async () => {
+    const { s, srv, idle } = await setup(E0, true);
+    s().apply({ op: "cut", w0: 0, w1: 1 });
+    await vi.waitFor(() => expect(srv.held).toHaveLength(1));
+    const loaded = s().load("p", "h");
+    s().apply({ op: "cut", w0: 9, w1: 9 });
+    srv.held.shift()!.ok();
+    await vi.waitFor(() => expect(srv.held).toHaveLength(1));
+    srv.held.shift()!.ok();
+    await loaded;
+    await idle();
+    expect(srv.sent.map((o) => (o as { w0: number }).w0)).toEqual([0, 9]);
+    expect(s().saving).toBe(false);
+  });
+
+  it("loading another clip drops the old clip's pending ops and ignores its in-flight reply", async () => {
+    const { s, srv, idle } = await setup(E0, true);
+    s().apply({ op: "cut", w0: 0, w1: 1 });
+    s().apply({ op: "cut", w0: 5, w1: 6 });
+    await vi.waitFor(() => expect(srv.held).toHaveLength(1));
+    const loaded = s().load("p", "h2");
+    expect(s().view).toBeNull();
+    expect(s().saving).toBe(false);
+    srv.held.shift()!.ok();
+    await loaded;
+    await idle();
+    expect(srv.sent).toHaveLength(1); // the queued cut never went out
+    expect(s().hid).toBe("h2");
+    expect(s().past).toEqual([]);
+    expect(s().view!.edl).toEqual(srv.edl()); // the fresh load, not the stale reply
+    s().apply({ op: "cut", w0: 12, w1: 13 }); // the new clip is editable
+    await vi.waitFor(() => expect(srv.held).toHaveLength(1));
+    srv.held.shift()!.ok();
+    await idle();
+    expect(s().saving).toBe(false);
+    expect(srv.sent).toHaveLength(2);
+  });
+
   it("does not queue an op the local port rejects", async () => {
     const { s, srv } = await setup(E0);
     s().apply({ op: "cut", w0: 5, w1: 2 });
