@@ -45,7 +45,7 @@ from studio_projects import (LANG_MODEL, Project, ProjectClip, _atomic_write_jso
 
 ALLOWED_ORIGINS = ("tauri://localhost", "http://tauri.localhost", "http://localhost:5173")
 FORMATS = ("9:16", "1:1", "4:5", "16:9")
-HIGH_CRF = "18"
+HIGH_CRF = "15"
 ANALYZE_STEPS = (("proxy", 0.1), ("analyze", 0.6), ("highlights", 0.15), ("framing", 0.15))
 TERMINAL = ("done", "failed", "cancelled")
 WS_QUEUE_MAX = 256
@@ -555,8 +555,14 @@ def _clip_view(wd: Path, edl_path: Path) -> dict:
     edl = load_json(edl_path)
     tp = wd / "transcript.main.json"
     tr = load_json(tp) if tp.is_file() else {}
+    tl = _timeline(edl_path)
+    clips = [c for c in tl.clips if not c.get("_bumper")]
+    # the zoom each clip is drawn at (automatic punch-ins capped where the picture would soften) and how far a zoom
+    # can go on this video before it does: the preview frames clips exactly like the export
     return {"edl": edl, "kept_ranges": [list(r) for r in kept_ranges(edl, tr)],
-            "captions": caption_events(_timeline(edl_path))}
+            "captions": caption_events(tl),
+            "zooms": [c["zoom"] if isinstance(c.get("zoom"), (int, float)) else 1 for c in clips],
+            "sharp_zoom": round(tl.sharp_zoom(tl.ref), 3)}
 
 
 def _int_arg(body: dict, key: str) -> int:

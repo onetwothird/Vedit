@@ -314,6 +314,7 @@ export default function Edit() {
             onTab={setTab}
             onPatch={onPatch}
             aspect={aspect}
+            sharpZoom={view.sharp_zoom}
             layers={{
               overlays: (edl.overlays as Overlay[] | undefined) ?? [],
               onOverlays,

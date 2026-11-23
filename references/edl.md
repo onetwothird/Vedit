@@ -11,7 +11,7 @@ Paths are relative to the edl.json file. Times can be seconds (`12.5`) or `"1:02
     "photo": "../img/product.png"                            // still images work as sources too
   },
   "output": {"path": "../final.mp4", "aspect": "16:9",       // 16:9 | 9:16 | 1:1 | 4:5   (or width/height)
-             "fps": 30, "crf": 20, "preset": "medium"},
+             "fps": 30, "crf": 18, "preset": "medium"},
   "fit": "crop",                                             // default fit when aspect differs: crop | blur | pad
   "pad": [0.10, 0.18],                                       // default padding around "words" clips (before, after)
   "intro": {"path": "../intro.mp4", "fade_out": 0.3},        // optional bumpers
@@ -79,6 +79,7 @@ The app's Speed tool sets `speed` on every clip (0.5 to 4); the Color tool write
 | `pad` | `[before, after]` seconds around `words` clips, never overlapping neighbor words |
 | `speed` | 0.25–4 (audio pitch preserved) |
 | `zoom` | number (static) or `{from, to, focus_from?, focus_to?, ease?}` (animated, Ken Burns/pan) |
+| `punchin` | `true` on autocut's jump-cut zooms: render keeps them only as far as the source has pixels to spare (none when the crop is already enlarged), so no cut looks softer. `false` = a zoom you chose, kept as it is |
 | `focus` | `[x, y]` subject point in source (0–1) for zooms |
 | `crop_x`, `crop_y` | center of the crop window (0–1) when output aspect differs; `"auto"` = face detection |
 | `fit` | `crop` (fill), `blur` (fit over blurred fill — screen recordings to vertical), `pad` (letterbox) |

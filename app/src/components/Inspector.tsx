@@ -32,6 +32,8 @@ export interface InspectorProps {
   layers: LayerToolProps;
   /** The shape the clip is saved in, also switched above the preview. */
   aspect: Aspect;
+  /** How far a zoom stays sharp on this video (ClipView.sharp_zoom). */
+  sharpZoom?: number;
 }
 
 type Rec = Record<string, unknown>;
@@ -174,7 +176,7 @@ function Captions({ edl, onPatch }: Pick<InspectorProps, "edl" | "onPatch">) {
   );
 }
 
-function Framing({ edl, onPatch, aspect }: Pick<InspectorProps, "edl" | "onPatch" | "aspect">) {
+function Framing({ edl, onPatch, aspect, sharpZoom = Infinity }: Pick<InspectorProps, "edl" | "onPatch" | "aspect" | "sharpZoom">) {
   const clip = rec(edl.clips[0]);
   const cx = clip.crop_x;
   const face = cx === "auto" || (typeof cx === "number" && Math.abs(cx - 0.5) > 1e-3);
@@ -196,6 +198,13 @@ function Framing({ edl, onPatch, aspect }: Pick<InspectorProps, "edl" | "onPatch
         label={t("edit.frame.zoom")} value={Math.min(1.3, Math.max(1, zoom))} min={1} max={1.3} step={0.01}
         format={(v) => `${v.toFixed(2)}×`} onCommit={(v) => onPatch("framing", { zoom: Math.round(v * 100) / 100 })}
       />
+      <p className="hint">
+        {sharpZoom < 1.02
+          ? t("edit.frame.zoom.soft")
+          : zoom > sharpZoom + 0.005
+            ? t("edit.frame.zoom.over", { n: sharpZoom.toFixed(2) })
+            : t("edit.frame.zoom.sharp", { n: sharpZoom.toFixed(2) })}
+      </p>
       <Choice
         label={t("edit.frame.fit")} name="fit" value={fit}
         options={["crop", "blur", "pad"].map((f) => ({ value: f, label: t(`edit.frame.fit.${f}`) }))}
@@ -323,7 +332,7 @@ function SpeedTool({ edl, onPatch }: Pick<InspectorProps, "edl" | "onPatch">) {
 
 /** The right pane: one rail with every tool (transcript, captions, text, b-roll, sound, framing, colour, speed) and
     the chosen tool's settings. Every setting is one `patch` op on the clip. */
-export default function Inspector({ edl, tab, onTab, transcript, onPatch, layers, aspect }: InspectorProps) {
+export default function Inspector({ edl, tab, onTab, transcript, onPatch, layers, aspect, sharpZoom }: InspectorProps) {
   const id = useId();
   const tabs = useRef(new Map<InspectorTab, HTMLButtonElement>());
 
@@ -378,7 +387,7 @@ export default function Inspector({ edl, tab, onTab, transcript, onPatch, layers
             {k === "text" && <TextTool {...layers} />}
             {k === "broll" && <BrollTool {...layers} />}
             {k === "sound" && <Sound edl={edl} onPatch={onPatch} />}
-            {k === "framing" && <Framing edl={edl} onPatch={onPatch} aspect={aspect} />}
+            {k === "framing" && <Framing edl={edl} onPatch={onPatch} aspect={aspect} sharpZoom={sharpZoom} />}
             {k === "color" && <ColorTool edl={edl} onPatch={onPatch} />}
             {k === "speed" && <SpeedTool edl={edl} onPatch={onPatch} />}
           </div>

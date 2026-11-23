@@ -208,7 +208,8 @@ def seg_cmd(tl: Timeline, c: dict, out: Path, preview: bool) -> list[str]:
         cmd += ["-f", "lavfi", "-t", f"{span:.4f}", "-i", "anullsrc=r=48000:cl=stereo"]
     vc = video_chain(tl, c)
     fc = f"[0:v]{vc}[v];[1:a]{audio_chain(c)}[a]"
-    q = ["-preset", "ultrafast", "-crf", "26"] if preview else ["-preset", "veryfast", "-crf", "15"]
+    # segments are intermediates the final pass encodes again: near-lossless, so the export loses detail only once
+    q = ["-preset", "ultrafast", "-crf", "26"] if preview else ["-preset", "veryfast", "-crf", "8"]
     return cmd + ["-filter_complex", fc, "-map", "[v]", "-map", "[a]", "-c:v", "libx264", *q,
                   "-c:a", "pcm_s16le", "-t", f"{c['dur']:.4f}", str(out)]
 
@@ -433,7 +434,7 @@ def main():
     ap.add_argument("--clips", help="render only a clip range, e.g. 0-12")
     ap.add_argument("--formats", help="also export other aspect ratios from the same edit, e.g. 9:16,1:1")
     ap.add_argument("--out", help="override output path")
-    ap.add_argument("--crf", type=int, default=None, help="final x264 quality (lower = better; default from the edl, 20)")
+    ap.add_argument("--crf", type=int, default=None, help="final x264 quality (lower = better; default from the edl, 18)")
     ap.add_argument("--jobs", type=int, default=max(1, (os.cpu_count() or 2) // 2))
     a = ap.parse_args()
     need("ffmpeg")

@@ -171,6 +171,7 @@ export function patchSection(edl: Edl, section: EditSection, patch: Record<strin
         if (v === null) delete c[k];
         else c[k] = v;
       }
+      if ("zoom" in patch) c.punchin = false; // a chosen zoom is kept as it is (edl_ops does the same)
     }
   } else if (section === "overlays") {
     const bad = Object.keys(patch).filter((k) => k !== "items");
