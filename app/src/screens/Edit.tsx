@@ -346,6 +346,7 @@ export default function Edit() {
             playhead={srcT}
             onSeek={seekSource}
             onTrim={onTrim}
+            onCut={onCut}
           />
         ) : (
           <section className="ed-tl" aria-label={t("edit.tl.label")} aria-busy="true" />

@@ -82,7 +82,7 @@ function render(over: Partial<TimelineProps> = {}) {
   const props: TimelineProps = {
     words: WORDS, w0: 0, w1: 5, kept: new Set([0, 1, 3, 4, 5]),
     captions: [{ start: 0, end: 1.9, text: "W0 W1" }, { start: 3, end: 5, text: "W3 W4" }],
-    music: null, playhead: 0, onSeek: vi.fn(), onTrim: vi.fn(), ...over,
+    music: null, playhead: 0, onSeek: vi.fn(), onTrim: vi.fn(), onCut: vi.fn(), ...over,
   };
   act(() => root.render(<Timeline {...props} />));
   return props;
@@ -168,5 +168,24 @@ describe("Timeline", () => {
       zoom.dispatchEvent(new Event("input", { bubbles: true }));
     });
     expect(content.style.width).toBe(`${FALLBACK_WIDTH * 3}px`);
+  });
+});
+
+describe("split and delete", () => {
+  it("splits the piece under the playhead, selects the new piece, and deletes it as a cut", () => {
+    const p = render({ playhead: 4.1, kept: new Set([0, 1, 2, 3, 4, 5]) });
+    const splitBtn = [...host.querySelectorAll<HTMLButtonElement>("button")].find((b) => b.getAttribute("aria-label") === "Split")!;
+    expect(splitBtn.disabled).toBe(false);
+    act(() => splitBtn.click());
+    expect(host.querySelectorAll(".tl-piece").length).toBe(2);
+    const del = [...host.querySelectorAll<HTMLButtonElement>("button")].find((b) => b.getAttribute("aria-label") === "Delete piece")!;
+    expect(del.disabled).toBe(false);
+    act(() => del.click());
+    expect(p.onCut).toHaveBeenCalledWith(4, 5);
+  });
+  it("cannot split at the start of a piece", () => {
+    render({ playhead: 0 });
+    const splitBtn = [...host.querySelectorAll<HTMLButtonElement>("button")].find((b) => b.getAttribute("aria-label") === "Split")!;
+    expect(splitBtn.disabled).toBe(true);
   });
 });

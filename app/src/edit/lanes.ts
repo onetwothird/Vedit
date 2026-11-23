@@ -100,3 +100,31 @@ export function captionSpans(track: Pick<CaptionTrack, "events" | "lead_in">, ra
 }
 
 const round = (n: number): number => Math.round(n * 1e4) / 1e4;
+
+/** A piece of the kept video: a kept run, further divided where the person split it. */
+export interface Piece { w0: number; w1: number; start: number; end: number }
+
+/** The kept runs of `segs`, each cut into pieces at every split word (a split word starts a new piece). */
+export function lanePieces(words: readonly TranscriptWord[], segs: readonly LaneSeg[], splits: ReadonlySet<number>, w1: number): Piece[] {
+  const out: Piece[] = [];
+  for (const s of segs) {
+    if (s.kind !== "kept") continue;
+    let a = s.w0;
+    for (let i = s.w0 + 1; i <= s.w1; i++) {
+      if (!splits.has(i)) continue;
+      out.push({ w0: a, w1: i - 1, start: words[a].start, end: wordSlot(words, i - 1, w1)[1] });
+      a = i;
+    }
+    out.push({ w0: a, w1: s.w1, start: words[a].start, end: s.end });
+  }
+  return out;
+}
+
+/** The word a split at `t` would start, or null when `t` is not inside a piece (a split at a piece's first word
+    changes nothing). */
+export function splitWordAt(words: readonly TranscriptWord[], pieces: readonly Piece[], t: number): number | null {
+  const p = pieces.find((q) => t >= q.start && t < q.end);
+  if (!p) return null;
+  const w = snapToWord(words, p.w0, p.w1, t, "start");
+  return w > p.w0 ? w : null;
+}

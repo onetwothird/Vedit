@@ -484,7 +484,13 @@ html.theme-fade, html.theme-fade * { transition: background-color .3s ease, bord
 .tl-gap { border-radius: 7px; border: 1px dashed var(--danger); opacity: .55; background: repeating-linear-gradient(135deg, transparent 0 5px, color-mix(in srgb, var(--danger) 10%, transparent) 5px 10px); }
 .tl-mus { border-radius: var(--r-chip); background: var(--accent-soft); border: 1px solid var(--line); font-size: 11px; color: var(--body); padding: 0 8px; display: flex; align-items: center; overflow: hidden; white-space: nowrap; }
 .tl-lane > .tl-none { position: static; display: flex; align-items: center; height: 100%; font-size: 11px; color: var(--muted); }
-.tl-lane > .tl-handle { width: 10px; transform: translateX(-50%); top: -3px; bottom: -3px; border-radius: 4px; background: var(--accent); cursor: ew-resize; z-index: 4; }
+.tl-lane > /* A piece of kept video: click to select it, then Delete removes it. Split points show as a bright seam. */
+.tl-piece { position: absolute; top: 0; bottom: 0; border-radius: var(--r-chip); border: 1.5px solid transparent; background: transparent; cursor: pointer; }
+.tl-piece:hover { border-color: color-mix(in srgb, var(--ink) 35%, transparent); }
+.tl-piece.on { border-color: var(--ink); background: color-mix(in srgb, var(--ink) 12%, transparent); }
+.tl-piece.split::before { content: ""; position: absolute; left: -2.5px; top: -3px; bottom: -3px; width: 2px; border-radius: 1px; background: var(--ink); }
+.tl-piece:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+.tl-handle { width: 10px; transform: translateX(-50%); top: -3px; bottom: -3px; border-radius: 4px; background: var(--accent); cursor: ew-resize; z-index: 4; }
 .tl-handle:focus-visible { outline: 2px solid var(--ink); outline-offset: 1px; }
 .tl-playhead { position: absolute; top: 0; bottom: 0; width: 2px; margin-left: -1px; background: var(--accent); z-index: 3; cursor: ew-resize; }
 .tl-playhead::before { content: ""; position: absolute; top: -3px; left: -5px; width: 12px; height: 12px; border-radius: 3px; background: var(--accent); }
