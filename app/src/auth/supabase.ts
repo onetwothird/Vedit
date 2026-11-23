@@ -28,7 +28,14 @@ interface Session {
 interface SupabaseUser {
   id: string;
   email?: string;
-  user_metadata?: { full_name?: string; name?: string };
+  user_metadata?: {
+    full_name?: string;
+    name?: string;
+    nickname?: string;
+    slug?: string;
+    avatar_url?: string;
+    picture?: string;
+  };
   app_metadata?: { plan?: string; provider?: string };
 }
 
@@ -62,6 +69,18 @@ function errorCode(status: number, body: Record<string, unknown>): AuthErrorCode
   if (status === 429 || code.startsWith("over_")) return "rate_limited";
   if (code === "provider_disabled" || code === "email_provider_disabled" || code === "signup_disabled") return "not_configured";
   return "unknown";
+}
+
+/** The fullest name the provider shares. Facebook's `name` can be short ("Angelito III") while `nickname` or `slug`
+    carries the whole one ("Angelito Decatoria III"); take the longest candidate that starts like the given name. */
+export function displayName(meta: { full_name?: string; name?: string; nickname?: string; slug?: string }): string {
+  const clean = (v?: string) => (typeof v === "string" ? v.trim().replace(/\s+/g, " ") : "");
+  const given = clean(meta.full_name) || clean(meta.name);
+  const first = given.split(" ")[0]?.toLowerCase();
+  const pool = [given, clean(meta.name), clean(meta.nickname), clean(meta.slug)].filter(
+    (n) => n && (!first || n.toLowerCase().split(" ")[0] === first),
+  );
+  return pool.reduce((best, n) => (n.split(" ").length > best.split(" ").length ? n : best), given);
 }
 
 function base64url(bytes: Uint8Array): string {
@@ -108,12 +127,14 @@ export function supabaseProvider(opts: SupabaseOptions): AuthProvider {
     const email = u.email ?? "";
     const meta = u.user_metadata ?? {};
     const via = provider ?? (u.app_metadata?.provider === "google" || u.app_metadata?.provider === "facebook" ? u.app_metadata.provider : "email");
+    const photo = [meta.avatar_url, meta.picture].find((p) => typeof p === "string" && p.startsWith("https://"));
     return {
       id: u.id,
-      name: (meta.full_name || meta.name || email.split("@")[0] || "vedit").trim(),
+      name: displayName(meta) || email.split("@")[0] || "vedit",
       email,
       provider: via,
       plan: u.app_metadata?.plan === "lifetime" ? "lifetime" : "free",
+      ...(photo ? { avatar: photo } : {}),
     };
   }
 
@@ -137,7 +158,10 @@ export function supabaseProvider(opts: SupabaseOptions): AuthProvider {
       if (code || failed) {
         // the provider's return trip: take the code out of the address before anything else
         window.history.replaceState(null, "", window.location.pathname + window.location.hash);
-        if (failed) throw new AuthError("social_cancelled");
+        if (failed) {
+          const why = `${failed} ${here.searchParams.get("error_code") ?? ""}`;
+          throw new AuthError(/access_denied|user_cancel/.test(why) ? "social_cancelled" : "social_failed");
+        }
         const verifier = sessionStorage.getItem(PKCE);
         sessionStorage.removeItem(PKCE);
         if (!verifier) throw new AuthError("unknown");

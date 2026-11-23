@@ -1,29 +1,47 @@
-/* Sign in: the product on the left (the Home hero, playing), the ways in on the right. One surface, no cards. */
-.signin { display: grid; grid-template-columns: minmax(0, 1.15fr) minmax(380px, 1fr); min-height: 100vh; background: var(--panel); }
+/* Sign in: the product on the left (the Home hero, playing), the ways in on the right inside 9:16 crop marks.
+   The mode switch is the editor ruler; its playhead marks which one you are in. One surface, no cards. */
+.signin { display: grid; grid-template-columns: minmax(0, 1.15fr) minmax(440px, 1fr); height: 100vh; overflow-y: auto; background: var(--panel); }
 
 .signin-show {
   position: relative; display: flex; flex-direction: column; justify-content: space-between; gap: 32px;
   padding: 32px 48px 40px; background: var(--bg); border-right: 1px solid var(--line); overflow: hidden;
 }
-.signin-show::before {
-  content: ""; position: absolute; inset: 0; pointer-events: none; opacity: .6;
-  background-image: radial-gradient(var(--line) 1px, transparent 1px); background-size: 18px 18px;
-  mask-image: radial-gradient(ellipse 70% 60% at 50% 50%, #000 30%, transparent 75%);
-}
-.signin-show > * { position: relative; }
 .signin-brand { display: flex; align-items: center; gap: 10px; }
 .signin-word { font: 400 24px var(--pixel); font-synthesis: none; color: var(--ink); }
 .signin-art { display: grid; place-items: center; }
 .signin-art .hero-art { justify-self: center; max-width: 720px; }
 .signin-line { max-width: 34ch; font: 600 22px/1.3 var(--sans); letter-spacing: -0.015em; color: var(--ink); }
 
-.signin-main { display: grid; place-items: center; padding: 40px 24px; }
-.signin-card { width: 100%; max-width: 380px; display: flex; flex-direction: column; }
-.signin-brand.small { display: none; margin-bottom: 28px; }
-.signin-title { font: 600 26px/1.2 var(--sans); letter-spacing: -0.02em; color: var(--ink); }
-.signin-sub { margin-top: 8px; font-size: 13.5px; line-height: 1.55; color: var(--body); }
+.signin-main { display: flex; flex-direction: column; align-items: center; justify-content: center; padding: 24px; min-width: 0; }
 
-.signin-social { display: flex; flex-direction: column; gap: 10px; margin-top: 28px; }
+/* The form column sits in a 9:16 frame drawn only by its four corner marks, the same marks the app draws on
+   vertical framing: 1px, 14px arms. No fill, no shadow. */
+.signin-card {
+  --mark: var(--line-2);
+  position: relative; width: 100%; max-width: 400px; aspect-ratio: 9 / 16;
+  display: flex; flex-direction: column; justify-content: center; padding: 32px;
+  background:
+    linear-gradient(var(--mark), var(--mark)) 0 0 / 14px 1px,
+    linear-gradient(var(--mark), var(--mark)) 0 0 / 1px 14px,
+    linear-gradient(var(--mark), var(--mark)) 100% 0 / 14px 1px,
+    linear-gradient(var(--mark), var(--mark)) 100% 0 / 1px 14px,
+    linear-gradient(var(--mark), var(--mark)) 0 100% / 14px 1px,
+    linear-gradient(var(--mark), var(--mark)) 0 100% / 1px 14px,
+    linear-gradient(var(--mark), var(--mark)) 100% 100% / 14px 1px,
+    linear-gradient(var(--mark), var(--mark)) 100% 100% / 1px 14px;
+  background-repeat: no-repeat;
+}
+.signin-card > * { flex-shrink: 0; }
+/* Room for two lines, text set on the bottom one: switching modes grows the title upward and the ruler stays put. */
+.signin-title {
+  display: flex; align-items: flex-end; min-height: 2.2em;
+  font: 400 40px/1.1 var(--pixel); font-synthesis: none; letter-spacing: 0; color: var(--ink);
+}
+
+.signin-card .ruler { margin: 24px 0 24px; }
+.signin-card .ruler-seg { flex-basis: 0; }
+
+.signin-social { display: flex; flex-direction: column; gap: 8px; }
 .social {
   display: flex; align-items: center; justify-content: center; gap: 10px; height: 44px; border-radius: var(--r-control);
   border: 1px solid var(--line-2); background: var(--bg); color: var(--ink); font: 500 14px var(--sans);
@@ -34,10 +52,10 @@
 .social:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 .social:disabled { opacity: .6; cursor: progress; }
 
-.signin-or { display: flex; align-items: center; gap: 12px; margin: 22px 0; font-size: 12px; color: var(--body); }
+.signin-or { display: flex; align-items: center; gap: 12px; margin: 20px 0; font-size: 12px; color: var(--body); }
 .signin-or::before, .signin-or::after { content: ""; flex: 1; height: 1px; background: var(--line); }
 
-.signin-form { display: flex; flex-direction: column; gap: 14px; }
+.signin-form { display: flex; flex-direction: column; gap: 16px; }
 .field-text { display: flex; flex-direction: column; gap: 6px; }
 .field-text > span { font: 500 12.5px var(--sans); color: var(--body); }
 .field-text input {
@@ -47,22 +65,54 @@
 .field-text input:hover { border-color: color-mix(in srgb, var(--ink) 25%, var(--line-2)); }
 .field-text input:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; border-color: transparent; }
 .field-text small { font-size: 12px; color: var(--body); }
+
+/* The name field opens (0fr to 1fr) when creating an account. The inner padding keeps the focus ring unclipped. */
+.name-slot {
+  display: grid; grid-template-rows: 0fr; margin-bottom: -16px; opacity: 0;
+  transition: grid-template-rows .32s cubic-bezier(.2, .9, .25, 1), margin .32s cubic-bezier(.2, .9, .25, 1), opacity .2s;
+}
+.name-slot.open { grid-template-rows: 1fr; margin-bottom: 0; opacity: 1; }
+.name-slot > div { min-height: 0; overflow: hidden; padding: 3px; margin: -3px; }
+
 .signin-submit { justify-content: center; height: 44px; margin-top: 4px; font-size: 14px; }
 
-.signin-switch { margin-top: 18px; font-size: 13px; color: var(--body); }
-.link { color: var(--ink); font: inherit; font-weight: 600; text-decoration: underline; text-underline-offset: 3px; text-decoration-color: var(--line-2); }
-.link:hover { text-decoration-color: currentColor; }
-.link:focus-visible, .signin-skip:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: 4px; }
-.signin-skip { align-self: flex-start; margin-top: 28px; padding: 0; font: 500 13px var(--sans); color: var(--body); }
+/* The way past sign in sits just outside the frame: not part of the form. */
+.signin-skip { margin-top: 16px; padding: 0; font: 500 13px/20px var(--sans); color: var(--body); }
 .signin-skip:hover { color: var(--ink); }
-
-@media (max-width: 980px) {
-  .signin { grid-template-columns: 1fr; }
-  .signin-show { display: none; }
-  .signin-brand.small { display: flex; }
-}
+.signin-skip:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: 4px; }
 
 .signin-form .notice {
   padding: 10px 12px; border-radius: var(--r-control); background: var(--chip);
   font-size: 13px; line-height: 1.5; color: var(--ink);
+}
+
+/* Phones and narrow windows: no product panel. A compact strip instead: the wordmark over a short waveform that
+   the playhead sweeps across once. */
+.signin-strip { display: none; }
+.signin-wave { position: relative; height: 56px; margin-top: 16px; overflow: hidden; color: var(--line-2); }
+.signin-wave svg { display: block; width: 100%; height: 100%; fill: currentColor; }
+.signin-sweep { position: absolute; inset: 0; transform: translateX(62%); }
+.signin-sweep i { position: absolute; left: 0; top: 0; bottom: 0; width: 2px; margin-left: -1px; background: var(--accent); }
+.signin-sweep i::before {
+  content: ""; position: absolute; top: 0; left: -4px; width: 10px; height: 10px; background: var(--accent);
+  clip-path: polygon(0 0, 100% 0, 100% 55%, 50% 100%, 0 55%);
+}
+@media (prefers-reduced-motion: no-preference) {
+  .signin-sweep { animation: sweep 1.6s cubic-bezier(.45, 0, .2, 1) .2s both; }
+}
+@keyframes sweep { from { transform: translateX(0); } to { transform: translateX(62%); } }
+
+@media (max-width: 980px) {
+  .signin { grid-template-columns: minmax(0, 1fr); }
+  .signin-show { display: none; }
+  .signin-main { justify-content: flex-start; padding: 24px 16px 32px; }
+  .signin-strip { display: block; width: 100%; max-width: 400px; margin-bottom: 16px; }
+  .signin-card { aspect-ratio: auto; justify-content: flex-start; }
+}
+@media (max-width: 480px) {
+  .signin-card { padding: 28px 20px; }
+  .signin-title { font-size: 28px; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .name-slot { transition: none; }
 }

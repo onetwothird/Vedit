@@ -1,6 +1,7 @@
 import { useEffect, useId, useRef, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
-import { initials, useAuth } from "../auth/auth";
+import { useAuth } from "../auth/auth";
+import Avatar from "./Avatar";
 import { t } from "../i18n/t";
 
 /** The account button in the header (like CapCut and Descript): who is signed in (or Sign in), Settings and
@@ -45,7 +46,7 @@ export default function AppMenu() {
         onClick={() => setOpen((o) => !o)}
       >
         {account ? (
-          <span className="avatar" aria-hidden="true">{initials(account.name)}</span>
+          <Avatar account={account} />
         ) : (
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" aria-hidden="true">
             <circle cx="12" cy="8.5" r="3.5" />
@@ -60,10 +61,10 @@ export default function AppMenu() {
         <div className="menu-panel" id={panelId} role="group" aria-label={t("menu.label")}>
           {account ? (
             <div className="menu-account">
-              <span className="avatar lg" aria-hidden="true">{initials(account.name)}</span>
+              <Avatar account={account} size="lg" />
               <span className="who">
                 <span className="who-name">{account.name}</span>
-                <span className="who-email" title={account.email}>{account.email}</span>
+                {account.email && <span className="who-email" title={account.email}>{account.email}</span>}
                 <span className={`plan ${account.plan}`}>{t(`menu.plan.${account.plan}`)}</span>
               </span>
             </div>

@@ -71,6 +71,11 @@ class AnalyzeBody(BaseModel):
     max_clips: Optional[int] = Field(default=None, ge=1, le=60)  # most highlights to keep; None = the engine default
 
 
+class AITestBody(BaseModel):
+    provider: Literal["anthropic", "openai"]
+    api_key: str
+
+
 class KeptBody(BaseModel):
     kept: bool
 
@@ -79,6 +84,66 @@ class ExportBody(BaseModel):
     clips: list[str]
     formats: list[str] = ["9:16"]
     quality: Literal["normal", "high"] = "normal"
+    out_dir: Optional[str] = None  # absolute folder for the files; default: "<name> - vedit" next to the video
+    srt: bool = True  # also write the .srt subtitle file
+    thumbnail: bool = False  # also save a .jpg frame beside each video
+    first_number: int = Field(1, ge=1, le=999)  # the "NN" the first clip's file name starts at (a retry keeps its number)
+
+
+BRAND_KEYS = ("font", "caption_color", "highlight", "logo", "intro", "outro", "music")
+AI_TEST_URLS = {"anthropic": "https://api.anthropic.com/v1/models", "openai": "https://api.openai.com/v1/models"}
+
+
+class BrandBody(BaseModel):
+    """The brand kit keys the Settings screen edits (see presets.apply_brand); an empty string means unset."""
+    font: str = ""
+    caption_color: str = ""
+    highlight: str = ""
+    logo: str = ""
+    intro: str = ""
+    outro: str = ""
+    music: str = ""
+
+
+def brand_file() -> Path:
+    """Where the app's brand kit lives: %LOCALAPPDATA%\vedit\brand.json, else ~/.vedit/brand.json (VEDIT_HOME wins)."""
+    home = os.environ.get("VEDIT_HOME")
+    if home:
+        return Path(home) / "brand.json"
+    local = os.environ.get("LOCALAPPDATA")
+    return (Path(local) / "vedit" if local else Path.home() / ".vedit") / "brand.json"
+
+
+def read_brand() -> dict:
+    """The saved brand kit, or {} when there is none or the file is unreadable or not a JSON object."""
+    try:
+        data = load_json(brand_file())
+    except (OSError, ValueError):
+        return {}
+    return data if isinstance(data, dict) else {}
+
+
+def usable_brand_file() -> Path | None:
+    f = brand_file()
+    return f if read_brand() and f.exists() else None
+
+
+def _http_get(url: str, headers: dict) -> int:
+    import httpx  # lazy, like highlights_llm
+    return httpx.get(url, headers=headers, timeout=15).status_code
+
+
+def check_ai_key(provider: str, api_key: str) -> dict:
+    """Ask the provider to list its models: the cheapest authenticated call, no tokens spent. Never logs the key."""
+    headers = ({"x-api-key": api_key, "anthropic-version": "2023-06-01"} if provider == "anthropic"
+               else {"Authorization": f"Bearer {api_key}"})
+    try:
+        status = _http_get(AI_TEST_URLS[provider], headers)
+    except Exception:  # noqa: BLE001 - any network failure is one plain answer; the exception text could echo the key
+        return {"ok": False, "error": "network"}
+    if 200 <= status < 300:
+        return {"ok": True}
+    return {"ok": False, "error": "rejected" if status in (401, 403) else f"status_{status}"}
 
 
 # ---- errors and small helpers ---------------------------------------------------------------------------------
@@ -342,7 +407,7 @@ class Engine:
             if any(_overlap_share(h, c.highlight) > OVERLAP_DROP for c in preserved):
                 continue
             try:
-                edl = clip_edl(wd, h, p.platform, language, None)
+                edl = clip_edl(wd, h, p.platform, language, usable_brand_file())
             except ValueError as e:
                 print(f"vedit: skipping highlight {hid}: {e}", file=sys.stderr)
                 continue
@@ -372,22 +437,32 @@ class Engine:
         """Finished files (+ .srt) and, on failure, which render failed. Always removes the temp edits."""
         with self._meta_lock:
             plan = self._exports.pop(job.id, [])
-        stages = [e["stage"] for e in plan]
+        by_stage = {}
+        for i, e in enumerate(plan):
+            by_stage[e["stage"]] = i
+            by_stage[e["stage"].replace("render ", "thumb ")] = i
         if job.state == "done":
             finished, failed = plan, None
         else:
-            at = stages.index(job.stage) if job.stage in stages else 0
-            finished = plan[:at]
-            failed = plan[at] if job.state == "failed" and plan else None
-        files = []
+            at = by_stage.get(job.stage, 0)
+            in_thumb = job.stage.startswith("thumb ")  # its video was already rendered
+            finished = plan[:at + 1] if in_thumb else plan[:at]
+            failed = plan[at] if job.state == "failed" and plan and not in_thumb else None
+        files, warnings = [], []
         for e in finished:
             out = Path(e["path"])
             files.append(str(out))
-            if out.with_suffix(".srt").is_file():
-                files.append(str(out.with_suffix(".srt")))
+            for extra in (".srt", ".jpg"):
+                if out.with_suffix(extra).is_file():
+                    files.append(str(out.with_suffix(extra)))
+            thumb_ran = job.state == "done" or (job.state == "failed" and e is finished[-1] and job.stage.startswith("thumb "))
+            if e.get("thumb") and thumb_ran and not out.with_suffix(".jpg").is_file():
+                warnings.append({"hid": e["hid"], "aspect": e["aspect"], "kind": "thumbnail"})
         for e in plan:
             Path(e["tmp"]).unlink(missing_ok=True)
         result = {"renders": _public_renders(plan), "files": files}
+        if warnings:
+            result["warnings"] = warnings
         if failed is not None:
             result["failed"] = {"hid": failed["hid"], "aspect": failed["aspect"]}
         return result
@@ -409,6 +484,24 @@ class Engine:
                 loop.call_soon_threadsafe(_offer, q, msg)
             except RuntimeError:  # loop already closed
                 self.remove_client((loop, q))
+
+
+def _safe_out_dir(raw: str) -> Path:
+    """A local absolute folder with no parent steps, no UNC and no device path; created when missing."""
+    flat = raw.replace("\\", "/")
+    if flat.startswith("//"):
+        raise ValueError("out_dir must be a local folder, not a network or device path")
+    path = Path(raw)
+    if not path.is_absolute() or ".." in flat.split("/"):
+        raise ValueError("out_dir must be an absolute folder without '..'")
+    path = path.resolve()
+    if path.exists() and not path.is_dir():
+        raise ValueError("out_dir is a file, not a folder")
+    try:
+        path.mkdir(parents=True, exist_ok=True)
+    except OSError:
+        raise ValueError("out_dir could not be created") from None
+    return path
 
 
 def _public_renders(plan: list[dict]) -> list[dict]:
@@ -559,6 +652,28 @@ def create_app(token: str, queue: JobQueue | None = None) -> FastAPI:
         models.delete(name)
         return models.status()
 
+    @app.post("/ai/test")
+    def ai_test(body: AITestBody):
+        if not body.api_key.strip():
+            return {"ok": False, "error": "empty"}
+        return check_ai_key(body.provider, body.api_key.strip())
+
+    @app.get("/brand")
+    def get_brand():
+        saved = read_brand()
+        return {k: saved.get(k) if isinstance(saved.get(k), str) else "" for k in BRAND_KEYS}
+
+    @app.put("/brand")
+    def put_brand(body: BrandBody):
+        kit = read_brand()  # keys Settings does not edit (caption_style, replace, ...) survive
+        for k, v in body.model_dump().items():
+            if v.strip():
+                kit[k] = v
+            else:
+                kit.pop(k, None)
+        _atomic_write_json(brand_file(), kit)
+        return {k: kit[k] if isinstance(kit.get(k), str) else "" for k in BRAND_KEYS}
+
     @app.get("/projects/recent")
     def recent():
         return [_project_dict(p) for p in list_recent()]
@@ -657,8 +772,10 @@ def create_app(token: str, queue: JobQueue | None = None) -> FastAPI:
             p = _project(pid)
             wd = workdir_for(p.source)
             out_dir = output_dir(Path(p.source))
+            if body.out_dir:
+                out_dir = _safe_out_dir(body.out_dir)
             plan = []
-            for i, hid in enumerate(body.clips, 1):
+            for i, hid in enumerate(body.clips, body.first_number):
                 clip = _find_clip(p, hid)
                 if not _valid_hid(hid):
                     raise ValueError(f"unsafe clip id {hid!r}")
@@ -669,6 +786,8 @@ def create_app(token: str, queue: JobQueue | None = None) -> FastAPI:
                     path = out_dir / output_name(i, clip.highlight.get("title", ""), aspect)
                     out.update(aspect=aspect, path=str(path))
                     e["output"] = out
+                    if not body.srt:
+                        e["captions"] = {**(e.get("captions") or {}), "srt": False}
                     plan.append((hid, aspect, e, path))
         n = len(plan)
         crf = ["--crf", HIGH_CRF] if body.quality == "high" else []
@@ -678,9 +797,21 @@ def create_app(token: str, queue: JobQueue | None = None) -> FastAPI:
             tmp = wd / f"export-{tag}-{hid}-{aspect.replace(':', 'x')}.edl.json"
             _atomic_write_json(tmp, e)
             stage = f"render {k}/{n}"
-            steps.append((stage, py_cmd("render.py", str(tmp), *crf), 1.0 / n))
-            renders.append({"stage": stage, "hid": hid, "aspect": aspect, "path": str(path), "tmp": str(tmp)})
+            share = 1.0 / n
+            steps.append((stage, py_cmd("render.py", str(tmp), *crf), share * (0.9 if body.thumbnail else 1.0)))
+            if body.thumbnail:
+                path.with_suffix(".jpg").unlink(missing_ok=True)  # an older thumbnail must not hide a new failure
+                # its own stage, and the script never fails the job
+                steps.append((f"thumb {k}/{n}", py_cmd("thumb_frame.py", str(path), str(path.with_suffix(".jpg"))), share * 0.1))
+            renders.append({"stage": stage, "hid": hid, "aspect": aspect, "path": str(path), "tmp": str(tmp),
+                            "thumb": body.thumbnail})
         return _job_dict(engine.submit(pid, "export", steps, renders=renders))
+
+    @app.get("/jobs")
+    def list_jobs(project: Optional[str] = None, kind: Optional[str] = None):
+        """Jobs still queued or running, optionally of one project and kind (a reloaded app asks for these)."""
+        return [_job_dict(engine.job_snapshot(j.id)) for j in engine.active_jobs()
+                if (project is None or j.project_id == project) and (kind is None or j.kind == kind)]
 
     @app.get("/jobs/{job_id}")
     def get_job(job_id: str):

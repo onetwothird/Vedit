@@ -4,11 +4,12 @@
 import {
   EngineError,
   type AnalyzeBody, type CaptionTrack, type ClipOp, type ClipView, type Doctor, type Edl, type EdlClip, type Engine,
-  type ExportBody, type FilmstripInfo, type Health, type Highlight, type Job, type ModelStatus, type NewProjectBody, type Project,
+  type AiTestResult, type Brand, type ExportBody, type FilmstripInfo, type Health, type Highlight, type Job, type ModelStatus, type NewProjectBody, type Project,
   type ProjectClip, type RenderPlanEntry, type Transcript, type TranscriptWord,
 } from "./types";
 import { spelledAs } from "../edit/spelling";
 import { fixWord, patchSection } from "../edit/timeline";
+import { defaultOutputFolder, joinPath } from "../lib/outputFolder";
 
 const CLIPS: [title: string, score: number, kept: boolean][] = [
   ["Nobody tells you this when you start", 94, true], ["The ₱500 mistake on my first gig", 88, true],
@@ -211,6 +212,7 @@ export function createMockEngine(opts: { tickMs?: number; persist?: Pick<Storage
   const timers = new Map<string, ReturnType<typeof setTimeout>>();
   const listeners = new Set<(job: Job) => void>();
   const models: ModelStatus = { small: { installed: true, size_mb: 484 }, "large-v3": { installed: false, size_mb: 3090 } };
+  let brand: Brand = { font: "", caption_color: "", highlight: "", logo: "", intro: "", outro: "", music: "" };
   const failedOnce = new Set<string>(); // projects whose first analyze already failed on purpose
   let seq = 0;
 
@@ -260,7 +262,7 @@ export function createMockEngine(opts: { tickMs?: number; persist?: Pick<Storage
 
   function run(
     job: Job, stages: [name: string, share: number][], finish: (job: Job) => void,
-    failure?: { afterTicks: number; error: string },
+    failure?: { afterTicks: number; error: string; result?: Job["result"] },
   ): Job {
     emit(job);
     let s = 0, tick = 0, done = 0, total = 0;
@@ -268,7 +270,7 @@ export function createMockEngine(opts: { tickMs?: number; persist?: Pick<Storage
       const cur = jobs.get(job.id)!;
       if (cur.state === "cancelled") return;
       if (failure && total >= failure.afterTicks) {
-        emit({ ...cur, state: "failed", error: failure.error, message: "" });
+        emit({ ...cur, state: "failed", error: failure.error, message: "", ...(failure.result ? { result: failure.result } : {}) });
         timers.delete(job.id);
         return;
       }
@@ -372,24 +374,41 @@ export function createMockEngine(opts: { tickMs?: number; persist?: Pick<Storage
       const formats = body.formats ?? ["9:16"];
       if (!body.clips.length || !formats.length) throw new EngineError(400, "bad_request", "export needs at least one clip and one format");
       for (const hid of body.clips) if (!p.clips.some((c) => c.highlight.id === hid)) throw notFound(`clip ${hid}`);
-      const plan: { stage: string; hid: string; aspect: string; path: string }[] = [];
+      const plan: RenderPlanEntry[] = [];
       const n = body.clips.length * formats.length;
+      const dir = body.out_dir ?? defaultOutputFolder(p.source);
+      const first = body.first_number ?? 1;
       body.clips.forEach((hid, i) => formats.forEach((aspect) => {
         const title = p.clips.find((c) => c.highlight.id === hid)!.highlight.title;
-        const name = `${String(i + 1).padStart(2, "0")} ${title} (${aspect.replace(":", "x")}).mp4`;
-        plan.push({ stage: `render ${plan.length + 1}/${n}`, hid, aspect, path: `C:/Videos/vedit exports/${name}` });
+        const name = `${String(first + i).padStart(2, "0")} ${title}${aspect === "9:16" ? "" : ` (${aspect.replace(":", "x")})`}.mp4`;
+        plan.push({ stage: `render ${plan.length + 1}/${n}`, hid, aspect, path: joinPath(dir, name) });
       }));
       const renders: RenderPlanEntry[] = plan.map((e) => ({ ...e }));
+      const withExtras = (list: RenderPlanEntry[]): string[] => list.flatMap((r) => [
+        r.path, ...(body.srt === false ? [] : [r.path.replace(/\.mp4$/, ".srt")]), ...(body.thumbnail ? [r.path.replace(/\.mp4$/, ".jpg")] : []),
+      ]);
       const job = newJob(pid, "export");
       job.result = { renders, files: [] };
+      // test trigger: window.__veditMockFail = ["h02"] makes the next export of that clip fail once, as a bad render would
+      const doomed = import.meta.env.VITE_ENGINE === "mock" ? (globalThis as { __veditMockFail?: string[] }).__veditMockFail : undefined;
+      const bad = doomed?.find((h) => body.clips.includes(h));
+      if (bad) doomed!.splice(doomed!.indexOf(bad), 1);
+      const failure = bad
+        ? { afterTicks: 2, error: "The render stopped: ffmpeg could not read this part of the video.", result: { renders, files: [], failed: { hid: bad, aspect: formats[0] } } }
+        : undefined;
       return run(job, plan.map((e) => [e.stage, 1 / n] as [string, number]), (j) => {
-        j.result = { renders, files: renders.map((r) => r.path) };
-      });
+        j.result = { renders, files: withExtras(renders) };
+      }, failure);
     },
     async getJob(id) {
       const j = jobs.get(id);
       if (!j) throw notFound(`job ${id}`);
       return snapshot(j);
+    },
+    async activeJobs(project, kind) {
+      return [...jobs.values()]
+        .filter((j) => (j.state === "queued" || j.state === "running") && (!project || j.project_id === project) && (!kind || j.kind === kind))
+        .map(snapshot);
     },
     async cancelJob(id) {
       const j = jobs.get(id);
@@ -412,6 +431,12 @@ export function createMockEngine(opts: { tickMs?: number; persist?: Pick<Storage
       models[name].installed = false;
       return snapshot(models);
     },
+    // the mock accepts any key that starts with "sk-"
+    async testAi(body): Promise<AiTestResult> {
+      return body.api_key.startsWith("sk-") ? { ok: true } : { ok: false, error: "rejected" };
+    },
+    async brand() { return { ...brand }; },
+    async saveBrand(next) { brand = { ...next }; return { ...brand }; },
   };
 }
 

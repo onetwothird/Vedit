@@ -14,7 +14,7 @@ import vlog from "./img/vlog.jpg";
    built from the app's own parts: timelines, waveforms, phone frames, caption chips. */
 
 /** Deterministic bar heights (0..1) so the waveform looks the same on every render. */
-function bars(n: number, seed: number): number[] {
+export function bars(n: number, seed: number): number[] {
   let s = seed;
   const out: number[] = [];
   for (let i = 0; i < n; i++) {
@@ -29,6 +29,15 @@ function bars(n: number, seed: number): number[] {
 /* podcast.mp4: Pexels video 38655900 ("Engaging podcast interview in professional studio", Pexels license,
    free for commercial use), first 6 s, 960x540, no audio. podcast-poster.jpg is its frame at 1 s. */
 const VIDEO_ASPECT = 16 / 9;
+
+/* A local, git-ignored preview of other footage (hero-local.mp4 + hero-local.jpg, 16:9), used only by the dev
+   server. Third-party footage stays out of git and out of release builds until it is cleared for use. */
+const LOCAL = import.meta.env.DEV
+  ? (import.meta.glob("./hero-local.{mp4,jpg}", { eager: true, import: "default" }) as Record<string, string>)
+  : {};
+const HERO_LOCAL = Boolean(LOCAL["./hero-local.mp4"]);
+const heroVideo = LOCAL["./hero-local.mp4"] ?? podcast;
+const heroPoster = LOCAL["./hero-local.jpg"] ?? poster;
 
 /** Where to place a cover-fitted video inside a box of aspect `boxAspect` so the point (cx, cy)
     (fractions of the frame) sits as close to the centre as the edges allow, magnified by `zoom`.
@@ -91,15 +100,22 @@ const OUTPUTS: Output[] = [
   { shape: "16:9", aspect: 16 / 9, focus: [0.5, 0.45, 1.3], start: 4, time: "38:05", label: "YouTube" },
 ];
 
+/* Where the people sit in the local preview's wide shot of three hosts: right (cap), left, middle. */
+const LOCAL_FOCUS: Record<Output["shape"], [number, number, number]> = {
+  "9:16": [0.83, 0.46, 1.3],
+  "1:1": [0.2, 0.5, 1.45],
+  "16:9": [0.5, 0.42, 1.35],
+};
+
 function Cut({ o, children }: { o: Output; children: React.ReactNode }) {
-  const p = cropPlacement(o.aspect, ...o.focus);
+  const p = cropPlacement(o.aspect, ...(HERO_LOCAL ? LOCAL_FOCUS[o.shape] : o.focus));
   const style = { width: `${p.width}%`, height: `${p.height}%`, left: `${p.left}%`, top: `${p.top}%` };
   return (
     <figure className={`cut cut-${o.shape.replace(":", "x")}`} title={o.label}>
       <div className="cut-frame">
         <video
-          src={podcast}
-          poster={poster}
+          src={heroVideo}
+          poster={heroPoster}
           muted
           loop
           playsInline
@@ -126,8 +142,8 @@ export function ClipArt() {
     <div ref={root} className={motion ? "hero-art moving" : "hero-art"} aria-hidden="true">
       <div className="src">
         <div className="src-frame">
-          <video src={podcast} poster={poster} muted loop playsInline preload="metadata" />
-          <span className="src-dur mono">1:12:40</span>
+          <video src={heroVideo} poster={heroPoster} muted loop playsInline preload="metadata" />
+          <span className="src-dur mono">1:12:29</span>
         </div>
         <svg className="wave" viewBox={`0 0 ${N * 5} 34`} preserveAspectRatio="none">
           {W.map((v, i) => {

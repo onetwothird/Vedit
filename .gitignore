@@ -34,3 +34,6 @@ app/dist/
 app/src-tauri/target/
 app/src-tauri/bin/
 app/src-tauri/gen/schemas/
+
+# Local-only hero preview (third-party footage, not cleared for release)
+app/src/screens/home/hero-local.*

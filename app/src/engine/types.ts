@@ -71,6 +71,8 @@ export interface RenderPlanEntry {
 export interface ExportResult {
   files: string[];
   failed?: { hid: string; aspect: string };
+  /** The video finished but something extra did not (a thumbnail). */
+  warnings?: { hid: string; aspect: string; kind: "thumbnail" }[];
   renders: RenderPlanEntry[];
 }
 
@@ -208,9 +210,35 @@ export interface ExportBody {
   clips: string[];
   formats?: Aspect[];
   quality?: "normal" | "high";
+  /** Absolute folder for the files; the engine's default is "<name> - vedit" beside the video. */
+  out_dir?: string;
+  /** Also write the .srt subtitle file (default true). */
+  srt?: boolean;
+  /** Also save a .jpg frame beside each video (default false). */
+  thumbnail?: boolean;
+  /** The number the first clip's file name starts at (default 1); a retried clip keeps its own. */
+  first_number?: number;
 }
 
 export type ModelStatus = Record<string, { installed: boolean; size_mb: number }>;
+
+/** The brand kit saved by Settings; an empty string means not set. Colours are #rrggbb. */
+export interface Brand {
+  font: string;
+  caption_color: string;
+  highlight: string;
+  logo: string;
+  intro: string;
+  outro: string;
+  music: string;
+}
+
+export interface AiTestBody {
+  provider: "anthropic" | "openai";
+  api_key: string;
+}
+
+export type AiTestResult = { ok: true } | { ok: false; error: string };
 
 export interface Health {
   ok: boolean;
@@ -244,7 +272,12 @@ export interface Engine {
   exportClips(pid: string, body: ExportBody): Promise<Job>;
   getJob(id: string): Promise<Job>;
   cancelJob(id: string): Promise<Job>;
+  /** Every job still queued or running, optionally of one project and kind (a reloaded app asks for these). */
+  activeJobs(project?: string, kind?: JobKind): Promise<Job[]>;
   models(): Promise<ModelStatus>;
   downloadModel(name: string): Promise<Job>;
   deleteModel(name: string): Promise<ModelStatus>;
+  testAi(body: AiTestBody): Promise<AiTestResult>;
+  brand(): Promise<Brand>;
+  saveBrand(brand: Brand): Promise<Brand>;
 }

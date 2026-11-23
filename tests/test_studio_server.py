@@ -441,6 +441,112 @@ def test_export_steps_paths_and_result(client, auth, app, fake_queue, analyzed_p
     assert dup.status_code == 400 and dup.json()["code"] == "bad_request"
 
 
+def test_export_options_folder_srt_thumbnail_and_numbering(client, auth, fake_queue, analyzed_project, tmp_path):
+    pid, h = analyzed_project["id"], analyzed_project["highlights"][0]
+    dest = tmp_path / "Mga Video ñ"
+    r = client.post(f"/projects/{pid}/export", headers=auth,
+                    json={"clips": [h["id"]], "formats": ["9:16"], "out_dir": str(dest), "srt": False,
+                          "thumbnail": True, "first_number": 3})
+    assert r.status_code == 200
+    job = r.json()
+    out = dest / output_name(3, h["title"], "9:16")
+    assert job["result"]["renders"][0]["path"] == str(out)
+    steps = fake_queue.steps
+    assert [s[0] for s in steps] == ["render 1/1", "thumb 1/1"] and sum(s[2] for s in steps) == pytest.approx(1.0)
+    assert steps[1][1][-1] == str(out.with_suffix(".jpg"))
+    assert load_json(steps[0][1][-1])["captions"]["srt"] is False
+    bad = client.post(f"/projects/{pid}/export", headers=auth,
+                      json={"clips": [h["id"]], "out_dir": "relative/folder"})
+    assert bad.status_code == 400
+
+
+def test_export_out_dir_is_checked_and_created(client, auth, fake_queue, analyzed_project, tmp_path):
+    pid, h = analyzed_project["id"], analyzed_project["highlights"][0]
+
+    def post(folder):
+        return client.post(f"/projects/{pid}/export", headers=auth, json={"clips": [h["id"]], "out_dir": str(folder)})
+
+    for bad in (str(tmp_path / "a" / ".." / "b"), r"\\server\share\x", "//server/share/x", r"\\?\C:\x", "relative"):
+        r = client.post(f"/projects/{pid}/export", headers=auth, json={"clips": [h["id"]], "out_dir": bad})
+        assert r.status_code == 400, bad
+    afile = tmp_path / "file.txt"
+    afile.write_text("x")
+    assert post(afile).status_code == 400
+    fresh = tmp_path / "new" / "Mga Bidyo ñ"
+    assert not fresh.exists()
+    assert post(fresh).status_code == 200 and fresh.is_dir()
+
+
+def test_thumbnail_failure_keeps_the_video_and_is_a_warning(client, auth, app, fake_queue, analyzed_project, tmp_path):
+    pid, h = analyzed_project["id"], analyzed_project["highlights"][0]
+    job = client.post(f"/projects/{pid}/export", headers=auth,
+                      json={"clips": [h["id"]], "formats": ["9:16", "1:1"], "thumbnail": True, "out_dir": str(tmp_path)}).json()
+    assert [s[0] for s in fake_queue.steps] == ["render 1/2", "thumb 1/2", "render 2/2", "thumb 2/2"]
+    outs = [tmp_path / output_name(1, h["title"], a) for a in ("9:16", "1:1")]
+    for o in outs:
+        o.write_bytes(b"")
+    outs[0].with_suffix(".jpg").write_bytes(b"")  # only the second clip's thumbnail is missing
+    fake_queue.finish(job["id"])
+    app.state.engine.wait_idle()
+    last = client.get(f"/jobs/{job['id']}", headers=auth).json()
+    assert last["state"] == "done" and "failed" not in last["result"]
+    assert str(outs[1]) in last["result"]["files"] and str(outs[0].with_suffix(".jpg")) in last["result"]["files"]
+    assert last["result"]["warnings"] == [{"hid": h["id"], "aspect": "1:1", "kind": "thumbnail"}]
+
+
+def test_cancel_during_thumbnail_keeps_that_clips_video(client, auth, app, fake_queue, analyzed_project, tmp_path):
+    pid, h = analyzed_project["id"], analyzed_project["highlights"][0]
+    job = client.post(f"/projects/{pid}/export", headers=auth,
+                      json={"clips": [h["id"]], "formats": ["9:16", "1:1"], "thumbnail": True, "out_dir": str(tmp_path)}).json()
+    first = tmp_path / output_name(1, h["title"], "9:16")
+    first.write_bytes(b"")
+    fake_queue.emit(job["id"], state="running", stage="thumb 1/2")
+    fake_queue.emit(job["id"], state="cancelled")
+    app.state.engine.wait_idle()
+    got = client.get(f"/jobs/{job['id']}", headers=auth).json()
+    assert got["result"]["files"] == [str(first)] and "failed" not in got["result"]
+
+
+def test_thumb_frame_time():
+    from thumb_frame import frame_time
+    assert frame_time(10) == 0.5 and frame_time(0.4) == 0.2 and frame_time(0) == 0.0
+
+
+def test_jobs_list_knows_every_active_export_of_a_project(client, auth, app, fake_queue, analyzed_project, tmp_path):
+    pid, h = analyzed_project["id"], analyzed_project["highlights"][0]
+    ids = [client.post(f"/projects/{pid}/export", headers=auth,
+                       json={"clips": [h["id"]], "out_dir": str(tmp_path), "first_number": n}).json()["id"] for n in (1, 2)]
+    app.state.engine.wait_idle()
+    got = client.get(f"/jobs?project={pid}&kind=export", headers=auth).json()  # what a reloaded app asks for
+    assert sorted(j["id"] for j in got) == sorted(ids) and all(j["result"]["renders"] for j in got)
+    assert client.get("/jobs?project=nope", headers=auth).json() == []
+    assert client.get(f"/jobs?project={pid}&kind=analyze", headers=auth).json() == []
+    fake_queue.finish(ids[0])
+    app.state.engine.wait_idle()
+    left = client.get(f"/jobs?project={pid}", headers=auth).json()
+    assert [j["id"] for j in left] == [ids[1]]
+    assert client.get("/jobs").status_code == 401
+
+
+def test_thumb_frame_never_fails_and_clears_a_stale_jpg(tmp_path):
+    import subprocess, sys
+    script = Path(__file__).resolve().parent.parent / "scripts" / "thumb_frame.py"
+    stale = tmp_path / "a.jpg"
+    stale.write_bytes(b"old")
+    r = subprocess.run([sys.executable, str(script), str(tmp_path / "missing.mp4"), str(stale)], capture_output=True)
+    assert r.returncode == 0 and not stale.exists()
+    assert subprocess.run([sys.executable, str(script)], capture_output=True).returncode == 0  # even bad arguments
+
+
+def test_export_removes_a_stale_thumbnail_before_the_job_runs(client, auth, fake_queue, analyzed_project, tmp_path):
+    pid, h = analyzed_project["id"], analyzed_project["highlights"][0]
+    stale = tmp_path / output_name(1, h["title"], "9:16")
+    stale.with_suffix(".jpg").write_bytes(b"old")
+    client.post(f"/projects/{pid}/export", headers=auth,
+                json={"clips": [h["id"]], "thumbnail": True, "out_dir": str(tmp_path)})
+    assert not stale.with_suffix(".jpg").exists()
+
+
 @pytest.mark.parametrize("end_state", ["failed", "cancelled"])
 def test_export_failure_reports_finished_files(client, auth, app, fake_queue, analyzed_project, tiny_video,
                                               end_state):
@@ -778,3 +884,76 @@ def test_patch_output_aspect_over_http(client, auth, analyzed_project):
     assert r.status_code == 200 and "aspect" not in r.json()["edl"]["output"]
     if before is not None:
         client.patch(url, headers=auth, json={"op": "patch", "section": "output", "patch": {"aspect": before}})
+
+
+# ---- AI key test and brand kit --------------------------------------------------------------------------------
+
+def test_ai_test_reports_ok_and_never_echoes_the_key(client, auth, monkeypatch):
+    import studio_server
+    seen = {}
+
+    def fake_get(url, headers):
+        seen["url"], seen["headers"] = url, headers
+        return 200
+
+    monkeypatch.setattr(studio_server, "_http_get", fake_get)
+    r = client.post("/ai/test", headers=auth, json={"provider": "anthropic", "api_key": "sk-ant-secret"})
+    assert r.json() == {"ok": True}
+    assert "anthropic.com" in seen["url"] and seen["headers"]["x-api-key"] == "sk-ant-secret"
+    assert "sk-ant-secret" not in r.text
+    client.post("/ai/test", headers=auth, json={"provider": "openai", "api_key": "sk-x"})
+    assert seen["headers"]["Authorization"] == "Bearer sk-x"
+
+
+@pytest.mark.parametrize("status,error", [(401, "rejected"), (403, "rejected"), (500, "status_500")])
+def test_ai_test_failures(client, auth, monkeypatch, status, error):
+    import studio_server
+    monkeypatch.setattr(studio_server, "_http_get", lambda url, headers: status)
+    r = client.post("/ai/test", headers=auth, json={"provider": "openai", "api_key": "sk-bad"})
+    assert r.json() == {"ok": False, "error": error}
+
+
+def test_ai_test_network_error_hides_the_key(client, auth, monkeypatch):
+    import studio_server
+
+    def boom(url, headers):
+        raise OSError("failed with header sk-leak")
+
+    monkeypatch.setattr(studio_server, "_http_get", boom)
+    r = client.post("/ai/test", headers=auth, json={"provider": "openai", "api_key": "sk-leak"})
+    assert r.json() == {"ok": False, "error": "network"}
+    assert "sk-leak" not in r.text
+    assert client.post("/ai/test", headers=auth, json={"provider": "openai", "api_key": " "}).json()["error"] == "empty"
+    assert client.post("/ai/test", headers=auth, json={"provider": "nope", "api_key": "k"}).status_code == 422
+
+
+def test_brand_round_trip(client, auth, home):
+    empty = client.get("/brand", headers=auth).json()
+    assert empty == {k: "" for k in ("font", "caption_color", "highlight", "logo", "intro", "outro", "music")}
+    kit = {**empty, "font": "Poppins", "caption_color": "#ffffff", "highlight": "#ffc72c", "logo": "C:/b/logo.png"}
+    assert client.put("/brand", headers=auth, json=kit).json() == kit
+    assert client.get("/brand", headers=auth).json() == kit
+    saved = json.loads((home / "brand.json").read_text(encoding="utf-8"))
+    assert saved == {"font": "Poppins", "caption_color": "#ffffff", "highlight": "#ffc72c", "logo": "C:/b/logo.png"}
+
+
+def test_brand_put_keeps_keys_settings_does_not_edit(client, auth, home):
+    home.mkdir(parents=True, exist_ok=True)
+    (home / "brand.json").write_text(json.dumps({"font": "Old", "caption_style": "pop", "uppercase": True,
+                                                 "replace": {"a": "b"}}), encoding="utf-8")
+    body = {"font": "New", "caption_color": "", "highlight": "", "logo": "", "intro": "", "outro": "", "music": ""}
+    client.put("/brand", headers=auth, json=body)
+    saved = json.loads((home / "brand.json").read_text(encoding="utf-8"))
+    assert saved == {"font": "New", "caption_style": "pop", "uppercase": True, "replace": {"a": "b"}}
+
+
+@pytest.mark.parametrize("text", ["{not json", "[1, 2]", ""])
+def test_bad_brand_file_is_treated_as_empty(client, auth, home, text):
+    import studio_server
+    home.mkdir(parents=True, exist_ok=True)
+    (home / "brand.json").write_text(text, encoding="utf-8")
+    r = client.get("/brand", headers=auth)
+    assert r.status_code == 200 and set(r.json().values()) == {""}
+    assert studio_server.usable_brand_file() is None
+    assert client.put("/brand", headers=auth, json={**r.json(), "font": "Fix"}).status_code == 200
+    assert studio_server.usable_brand_file() is not None

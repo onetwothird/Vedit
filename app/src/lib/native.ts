@@ -1,8 +1,8 @@
 // Everything that differs between the desktop shell and a plain browser: the file dialog, drag and drop, the AI key.
 
-import { isTauri } from "../engine/client";
+import { isMock, isTauri } from "../engine/client";
 import type { AnalyzeBody } from "../engine/types";
-import { getAiProvider } from "./prefs";
+import { getAiProvider, type AiProvider } from "./prefs";
 
 export const VIDEO_EXTENSIONS = ["mp4", "mov", "m4v", "mkv", "avi", "webm", "mts", "3gp"];
 export const VIDEO_ACCEPT = VIDEO_EXTENSIONS.map((e) => `.${e}`).join(",");
@@ -79,4 +79,52 @@ export async function analyzeBody(): Promise<AnalyzeBody> {
   } catch {
     return {};
   }
+}
+
+export const IMAGE_ACCEPT = "image/*";
+export const BRAND_VIDEO_ACCEPT = "video/*";
+
+/** A native file dialog restricted to some extensions. Resolves null when cancelled. Only call inside Tauri. */
+export async function pickFileNative(name: string, extensions: string[]): Promise<string | null> {
+  const { open } = await import("@tauri-apps/plugin-dialog");
+  const res = await open({ multiple: false, filters: [{ name, extensions }] });
+  return typeof res === "string" ? res : null;
+}
+
+/** A native folder dialog. Resolves null when cancelled. Only call inside Tauri. */
+export async function pickFolderNative(): Promise<string | null> {
+  const { open } = await import("@tauri-apps/plugin-dialog");
+  const res = await open({ directory: true, multiple: false });
+  return typeof res === "string" ? res : null;
+}
+
+// ---- the AI key: Credential Manager in the desktop app; in the mock build, memory only (never storage) ----------
+
+const memoryKeys = new Map<string, string>();
+if (isMock() && typeof window !== "undefined") (window as unknown as { __veditMockKeys: Map<string, string> }).__veditMockKeys = memoryKeys;
+
+async function keyCommand<T>(cmd: string, args: Record<string, unknown>): Promise<T> {
+  const { invoke } = await import("@tauri-apps/api/core");
+  return invoke<T>(cmd, args);
+}
+
+export async function saveAiKey(provider: AiProvider, key: string): Promise<void> {
+  if (isTauri()) await keyCommand("set_ai_key", { provider, key });
+  else memoryKeys.set(provider, key);
+}
+
+export async function loadAiKey(provider: AiProvider): Promise<string | null> {
+  if (isTauri()) return (await keyCommand<string | null>("get_ai_key", { provider })) || null;
+  return memoryKeys.get(provider) ?? null;
+}
+
+export async function removeAiKey(provider: AiProvider): Promise<void> {
+  if (isTauri()) await keyCommand("delete_ai_key", { provider });
+  else memoryKeys.delete(provider);
+}
+
+/** Opens Explorer with the file selected. Desktop app only; throws if the file is gone. */
+export async function showInFolder(path: string): Promise<void> {
+  const { invoke } = await import("@tauri-apps/api/core");
+  await invoke("show_in_folder", { path });
 }

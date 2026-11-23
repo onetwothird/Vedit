@@ -2,7 +2,7 @@
 // The token and any AI key are never logged and never put into an error message.
 
 import type {
-  AnalyzeBody, ClipOp, ClipView, Doctor, Engine, EngineInfo, ErrorBody, ExportBody, FilmstripInfo, Health, Job, ModelStatus,
+  AiTestBody, AiTestResult, AnalyzeBody, Brand, ClipOp, ClipView, Doctor, Engine, EngineInfo, ErrorBody, ExportBody, FilmstripInfo, Health, Job, ModelStatus,
   NewProjectBody, Project, Transcript,
 } from "./types";
 import { mockEngine } from "./mock";
@@ -105,10 +105,21 @@ export function createClient(opts: ClientOptions): Engine {
     setKept: (pid, hid, kept) => request<Project>("PUT", `/projects/${enc(pid)}/clips/${enc(hid)}/kept`, { kept }),
     exportClips: (pid, body: ExportBody) => job(request<Job>("POST", `/projects/${enc(pid)}/export`, body)),
     getJob: (id) => job(request<Job>("GET", `/jobs/${enc(id)}`)),
+    activeJobs: async (project, kind) => {
+      const q = new URLSearchParams();
+      if (project) q.set("project", project);
+      if (kind) q.set("kind", kind);
+      const list = await request<Job[]>("GET", `/jobs${q.size ? `?${q}` : ""}`);
+      list.forEach((j) => opts.onJob?.(j));
+      return list;
+    },
     cancelJob: (id) => job(request<Job>("POST", `/jobs/${enc(id)}/cancel`)),
     models: () => request<ModelStatus>("GET", "/models"),
     downloadModel: (name) => job(request<Job>("POST", `/models/${enc(name)}/download`)),
     deleteModel: (name) => request<ModelStatus>("DELETE", `/models/${enc(name)}`),
+    testAi: (body: AiTestBody) => request<AiTestResult>("POST", "/ai/test", body),
+    brand: () => request<Brand>("GET", "/brand"),
+    saveBrand: (brand: Brand) => request<Brand>("PUT", "/brand", brand),
   };
 }
 

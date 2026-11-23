@@ -46,7 +46,11 @@ Google and Facebook send people back to these addresses after they sign in. Anyt
 1. In Meta for Developers, create an app and add **Facebook Login**.
 2. Under **Valid OAuth Redirect URIs**, add the same callback, `https://your-project-ref.supabase.co/auth/v1/callback`.
 3. In Supabase, open **Authentication > Sign In / Providers > Facebook**, turn it on, and paste the App ID and App Secret.
-4. Meta needs the app switched to Live (with a privacy policy URL) before people outside your developer team can sign in.
+4. In the Facebook Login use case, add the **email** permission. Then, in Supabase's Facebook panel, turn on
+   **Allow users without an email**. Facebook accounts made with a phone number don't share an email, and Supabase
+   refuses them otherwise ("Error getting user email from external provider"). Such an account stays separate from
+   the same person's Google account, because there is no email to link the two.
+5. Meta needs the app switched to Live (with a privacy policy URL) before people outside your developer team can sign in.
 
 ## 6. Lifetime plan
 

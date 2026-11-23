@@ -274,6 +274,6 @@ describe("mock engine", () => {
     await vi.advanceTimersByTimeAsync(2000);
     const done = await m.getJob(j.id);
     expect(done.state).toBe("done");
-    expect((done.result as { files: string[] }).files).toHaveLength(2);
+    expect((done.result as { files: string[] }).files).toHaveLength(4); // each video and its .srt
   });
 });

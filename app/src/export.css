@@ -1,0 +1,18 @@
+/* ---------- Export ---------- */
+.opt { display: flex; align-items: center; gap: 10px; min-height: 36px; cursor: pointer; min-width: 0; color: var(--ink); font-size: 14px; }
+.opt-text { min-width: 0; overflow-wrap: anywhere; }
+.opt-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; }
+.wrap-path { white-space: normal; overflow-wrap: anywhere; font-family: var(--mono); font-size: 12.5px; color: var(--ink); }
+.q-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; }
+.q-row { display: flex; flex-direction: column; gap: 8px; padding: 12px 0; border-top: 1px solid var(--line); min-width: 0; }
+.q-row:first-child { border-top: 0; padding-top: 0; }
+.q-main { display: flex; justify-content: space-between; gap: 12px; align-items: baseline; min-width: 0; }
+.q-title { font: 500 14px var(--sans); color: var(--ink); overflow-wrap: anywhere; min-width: 0; }
+.q-state { font-size: 12px; color: var(--body); flex: none; }
+.q-files { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 8px; }
+.q-file { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; min-width: 0; }
+.q-name { flex: 1; min-width: 0; font-size: 12.5px; color: var(--ink); overflow-wrap: anywhere; }
+.q-fail { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+.q-fail .error { flex: 1; min-width: 160px; }
+.q-row .secondary:disabled { opacity: .55; cursor: not-allowed; }
+.settings .set-sec .secondary:focus-visible, .settings .secondary:focus-visible { outline: 2px solid var(--ink); outline-offset: 2px; }

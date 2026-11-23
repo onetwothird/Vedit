@@ -1,6 +1,6 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { t } from "../i18n/t";
-import { getTheme, setTheme, type Theme } from "../theme/theme";
+import { getTheme, onThemeChange, switchTheme, type Theme } from "../theme/theme";
 
 /** Its own header button, beside the account menu. The sun and the moon share one button: the outgoing icon
     turns away as the incoming one turns in, and the page colours fade across instead of snapping. */
@@ -9,13 +9,9 @@ export default function ThemeToggle() {
   const next: Theme = theme === "dark" ? "light" : "dark";
   const label = t(next === "light" ? "theme.toLight" : "theme.toDark");
 
-  function toggle() {
-    const html = document.documentElement;
-    html.classList.add("theme-fade");
-    window.setTimeout(() => html.classList.remove("theme-fade"), 320);
-    setTheme(next);
-    setThemeState(next);
-  }
+  useEffect(() => onThemeChange(setThemeState), []);
+
+  const toggle = () => switchTheme(next);
 
   return (
     <button type="button" className={`theme-btn ${theme}`} onClick={toggle} aria-label={label} title={label}>
