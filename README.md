@@ -21,6 +21,8 @@
 [How it works](#how-it-works) ·
 [Contributing](#contributing)
 
+<img src="docs/images/edit.png" alt="Vedit Studio editing a clip: the clip list, the vertical preview with captions, the tool rail and the timeline" width="900">
+
 </div>
 
 ---
@@ -228,9 +230,14 @@ Claude analyzes the footage, drafts and refines the edit, renders a preview, che
 
 Vedit Studio is the same engine with a screen: drop in a long video, pick the best moments, edit each clip, export.
 
+<img src="docs/images/home.png" alt="The Vedit Studio welcome screen: a podcast cut into three vertical clips, next to sign-in" width="800">
+
 1. **Import.** Choose a video. Vedit listens to it, finds the 20 to 90 second moments worth posting and frames
    them for vertical.
 2. **Pick clips.** Play each suggestion, keep the good ones, or ask for more.
+
+   <img src="docs/images/pick.png" alt="Pick clips: suggested moments with scores, the selected clip playing in 9:16, and why it was picked" width="800">
+
 3. **Edit.** One rail holds every tool, so nothing is hidden in another screen:
 
    | Tool | What it does |
@@ -248,6 +255,10 @@ Vedit Studio is the same engine with a screen: drop in a long video, pick the be
    can drag. The preview shows what the export will draw: the same cuts, speed, captions, text, b-roll and colour
    (sharpen shows in the export only).
 4. **Export.** Every kept clip is rendered to a folder next to your video, `<video name> - Vedit`.
+
+   <img src="docs/images/export.png" alt="Export: the kept clips, formats (9:16, 1:1, 16:9), quality, subtitles and thumbnails" width="800">
+
+   Screenshots are from the built-in demo (`npm run dev:mock`). The sample footage is a Pexels podcast clip, free for commercial use.
 
 **Run it on your own videos (from source):**
 
