@@ -29,3 +29,6 @@ export function brollType(path: string): "image" | "video" {
   const ext = path.split(".").pop()?.toLowerCase() ?? "";
   return BROLL_IMAGE.includes(ext) ? "image" : "video";
 }
+
+/** The object URL of a file picked in the browser this session, if any. */
+export const pickedUrl = (path: string): string | null => picked.get(path) ?? null;

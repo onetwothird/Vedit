@@ -54,7 +54,7 @@ export interface ProjectSettings {
   filmstrip?: string;
 }
 
-export type JobKind = "analyze" | "export" | "model";
+export type JobKind = "analyze" | "export" | "model" | "story";
 export type JobState = "queued" | "running" | "done" | "failed" | "cancelled";
 
 export interface AnalyzeResult {
@@ -276,6 +276,86 @@ export interface JobEvent {
 }
 
 /** One async method per server route. The real client and the in-memory mock both implement it. */
+export type StoryAspect = "9:16" | "16:9" | "1:1";
+export type StoryCaptions = "pop" | "box" | "clean" | "none";
+export type StoryMotion = "auto" | "in" | "out" | "left" | "right" | "none";
+
+export interface StoryScene {
+  /** Full path of the photo or clip. */
+  media: string;
+  kind: "image" | "video";
+  /** What the narrator says: one caption per line. */
+  text: string;
+  motion: StoryMotion;
+  /** A clip that keeps its own sound (and is captioned from it) instead of narration. */
+  keep_audio: boolean;
+}
+
+export interface Story {
+  id: string;
+  title: string;
+  aspect: StoryAspect;
+  voice: string;
+  captions: StoryCaptions;
+  music: string | null;
+  music_volume: number;
+  scenes: StoryScene[];
+  created: string;
+  updated: string;
+  /** The last video made from it. */
+  output: string | null;
+  last_job: Job | null;
+}
+
+/** What PUT /stories/{id} takes; a scene's kind is worked out from its file. */
+export type StoryBody = Partial<Pick<Story, "title" | "aspect" | "voice" | "captions" | "music" | "music_volume">> & {
+  scenes?: Pick<StoryScene, "media" | "text" | "motion" | "keep_audio">[];
+};
+
+export interface StoryVoice {
+  id: string;
+  name: string;
+}
+
+export interface StoryResult {
+  files: string[];
+}
+
+export interface BuildStoryBody {
+  out_dir?: string;
+  quality?: "normal" | "high";
+}
+
+export interface BatchBody extends AnalyzeBody {
+  sources: string[];
+  type: ProjectType;
+  language: Language;
+  platform: Platform;
+  export: boolean;
+  formats: Aspect[];
+  quality: "normal" | "high";
+  out_dir?: string;
+  srt: boolean;
+  thumbnail: boolean;
+}
+
+export interface BatchItem {
+  /** Null when the project was removed since. */
+  project: Project | null;
+  source: string;
+  analyze: string;
+  export: string | null;
+  error: string | null;
+}
+
+export interface Batch {
+  id: string;
+  created: string;
+  type: ProjectType;
+  export: boolean;
+  items: BatchItem[];
+}
+
 export interface Engine {
   health(): Promise<Health>;
   doctor(): Promise<Doctor>;
@@ -299,4 +379,12 @@ export interface Engine {
   testAi(body: AiTestBody): Promise<AiTestResult>;
   brand(): Promise<Brand>;
   saveBrand(brand: Brand): Promise<Brand>;
+  stories(): Promise<Story[]>;
+  storyVoices(): Promise<StoryVoice[]>;
+  createStory(title?: string): Promise<Story>;
+  getStory(sid: string): Promise<Story>;
+  saveStory(sid: string, body: StoryBody): Promise<Story>;
+  buildStory(sid: string, body?: BuildStoryBody): Promise<Job>;
+  createBatch(body: BatchBody): Promise<Batch>;
+  getBatch(bid: string): Promise<Batch>;
 }

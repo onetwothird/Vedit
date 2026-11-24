@@ -3,8 +3,8 @@ import { Link, Navigate } from "react-router-dom";
 import { shouldOfferSignIn, useAuth } from "../auth/auth";
 import FilmFrame from "../components/FilmFrame";
 import Screen from "../components/Screen";
-import { engine } from "../engine/client";
-import type { Project } from "../engine/types";
+import { engine, engineMediaUrl, isMock } from "../engine/client";
+import type { Project, Story } from "../engine/types";
 import { t } from "../i18n/t";
 import { baseName } from "../lib/native";
 import { isWhole, newImport, projectHome } from "../lib/projectKind";
@@ -13,16 +13,13 @@ import { BatchArt, ClipArt, PhotosArt, ReelArt, VlogArt } from "./home/HomeArt";
 import "./home/home.css";
 
 const TILES = [
-  { key: "vlog", Art: VlogArt, type: "vlog" },
-  { key: "reel", Art: ReelArt, type: "reel" },
+  { key: "vlog", Art: VlogArt, to: newImport("vlog") },
+  { key: "reel", Art: ReelArt, to: newImport("reel") },
+  { key: "photos", Art: PhotosArt, to: "/s/new" },
+  { key: "batch", Art: BatchArt, to: "/batch" },
 ] as const;
 
-const SOON = [
-  { key: "photos", Art: PhotosArt },
-  { key: "batch", Art: BatchArt },
-] as const;
-
-type Recent = { status: "loading" } | { status: "error" } | { status: "ready"; projects: Project[] };
+type Recent = { status: "loading" } | { status: "error" } | { status: "ready"; projects: Project[]; stories: Story[] };
 
 const dateFormat = new Intl.DateTimeFormat(undefined, { dateStyle: "medium" });
 
@@ -37,8 +34,8 @@ export default function Home() {
 
   useEffect(() => {
     let live = true;
-    engine.recent().then(
-      (projects) => live && setRecent({ status: "ready", projects }),
+    Promise.all([engine.recent(), engine.stories().catch(() => [] as Story[])]).then(
+      ([projects, stories]) => live && setRecent({ status: "ready", projects, stories }),
       () => live && setRecent({ status: "error" }),
     );
     return () => {
@@ -64,9 +61,9 @@ export default function Home() {
         </li>
         <li>
           <ul className="mode-soon-row">
-            {TILES.map(({ key, Art, type }) => (
+            {TILES.map(({ key, Art, to }) => (
               <li key={key}>
-                <Link className="mode-soon mode-live" to={newImport(type)} data-tile>
+                <Link className="mode-soon mode-live" to={to} data-tile>
                   <Art />
                   <span className="m-title">{t(`home.tile.${key}.title`)}</span>
                   <span className="m-desc">{t(`home.tile.${key}.desc`)}</span>
@@ -74,19 +71,6 @@ export default function Home() {
                 </Link>
               </li>
             ))}
-            {SOON.map(({ key, Art }) => {
-              const title = t(`home.tile.${key}.title`);
-              return (
-                <li key={key}>
-                  <div className="mode-soon" role="group" aria-disabled="true" aria-label={title} data-tile>
-                    <Art />
-                    <span className="m-title">{title}</span>
-                    <span className="m-desc">{t(`home.tile.${key}.desc`)}</span>
-                    <span className="m-soon">{t("home.soon")}</span>
-                  </div>
-                </li>
-              );
-            })}
           </ul>
         </li>
       </ul>
@@ -95,16 +79,37 @@ export default function Home() {
         <h2 id="recent-h">{t("home.recent.title")}</h2>
         {recent.status === "loading" && <p className="note-text">{t("home.recent.loading")}</p>}
         {recent.status === "error" && <p className="note-text">{t("home.recent.error")}</p>}
-        {recent.status === "ready" && recent.projects.length === 0 && (
+        {recent.status === "ready" && recent.projects.length + recent.stories.length === 0 && (
           <p className="note-text">{t("home.recent.empty")}</p>
         )}
-        {recent.status === "ready" && recent.projects.length > 0 && (
+        {recent.status === "ready" && recent.projects.length + recent.stories.length > 0 && (
           <ul className="recent-list">
+            {recent.stories.map((s) => <StoryItem key={s.id} s={s} />)}
             {recent.projects.map((p) => <RecentItem key={p.id} p={p} />)}
           </ul>
         )}
       </section>
     </Screen>
+  );
+}
+
+/** One recent story: its first photo, its name, then date and scene count. */
+function StoryItem({ s }: { s: Story }) {
+  const first = s.scenes.find((sc) => sc.kind === "image");
+  const url = first && !isMock() ? engineMediaUrl(`/stories/${s.id}/file`, { path: first.media }) : null;
+  const name = s.title || t("home.recent.story.untitled");
+  const n = s.scenes.length;
+  return (
+    <li>
+      <Link className="recent-item" to={`/s/${s.id}`}>
+        <span className="r-thumb r-story">{url ? <img src={url} alt="" /> : <PhotosArt />}</span>
+        <span className="r-name" title={name}>{name}</span>
+        <span className="r-meta">
+          <span>{formatDate(s.updated)}</span>
+          <span>{t(n === 1 ? "home.recent.story.one" : "home.recent.story.other", { n })}</span>
+        </span>
+      </Link>
+    </li>
   );
 }
 

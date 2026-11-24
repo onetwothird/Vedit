@@ -230,12 +230,20 @@ Claude analyzes the footage, drafts and refines the edit, renders a preview, che
 
 Vedit Studio is the same engine with a screen: drop in a long video, pick the best moments, edit each clip, export.
 
-Start from Home with one of three project types:
+Start from Home with one of five things to make:
 
 - **Clip a long video.** A podcast, stream or interview becomes many 20 to 90 second clips (the steps below).
 - **Edit a vlog.** The whole video, tidied: dead air, filler words and retakes cut, clean captions, its own shape
   (16:9 for a landscape video). Import goes straight to Edit.
 - **Quick Reel / Short.** One phone video as a fast vertical cut with pop-up captions, for Reels, Shorts or TikTok.
+- **Photos + script → Reel.** Put photos and clips in order and write what the narrator says over each (one caption
+  per line). Pick the shape, caption style, voice and optional music, then **Make video**: Vedit records the narration
+  with a free neural voice (this needs the internet the first time), animates the photos, adds the captions and saves
+  the video to `Videos\Vedit` (or the folder chosen in Settings). A clip can keep its own sound instead; its words
+  become the captions. Stories are saved as you type and listed under Recent projects.
+- **Batch & automate.** Add many videos at once, choose clips, a vlog or a Quick Reel for each, and Vedit analyses them
+  one after another and exports the results as each one finishes (or leaves them for you to review). You can leave
+  the screen while it works; every video also appears under Recent projects.
 
 <img src="docs/images/home.png" alt="The Vedit Studio welcome screen: a podcast cut into three vertical clips, next to sign-in" width="800">
 
