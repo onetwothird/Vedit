@@ -71,6 +71,16 @@ describe("engine client", () => {
     const second = f.mock.calls[1] as unknown as [string, RequestInit];
     expect(JSON.parse(second[1].body as string)).toEqual({ op: "trim", w_first: 2, w_last: 9 });
   });
+
+  it("posts a b-roll suggestion request to the clip", async () => {
+    const f = vi.fn(async () => json(200, { suggestions: [], files: 0, ai: null }));
+    const c = createClient({ getInfo: async () => INFO, fetchImpl: f as unknown as typeof fetch });
+    expect(await c.suggestBroll("p 1", "h01", { folder: "C:/pics" })).toEqual({ suggestions: [], files: 0, ai: null });
+    const [url, init] = f.mock.calls[0] as unknown as [string, RequestInit];
+    expect(url).toBe("http://127.0.0.1:4111/projects/p%201/clips/h01/broll");
+    expect(init.method).toBe("POST");
+    expect(JSON.parse(init.body as string)).toEqual({ folder: "C:/pics" });
+  });
 });
 
 class FakeSocket implements SocketLike {
@@ -265,6 +275,31 @@ describe("mock engine", () => {
       .toEqual([[0, 0], [2, 11], [13, 31]]);
     expect(words(await m.patchClip(p.id, "h01", { op: "trim", w_first: 2, w_last: 8 }))).toEqual([[2, 8]]);
     await expect(m.patchClip(p.id, "h01", { op: "cut", w0: 4, w1: 2 })).rejects.toMatchObject({ code: "bad_request" });
+  });
+
+  it("suggests b-roll whose file name the clip says, once per file and moment", async () => {
+    const m = createMockEngine();
+    const [p] = await m.recent();
+    const r = await m.suggestBroll(p.id, "h01", { folder: "C:/Pics/" });
+    expect(r).toMatchObject({ files: 4, ai: null });
+    expect(r.suggestions.map((s) => [s.name, s.word, s.type, s.source])).toEqual([
+      ["new_year party.mp4", "year", "video", "name"], ["first-gig.jpg", "first", "image", "name"],
+    ]);
+    expect(r.suggestions[1]).toMatchObject({ path: "C:/Pics/first-gig.jpg", t: 8.4, duration: 3 });
+    expect(r.suggestions[0].duration).toBe(0.8); // the kept range ends after "is"
+    // the AI finds a moment no file name is said at, and wins where it overlaps a name match
+    const ai = await m.suggestBroll(p.id, "h01", { folder: "C:/Pics", ai: { provider: "anthropic", api_key: "sk-x" } });
+    expect(ai.ai).toBe("ok");
+    expect(ai.suggestions.map((s) => [s.name, s.source])).toEqual([["new_year party.mp4", "name"], ["exit-door.jpg", "ai"]]);
+    // placed b-roll is not suggested again
+    const placed = r.suggestions[1];
+    await m.patchClip(p.id, "h01", { op: "patch", section: "overlays", patch: { items: [
+      { type: "image", at: { src: "main", t: placed.t }, duration: placed.duration, path: placed.path, mode: "full" },
+    ] } });
+    expect((await m.suggestBroll(p.id, "h01", { folder: "C:/Pics" })).suggestions.map((s) => s.name)).toEqual(["new_year party.mp4"]);
+    expect(await m.suggestBroll(p.id, "h01", { folder: "D:/Media/empty" })).toEqual({ suggestions: [], files: 0, ai: null });
+    await expect(m.suggestBroll(p.id, "h01", { folder: "pics" })).rejects.toMatchObject({ code: "bad_request" });
+    await expect(m.suggestBroll(p.id, "h99", { folder: "C:/Pics" })).rejects.toMatchObject({ status: 404 });
   });
 
   it("runs an export job to done with files", async () => {

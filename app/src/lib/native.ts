@@ -81,6 +81,15 @@ export async function analyzeBody(): Promise<AnalyzeBody> {
   }
 }
 
+/** The user's AI provider and key, when both are set in Settings (the desktop app's Credential Manager, or the mock
+    build's memory). Never logged. */
+export async function aiOptions(): Promise<AnalyzeBody["ai"] | undefined> {
+  const provider = getAiProvider();
+  if (!provider) return undefined;
+  const key = await loadAiKey(provider).catch(() => null);
+  return key ? { provider, api_key: key } : undefined;
+}
+
 export const IMAGE_ACCEPT = "image/*";
 export const BRAND_VIDEO_ACCEPT = "video/*";
 

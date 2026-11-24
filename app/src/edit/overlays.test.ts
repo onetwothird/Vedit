@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { Overlay } from "../engine/types";
-import { MIN_LAYER, duplicateLayer, newBroll, newText, withIds } from "./overlays";
+import { MIN_LAYER, brollAt, duplicateLayer, newBroll, newText, withIds } from "./overlays";
 
 describe("layer helpers", () => {
   it("puts new text at the playhead for 3 s, inside the clip", () => {
@@ -8,6 +8,13 @@ describe("layer helpers", () => {
     // near the end of the clip it shortens; before the clip it starts at the clip
     expect(newText("Hi", 9, 2, 10)).toMatchObject({ at: { t: 9 }, duration: 1 });
     expect(newText("Hi", 0, 2, 10).at.t).toBe(2);
+  });
+
+  it("places accepted b-roll at its moment, held inside the clip", () => {
+    expect(brollAt("C:/a/b.jpg", "image", 4.123, 3, 2, 10)).toMatchObject({ type: "image", at: { src: "main", t: 4.12 }, duration: 3, mode: "full" });
+    expect(brollAt("C:/a/b.mp4", "video", 9, 3, 2, 10)).toMatchObject({ at: { t: 9 }, duration: 1 });
+    expect(brollAt("C:/a/b.jpg", "image", 1, 3, 2, 10).at.t).toBe(2);
+    expect(brollAt("C:/a/b.jpg", "image", 9.9, 3, 2, 10)).toMatchObject({ at: { t: 9.5 }, duration: 0.5 });
   });
 
   it("knows a video from a photo", () => {

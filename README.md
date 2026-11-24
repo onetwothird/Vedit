@@ -260,7 +260,7 @@ Start from Home with one of five things to make:
    | Transcript | Click a word to cut it or fix its spelling; crossed-out words are removed |
    | Captions | Caption style, size, colours and position |
    | Text | Add text at the playhead, type it, place it top, middle or bottom, copy or delete it |
-   | B-roll | A photo or video over the clip, full screen or in a corner, with a fade |
+   | B-roll | A photo or video over the clip, full screen or in a corner, with a fade. **Suggest b-roll** finds the moments the clip names a thing or place and the photos or videos in a folder you pick that show it (by file name, and by meaning with an AI key; only the words and file names are sent) |
    | Sound | Loudness, voice polish, noise reduction, background music |
    | Framing | Shape (9:16, 1:1, 4:5, 16:9), face tracking, zoom |
    | Color | Brightness, contrast, saturation, sharpen, vignette |
@@ -475,7 +475,7 @@ See [`docs/USAGE.md`](docs/USAGE.md) for a step-by-step guide.
 ## Roadmap
 
 - [ ] Crossfade and whip transitions
-- [ ] Automatic b-roll suggestions from the transcript
+- [x] Automatic b-roll suggestions from the transcript
 - [ ] Speaker diarization for single-microphone podcasts
 - [ ] Karaoke and emoji caption styles
 - [ ] Claude Code plugin marketplace listing

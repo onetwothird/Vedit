@@ -32,6 +32,7 @@ from fastapi.responses import FileResponse, JSONResponse  # noqa: E402
 from pydantic import BaseModel, Field  # noqa: E402
 from starlette.exceptions import HTTPException as StarletteHTTPException  # noqa: E402
 
+import broll  # noqa: E402
 import models  # noqa: E402
 import vedit  # noqa: E402
 from captions import caption_events  # noqa: E402
@@ -80,6 +81,11 @@ class AnalyzeBody(BaseModel):
 class AITestBody(BaseModel):
     provider: Literal["anthropic", "openai"]
     api_key: str
+
+
+class BrollBody(BaseModel):
+    folder: str  # absolute folder of photos and videos to suggest from
+    ai: Optional[AIOptions] = None
 
 
 class KeptBody(BaseModel):
@@ -1006,6 +1012,23 @@ def create_app(token: str, queue: JobQueue | None = None) -> FastAPI:
             finally:
                 tmp_path.unlink(missing_ok=True)
             return view
+
+    @app.post("/projects/{pid}/clips/{hid}/broll")
+    def suggest_broll(pid: str, hid: str, body: BrollBody):
+        """B-roll for the moments the clip names a thing or place, from the photos and videos in `folder`.
+        Suggests only: the app places the ones the user accepts through the overlays patch."""
+        folder = Path(body.folder.strip())
+        if not folder.is_absolute() or not folder.is_dir():
+            raise ValueError("folder must be an existing absolute folder")
+        p = _project(pid)
+        wd = workdir_for(p.source)
+        edl = load_json(_edl_path(wd, _find_clip(p, hid)))
+        tp = wd / "transcript.main.json"
+        if not tp.is_file():
+            raise NotFound("transcript")
+        tr = load_json(tp)
+        ai = {"provider": body.ai.provider, "api_key": body.ai.api_key.strip(), "model": body.ai.model} if body.ai else None
+        return broll.suggest(tr, kept_ranges(edl, tr), folder, overlays=edl.get("overlays") or [], ai=ai)
 
     @app.put("/projects/{pid}/clips/{hid}/kept")
     def set_kept(pid: str, hid: str, body: KeptBody):

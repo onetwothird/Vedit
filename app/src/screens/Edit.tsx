@@ -17,7 +17,7 @@ import { t } from "../i18n/t";
 import { isWhole } from "../lib/projectKind";
 import { keptCount, sortClips, type ClipSort } from "../lib/clips";
 import { coverWidth } from "../lib/filmstrip";
-import { baseName } from "../lib/native";
+import { aiOptions, baseName } from "../lib/native";
 import { formatLength } from "../lib/time";
 import { useFilmstrip } from "../lib/useFilmstrip";
 import { previewSrc } from "../preview/media";
@@ -178,6 +178,11 @@ export default function Edit() {
   const onRestore = useCallback((a: number, b: number) => apply({ op: "restore", w0: a, w1: b }), [apply]);
   const onFix = useCallback((wrong: string, right: string) => apply({ op: "fix_word", wrong, right }), [apply]);
   const onOverlays = useCallback((items: Overlay[]) => apply({ op: "patch", section: "overlays", patch: { items } }), [apply]);
+  const suggestBroll = useCallback(async (folder: string) => {
+    if (!id || !hid) throw new Error("no clip");
+    const ai = await aiOptions();
+    return engine.suggestBroll(id, hid, { folder, ...(ai ? { ai } : {}) });
+  }, [id, hid]);
   const onPatch = useCallback((section: EditSection, patch: Record<string, unknown>) => apply({ op: "patch", section, patch }), [apply]);
   // selecting a layer on the timeline opens its tool, so its settings are always where you look for them
   const onLayer = useCallback((lid: string | null) => {
@@ -327,6 +332,7 @@ export default function Edit() {
               t0: words[h.w0]?.start ?? h.start,
               t1: words[h.w1] ? wordSlot(words, h.w1, h.w1)[1] : h.end,
               onSeek: seekSource,
+              suggestBroll,
             }}
             transcript={
               <TranscriptPanel

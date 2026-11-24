@@ -27,6 +27,15 @@ export function newBroll(path: string, playhead: number, t0: number, t1: number)
   return { id: newLayerId(), type: brollType(path), at: { src: "main", t: r2(at) }, duration: r2(lengthAt(at, t1)), path, mode: "full" };
 }
 
+/** B-roll at a set moment (a suggestion the user accepted), held inside the clip t0..t1. */
+export function brollAt(path: string, type: "image" | "video", at: number, duration: number, t0: number, t1: number): Overlay {
+  const start = startAt(at, t0, t1);
+  return {
+    id: newLayerId(), type, at: { src: "main", t: r2(start) },
+    duration: r2(Math.max(MIN_LAYER, Math.min(duration, t1 - start))), path, mode: "full",
+  };
+}
+
 /** A copy that starts where the layer ends (as far as the clip allows), with the same settings. */
 export function duplicateLayer(o: Overlay, t0: number, t1: number): Overlay {
   const at = Math.max(t0, Math.min(o.at.t + o.duration, t1 - MIN_LAYER));

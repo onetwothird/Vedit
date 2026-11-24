@@ -63,12 +63,12 @@ def _parse_json(text: str) -> dict:
         return json.loads(t[a:b + 1])
 
 
-def _call(http, provider: str, api_key: str, model: str, user: str) -> str:
+def _call(http, provider: str, api_key: str, model: str, user: str, system: str = SYSTEM_PROMPT) -> str:
     if provider == "anthropic":
         r = http.post("https://api.anthropic.com/v1/messages", timeout=TIMEOUT,
                       headers={"x-api-key": api_key, "anthropic-version": "2023-06-01",
                                "content-type": "application/json"},
-                      json={"model": model, "max_tokens": 2000, "system": SYSTEM_PROMPT,
+                      json={"model": model, "max_tokens": 2000, "system": system,
                             "messages": [{"role": "user", "content": user}]})
         r.raise_for_status()
         return "".join(b.get("text", "") for b in r.json()["content"] if b.get("type") == "text")
@@ -76,7 +76,7 @@ def _call(http, provider: str, api_key: str, model: str, user: str) -> str:
         r = http.post("https://api.openai.com/v1/chat/completions", timeout=TIMEOUT,
                       headers={"Authorization": f"Bearer {api_key}", "content-type": "application/json"},
                       json={"model": model, "response_format": {"type": "json_object"},
-                            "messages": [{"role": "system", "content": SYSTEM_PROMPT},
+                            "messages": [{"role": "system", "content": system},
                                          {"role": "user", "content": user}]})
         r.raise_for_status()
         return r.json()["choices"][0]["message"]["content"]
