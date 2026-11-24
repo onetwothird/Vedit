@@ -15,6 +15,9 @@ from common import die, even, ffprobe, load_json, parse_time  # noqa: E402
 
 ASPECTS = {"16:9": (1920, 1080), "9:16": (1080, 1920), "1:1": (1080, 1080), "4:5": (1080, 1350)}
 DEFAULT_PAD = (0.10, 0.18)
+TRANSITIONS = ("none", "crossfade", "whip")  # between kept segments; "none" is a hard cut
+TRANSITION_DURATION = 0.4  # seconds, when the edl names a type but no duration
+TRANSITION_RANGE = (0.1, 1.5)
 IMAGE_EXT = {".png", ".jpg", ".jpeg", ".webp", ".bmp", ".tif", ".tiff", ".gif", ".heic"}
 
 
@@ -37,6 +40,27 @@ def word_range(W: list[dict] | None, a: int, b: int, pad, alias: str = "main") -
     if b + 1 < len(W):
         end = min(end, (W[b]["end"] + W[b + 1]["start"]) / 2)
     return max(0.0, start), end
+
+
+def transition_of(edl: dict) -> dict:
+    """The edl's "transition" as {"type", "duration"}: missing or "none" is a hard cut (duration 0). Raises ValueError
+    for an unknown type or a duration outside TRANSITION_RANGE."""
+    raw = edl.get("transition")
+    if raw is None:
+        return {"type": "none", "duration": 0.0}
+    raw = {"type": raw} if isinstance(raw, str) else raw
+    if not isinstance(raw, dict):
+        raise ValueError("transition must be an object")
+    kind = raw.get("type", "none")
+    if kind not in TRANSITIONS:
+        raise ValueError(f"transition type must be one of {', '.join(TRANSITIONS)}")
+    if kind == "none":
+        return {"type": "none", "duration": 0.0}
+    d = raw.get("duration", TRANSITION_DURATION)
+    lo, hi = TRANSITION_RANGE
+    if isinstance(d, bool) or not isinstance(d, (int, float)) or not lo <= d <= hi:
+        raise ValueError(f"transition duration must be a number from {lo} to {hi}")
+    return {"type": kind, "duration": float(d)}
 
 
 def clip_span(tin: float, tout: float, speed: float, fps: int | float) -> tuple[float, float]:
@@ -70,6 +94,10 @@ class Timeline:
         self.out = self._output()
         self.clips: list[dict] = []
         self._resolve_clips()
+        try:
+            self.transition = transition_of(self.edl)
+        except ValueError as e:
+            die(str(e))
 
     # ---------- sources ----------
     def _abs(self, p: str) -> str:

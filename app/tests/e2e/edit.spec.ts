@@ -107,6 +107,18 @@ test("caption style, words at a time and position update the overlay", async ({ 
   await expect.poll(bottom).toBeCloseTo(lower, 1);
 });
 
+test("karaoke and emoji caption styles draw in the preview", async ({ page }) => {
+  await open(page);
+  await page.getByRole("tab", { name: "Captions" }).click();
+  await page.getByRole("radio", { name: "Karaoke" }).check();
+  await expect(page.getByRole("radio", { name: "Karaoke" })).toBeChecked();
+  // every word of the group is on screen, each with how far it has filled
+  await expect(page.locator("[data-caption] [data-word][data-fill]")).toHaveCount(3);
+  await page.getByRole("radio", { name: "Emoji" }).check();
+  await expect(page.locator("[data-caption] [data-fill]")).toHaveCount(0);
+  await expect(page.locator("[data-caption] [data-emoji]")).toHaveText(" 🙅"); // "Nobody tells you"
+});
+
 test("framing and sound settings save to the clip", async ({ page }) => {
   await open(page);
   await page.getByRole("tab", { name: "Framing" }).click();

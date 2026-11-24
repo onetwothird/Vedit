@@ -15,6 +15,7 @@ pytest.importorskip("fastapi", reason="needs the studio extra")
 import httpx  # noqa: E402
 from fastapi.testclient import TestClient  # noqa: E402
 
+import broll  # noqa: E402
 import models  # noqa: E402
 import vedit  # noqa: E402
 from common import load_json, save_json, workdir_for  # noqa: E402
@@ -999,3 +1000,59 @@ def test_file_serves_only_broll_a_clip_uses(client, auth, analyzed_project, tmp_
     assert r.status_code == 200 and r.content == b"png-bytes"
     assert client.get(url(other)).status_code == 404
     assert client.get(url(analyzed_project["wd"] / "transcript.main.json")).status_code == 404
+
+
+def test_broll_suggests_files_named_in_the_clip(client, auth, analyzed_project, tmp_path):
+    pid, hid = analyzed_project["id"], analyzed_project["highlights"][0]["id"]
+    view = client.get(f"/projects/{pid}/clips/{hid}", headers=auth).json()
+    words = client.get(f"/projects/{pid}/transcript", headers=auth).json()["words"]
+    a, b = view["kept_ranges"][0]
+    said = next(w for w in words if a <= (w["start"] + w["end"]) / 2 <= b and len(broll.name_words(w["text"])) == 1)
+    folder = tmp_path / "broll"
+    folder.mkdir()
+    named = folder / f"{broll.name_words(said['text'])[0]}.jpg"
+    named.write_bytes(b"jpg")
+    (folder / "zzqx.png").write_bytes(b"png")  # never said
+    url = f"/projects/{pid}/clips/{hid}/broll"
+    r = client.post(url, headers=auth, json={"folder": str(folder)})
+    assert r.status_code == 200
+    out = r.json()
+    assert out["files"] == 2 and out["ai"] is None
+    assert [s["path"] for s in out["suggestions"]] == [str(named)]
+    s = out["suggestions"][0]
+    assert s["type"] == "image" and s["source"] == "name" and a <= s["t"] <= b and s["duration"] > 0
+    # placed through the overlays patch, the file is not suggested again
+    item = {"type": "image", "at": {"src": "main", "t": s["t"]}, "duration": s["duration"], "path": s["path"], "mode": "full"}
+    assert client.patch(f"/projects/{pid}/clips/{hid}", headers=auth,
+                        json={"op": "patch", "section": "overlays", "patch": {"items": [item]}}).status_code == 200
+    assert client.post(url, headers=auth, json={"folder": str(folder)}).json()["suggestions"] == []
+
+
+def test_broll_errors(client, auth, analyzed_project, tmp_path):
+    pid, hid = analyzed_project["id"], analyzed_project["highlights"][0]["id"]
+    url = f"/projects/{pid}/clips/{hid}/broll"
+    for folder in ("relative/pics", str(tmp_path / "missing"), ""):
+        r = client.post(url, headers=auth, json={"folder": folder})
+        assert r.status_code == 400 and r.json()["code"] == "bad_request"
+    assert client.post(url, headers=auth, json={}).status_code in (400, 422)
+    assert client.post(f"/projects/{pid}/clips/h99/broll", headers=auth, json={"folder": str(tmp_path)}).status_code == 404
+    assert client.post(f"/projects/nope/clips/{hid}/broll", headers=auth, json={"folder": str(tmp_path)}).status_code == 404
+    assert client.post(url, json={"folder": str(tmp_path)}).status_code == 401
+
+
+def test_broll_ai_key_reaches_only_the_ai_call(client, auth, analyzed_project, tmp_path, monkeypatch):
+    pid, hid = analyzed_project["id"], analyzed_project["highlights"][0]["id"]
+    seen = {}
+
+    def fake(words, files, ranges, provider, api_key, model=None, http=None):
+        seen.update(provider=provider, key=api_key, n=len(files))
+        return [], broll.AI_FAILED
+    monkeypatch.setattr(broll, "suggest_with_llm", fake)
+    pics = tmp_path / "pics"
+    pics.mkdir()
+    (pics / "x.jpg").write_bytes(b"x")
+    r = client.post(f"/projects/{pid}/clips/{hid}/broll", headers=auth,
+                    json={"folder": str(pics), "ai": {"provider": "openai", "api_key": " sk-secret "}})
+    assert r.status_code == 200 and r.json()["ai"] == "ai_failed"
+    assert seen == {"provider": "openai", "key": "sk-secret", "n": 1}
+    assert "sk-secret" not in r.text

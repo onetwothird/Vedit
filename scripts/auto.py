@@ -95,7 +95,7 @@ def main():
     ap.add_argument("--preset", default="youtube", help=", ".join(PRESETS))
     ap.add_argument("--brand", help="brand kit json (auto-detects ./brand.json or ~/.vedit/brand.json)")
     ap.add_argument("--aspect", help="override preset aspect: 16:9 | 9:16 | 1:1 | 4:5")
-    ap.add_argument("--captions", help="override preset captions: pop | box | clean | off")
+    ap.add_argument("--captions", help="override preset captions: pop | box | clean | karaoke | emoji | off")
     ap.add_argument("--formats", help="extra aspect ratios from the same edit, e.g. 9:16,1:1")
     ap.add_argument("--thumbs", action="store_true", help="also export thumbnail candidates")
     ap.add_argument("--preview", action="store_true", help="fast half-res render")

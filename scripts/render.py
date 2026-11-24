@@ -110,6 +110,35 @@ def color_filters(c: dict, d: str | Path) -> list[str]:
     return f
 
 
+# ---------- transitions ----------
+# A transition is centred on the cut: the outgoing clip runs on for half its length past its out point and the incoming
+# one starts half its length before its in point (handles, like any editor), so the timeline, the audio, the captions
+# and every overlay keep their times. The audio stays a hard cut; only the picture blends.
+WHIP_BLUR = 0.035  # of the output width: the directional blur's radius while the picture whips across
+
+
+def plan_transitions(tl: Timeline) -> list[dict]:
+    """Set each clip's video handles (c["head"], c["tail"], output seconds) and return one entry per cut that gets a
+    transition: {"after": clip position, "at": cut time, "half": seconds each side}. A transition is never longer than
+    either clip it joins, and is snapped to whole frames; a hard cut (or a cut too short for one frame) gets nothing."""
+    tr = getattr(tl, "transition", None) or {"type": "none", "duration": 0.0}
+    F = tl.out["fps"]
+    for c in tl.clips:
+        c["head"] = c["tail"] = 0.0
+    if tr["type"] == "none":
+        return []
+    cuts = []
+    for k in range(len(tl.clips) - 1):
+        a, b = tl.clips[k], tl.clips[k + 1]
+        frames = int(min(tr["duration"] / 2, a["dur"] / 2, b["dur"] / 2) * F + 1e-6)
+        if frames < 1:
+            continue
+        half = frames / F
+        a["tail"], b["head"] = half, half
+        cuts.append({"after": k, "at": a["t1"], "half": half})
+    return cuts
+
+
 def video_chain(tl: Timeline, c: dict) -> str:
     s = tl.sources[c["src"]]
     sw, sh = s["info"]["width"], s["info"]["height"]
@@ -119,6 +148,11 @@ def video_chain(tl: Timeline, c: dict) -> str:
     if c["speed"] != 1.0:
         f.append(f"setpts=PTS/{c['speed']}")
     f.append(f"fps={F}")
+    short = head_short(tl, c)
+    if short > 0:  # the source starts too soon for the whole head handle: hold its first frame
+        f.append(f"tpad=start_mode=clone:start_duration={short:.4f}")
+    if c.get("tail"):  # and the source may end inside the tail handle: hold its last frame
+        f.append(f"tpad=stop_mode=clone:stop_duration={c['tail']:.4f}")
     fit = c.get("fit", tl.edl.get("fit", "crop"))
     z = c.get("zoom", 1.0)
     zfrom, zto = (z.get("from", 1.0), z.get("to", 1.15)) if isinstance(z, dict) else (float(z), float(z))
@@ -160,7 +194,10 @@ def video_chain(tl: Timeline, c: dict) -> str:
                 conv = [0.5, 0.5]
             f0 = z.get("focus_from", conv) if isinstance(z, dict) else conv
             f1 = z.get("focus_to", f0) if isinstance(z, dict) else f0
-            ease = f"(1-cos(PI*on/{n}))/2" if (isinstance(z, dict) and z.get("ease", True)) else f"on/{n}"
+            on = "on"
+            if c.get("head") or c.get("tail"):  # the move runs over the clip itself; the handles hold its ends
+                on = f"min(max(on-{round(c.get('head', 0) * F)},0),{n})"
+            ease = f"(1-cos(PI*{on}/{n}))/2" if (isinstance(z, dict) and z.get("ease", True)) else f"{on}/{n}"
             fx = f"({f0[0]}+({f1[0]}-{f0[0]})*{ease})"
             fy = f"({f0[1]}+({f1[1]}-{f0[1]})*{ease})"
             f += [f"scale={OW * 2}:{OH * 2}:flags=lanczos",
@@ -174,12 +211,32 @@ def video_chain(tl: Timeline, c: dict) -> str:
 
 def tail(tl: Timeline, c: dict) -> str:
     f = color_filters({**(tl.edl.get("color") or {}), **(c.get("color") or {})}, tl.dir)
+    h = c.get("head", 0.0)
     if c.get("fade_in"):
-        f.append(f"fade=t=in:st=0:d={c['fade_in']}")
+        f.append(f"fade=t=in:st={h:g}:d={c['fade_in']}")
     if c.get("fade_out"):
-        f.append(f"fade=t=out:st={max(0, c['dur'] - c['fade_out']):.3f}:d={c['fade_out']}")
-    f += ["format=yuv420p", f"trim=duration={c['dur']:.4f}"]
+        f.append(f"fade=t=out:st={max(0, h + c['dur'] - c['fade_out']):.3f}:d={c['fade_out']}")
+    f += ["format=yuv420p", f"trim=duration={seg_len(c):.4f}"]
     return "," + ",".join(f)
+
+
+def seg_len(c: dict) -> float:
+    """A segment's video length: the clip plus its transition handles."""
+    return c.get("head", 0.0) + c["dur"] + c.get("tail", 0.0)
+
+
+def head_src(tl: Timeline, c: dict) -> float:
+    """Source seconds read before the clip's in point for its head handle (as much as the source has)."""
+    if not c.get("head") or tl.sources[c["src"]].get("is_image"):
+        return 0.0
+    return min(c["head"] * c["speed"], c["vin"])
+
+
+def head_short(tl: Timeline, c: dict) -> float:
+    """Output seconds of head handle the source cannot supply (it starts too soon), held on the first frame."""
+    if not c.get("head") or tl.sources[c["src"]].get("is_image"):
+        return 0.0
+    return max(0.0, c["head"] - head_src(tl, c) / c["speed"])
 
 
 def audio_chain(c: dict) -> str:
@@ -190,17 +247,26 @@ def audio_chain(c: dict) -> str:
     f += ["aresample=48000", "aformat=sample_fmts=fltp:channel_layouts=stereo", "apad", f"atrim=0:{d:.4f}"]
     fi, fo = max(0.012, float(c.get("fade_in", 0))), max(0.012, float(c.get("fade_out", 0)))
     f += [f"afade=t=in:st=0:d={fi}", f"afade=t=out:st={max(0, d - fo):.4f}:d={fo}"]
+    if c.get("head") or c.get("tail"):  # silence under the video handles; the final pass trims it off again
+        f += [f"adelay=delays={round(c.get('head', 0) * 48000)}S:all=1", f"apad=whole_len={seg_samples(c)}"]
     return ",".join(f)
+
+
+def seg_samples(c: dict) -> int:
+    return round(seg_len(c) * 48000)
 
 
 def seg_cmd(tl: Timeline, c: dict, out: Path, preview: bool) -> list[str]:
     s = tl.sources[c["src"]]
     span = c["dur"] * c["speed"] + 0.25
+    hs = head_src(tl, c)
+    vspan = span + hs + c.get("tail", 0.0) * c["speed"]
     if s.get("is_image"):
-        cmd = [ffmpeg_bin("ffmpeg"), "-y", "-v", "error", "-loop", "1", "-framerate", str(tl.out["fps"]), "-t", f"{span:.4f}",
+        vspan = seg_len(c) + 0.25
+        cmd = [ffmpeg_bin("ffmpeg"), "-y", "-v", "error", "-loop", "1", "-framerate", str(tl.out["fps"]), "-t", f"{vspan:.4f}",
                "-i", s["path"]]
     else:
-        cmd = [ffmpeg_bin("ffmpeg"), "-y", "-v", "error", "-ss", f"{c['vin']:.4f}", "-t", f"{span:.4f}", "-i", s["path"]]
+        cmd = [ffmpeg_bin("ffmpeg"), "-y", "-v", "error", "-ss", f"{c['vin'] - hs:.4f}", "-t", f"{vspan:.4f}", "-i", s["path"]]
     a = tl.sources[c["audio_alias"]]
     if a["info"]["has_audio"] and not c.get("mute"):
         cmd += ["-ss", f"{max(0.0, c['ain']):.4f}", "-t", f"{span:.4f}", "-i", a["path"]]
@@ -211,7 +277,7 @@ def seg_cmd(tl: Timeline, c: dict, out: Path, preview: bool) -> list[str]:
     # segments are intermediates the final pass encodes again: near-lossless, so the export loses detail only once
     q = ["-preset", "ultrafast", "-crf", "26"] if preview else ["-preset", "veryfast", "-crf", "8"]
     return cmd + ["-filter_complex", fc, "-map", "[v]", "-map", "[a]", "-c:v", "libx264", *q,
-                  "-c:a", "pcm_s16le", "-t", f"{c['dur']:.4f}", str(out)]
+                  "-c:a", "pcm_s16le", "-t", f"{seg_len(c):.4f}", str(out)]
 
 
 def render_segments(tl: Timeline, cache: Path, preview: bool, jobs: int) -> list[Path]:
@@ -257,13 +323,50 @@ def render_segments(tl: Timeline, cache: Path, preview: bool, jobs: int) -> list
     return [o for _, o in work]
 
 
+def join_graph(tl: Timeline, cuts: list[dict]) -> list[str]:
+    """Filters that join the segments (inputs 0..n-1) into [vjoin] and [ajoin] with the transitions in `cuts`: the
+    pictures overlap by each cut's handles through xfade; the audio drops its silent handles and is joined end to end."""
+    kind = tl.transition["type"]
+    W, F = tl.out["width"], tl.out["fps"]
+    fc = []
+    for i, c in enumerate(tl.clips):  # a time base of one frame, so every offset below lands on a whole frame
+        fc.append(f"[{i}:v]settb=1/{F},setpts=PTS-STARTPTS[s{i}]")
+        h = round(c.get("head", 0) * 48000)
+        fc.append(f"[{i}:a]atrim=start_sample={h}:end_sample={h + round(c['dur'] * 48000)},asetpts=PTS-STARTPTS[a{i}]")
+    cur = "s0"
+    for i in range(1, len(tl.clips)):
+        x = next((x for x in cuts if x["after"] == i - 1), None)
+        nxt = f"x{i}"
+        if x is None:
+            fc.append(f"[{cur}][s{i}]concat=n=2:v=1:a=0[{nxt}]")
+        else:
+            name = "fade"
+            if kind == "whip":  # whips alternate direction, like a camera swung back and forth
+                name = "slideleft" if cuts.index(x) % 2 == 0 else "slideright"
+            fc.append(f"[{cur}][s{i}]xfade=transition={name}:duration={2 * x['half']:.6f}"
+                      f":offset={x['at'] - x['half']:.6f}[{nxt}]")
+        cur = nxt
+    if kind == "whip" and cuts:
+        on = "+".join(f"between(t,{x['at'] - x['half']:.4f},{x['at'] + x['half']:.4f})" for x in cuts)
+        fc.append(f"[{cur}]dblur=angle=0:radius={max(2, round(W * WHIP_BLUR))}:enable='{on}'[vjoin]")
+    else:
+        fc.append(f"[{cur}]null[vjoin]")
+    fc.append("".join(f"[a{i}]" for i in range(len(tl.clips))) + f"concat=n={len(tl.clips)}:v=0:a=1[ajoin]")
+    return fc
+
+
 def final_pass(tl: Timeline, segs: list[Path], ass: Path | None, out: Path, preview: bool):
     wd = tl.dir
-    lst = wd / ".render_cache" / "concat.txt"
-    lst.write_text("".join(f"file '{p.as_posix()}'\n" for p in segs), encoding="utf-8")
+    cuts = getattr(tl, "cuts", None) or []  # set by plan_transitions
     OW, OH, D = tl.out["width"], tl.out["height"], tl.duration
-    inputs = ["-f", "concat", "-safe", "0", "-i", str(lst)]
-    fc, vlab, n_in = [], "0:v", 1
+    if cuts:  # transitions overlap the segments, so each is its own input
+        inputs = [a for p in segs for a in ("-i", str(p))]
+        fc, vlab, alab0, n_in = join_graph(tl, cuts), "vjoin", "ajoin", len(segs)
+    else:
+        lst = wd / ".render_cache" / "concat.txt"
+        lst.write_text("".join(f"file '{p.as_posix()}'\n" for p in segs), encoding="utf-8")
+        inputs = ["-f", "concat", "-safe", "0", "-i", str(lst)]
+        fc, vlab, alab0, n_in = [], "0:v", "0:a", 1
 
     for k, ov in enumerate(o for o in (tl.edl.get("overlays") or []) if o.get("type") in ("image", "video")):
         at = tl.anchor(ov.get("at", 0))
@@ -315,7 +418,7 @@ def final_pass(tl: Timeline, segs: list[Path], ass: Path | None, out: Path, prev
     if au.get("voice_polish"):
         af += ["acompressor=threshold=-21dB:ratio=3:attack=5:release=150:makeup=2",
                "equalizer=f=3500:t=q:w=1.2:g=2"]
-    fc.append(f"[0:a]{','.join(af)}[voice0]")
+    fc.append(f"[{alab0}]{','.join(af)}[voice0]")
     sfx = []
     for k, ov in enumerate(o for o in (tl.edl.get("overlays") or []) if o.get("type") == "audio"):
         at = tl.anchor(ov.get("at", 0))
@@ -412,6 +515,9 @@ def render_one(edl: str, aspect: str | None, a) -> Path:
     out.parent.mkdir(parents=True, exist_ok=True)
     tl.out["path"] = str(out)
 
+    tl.cuts = cuts = plan_transitions(tl)
+    if cuts:
+        print(f"[render] {len(cuts)} {tl.transition['type']} transitions", file=sys.stderr)
     segs = render_segments(tl, tl.dir / ".render_cache", a.preview, a.jobs)
     ass, n = cap.write(tl, tl.dir / ("captions.ass" if not aspect else f"captions_{aspect.replace(':', 'x')}.ass"))
     if ass:

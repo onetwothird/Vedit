@@ -105,6 +105,18 @@
   font: 700 15px/1.45 var(--sans); text-shadow: 0 1px 2px #000000b3, 0 0 8px #00000066; overflow-wrap: anywhere;
 }
 .cap-hl { padding: 1px 4px; border-radius: 4px; text-shadow: none; box-decoration-break: clone; }
+.cap-preview[data-style="box"] .cap-text { padding: 2px 6px; background: #00000070; text-shadow: none; box-decoration-break: clone; }
+.cap-preview[data-style="clean"] .cap-line { font-weight: 600; font-size: 13px; }
+.cap-preview:is([data-style="pop"], [data-style="box"], [data-style="karaoke"], [data-style="emoji"]) .cap-line { text-transform: uppercase; }
+.cap-fill { color: transparent; -webkit-background-clip: text; background-clip: text; text-shadow: none; }
+.cap-emoji { text-shadow: none; }
+.cap-styles { padding: 12px 12px 0; }
+.cap-styles .field { margin: 0; border: 0; padding: 0; min-width: 0; }
+.cap-styles legend { padding: 0; margin-bottom: 6px; font: 500 12px var(--sans); color: #ffffffa6; }
+.cap-styles .seg { display: flex; flex-wrap: wrap; background: #0d0d0e; border-color: #ffffff1f; }
+.cap-styles .seg-opt span { padding: 5px 8px; color: #ffffffa6; }
+.cap-styles .seg-opt:hover span, .cap-styles .seg-opt input:checked + span { color: #fff; }
+.cap-styles .seg-opt input:checked + span { background: #ffffff24; }
 
 .set-version { font: 400 30px/1.2 var(--pixel); font-synthesis: none; color: var(--ink); }
 .set-version:empty { display: none; }

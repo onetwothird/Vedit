@@ -1,6 +1,9 @@
 # Changelog
 
 ## Unreleased
+- Editor: **Suggest b-roll** in the B-roll tool finds the moments a clip names a thing or place and the photos or
+  videos in a folder you pick that show it (by file name, and by meaning with an AI key); add or skip each one
+  (`scripts/broll.py`, `POST /projects/{pid}/clips/{hid}/broll`)
 - **No-code Windows workflow**: `1_INSTALL.bat` (installs Python, FFmpeg and dependencies) and
   `2_MAKE_VIDEO.bat` (drag a video on it, pick platform and English / Filipino / Taglish); guide in `START_HERE.md`
 - Transcription falls back to CPU when the GPU is unusable (e.g. missing cuBLAS DLLs) instead of crashing

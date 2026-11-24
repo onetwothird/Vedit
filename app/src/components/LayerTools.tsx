@@ -1,11 +1,12 @@
 import { useEffect, useId, useRef, useState } from "react";
 import { isTauri } from "../engine/client";
-import type { Overlay } from "../engine/types";
+import type { BrollSuggestions, Overlay } from "../engine/types";
 import { duplicateLayer, newBroll, newText, withIds } from "../edit/overlays";
 import { t } from "../i18n/t";
 import { baseName, pickFileNative } from "../lib/native";
 import { BROLL_IMAGE, BROLL_VIDEO, rememberPicked } from "../lib/overlayMedia";
 import { formatClock } from "../lib/time";
+import { BrollSuggest } from "./BrollSuggest";
 
 /* The Text and B-roll tools: add a layer at the playhead, see every layer on the clip, and change the selected one.
    The timeline shows the same layers; selecting one there opens it here. */
@@ -20,6 +21,8 @@ export interface LayerToolProps {
   t0: number;
   t1: number;
   onSeek(srcT: number): void;
+  /** Suggests b-roll for this clip from a folder of photos and videos; without it the B-roll tool offers none. */
+  suggestBroll?(folder: string): Promise<BrollSuggestions>;
 }
 
 const TEXT_POS = ["top", "center", "bottom"] as const;
@@ -173,7 +176,7 @@ function TextField({ o, onChange }: { o: Extract<Overlay, { type: "text" }>; onC
 
 export function BrollTool(props: LayerToolProps) {
   const { mine, selected, add, change, duplicate, remove } = useLayers(props, "broll");
-  const { playhead, t0, t1, onLayer, onSeek } = props;
+  const { playhead, t0, t1, onLayer, onSeek, onOverlays, overlays, suggestBroll } = props;
   const file = useRef<HTMLInputElement>(null);
   const addPath = (path: string) => add(newBroll(path, playhead, t0, t1));
   async function pick() {
@@ -217,6 +220,9 @@ export function BrollTool(props: LayerToolProps) {
           )}
           <LayerActions o={selected} onDuplicate={() => duplicate(selected)} onDelete={() => remove(selected)} />
         </div>
+      )}
+      {suggestBroll && (
+        <BrollSuggest suggest={suggestBroll} t0={t0} t1={t1} onAdd={(items) => onOverlays([...withIds(overlays), ...items])} />
       )}
     </>
   );

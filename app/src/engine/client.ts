@@ -2,7 +2,7 @@
 // The token and any AI key are never logged and never put into an error message.
 
 import type {
-  AiTestBody, AiTestResult, AnalyzeBody, Batch, BatchBody, Brand, BuildStoryBody, Story, StoryBody, StoryVoice, ClipOp, ClipView, Doctor, Engine, EngineInfo, ErrorBody, ExportBody, FilmstripInfo, Health, Job, ModelStatus,
+  AiTestBody, AiTestResult, AnalyzeBody, Batch, BrollBody, BrollSuggestions, BatchBody, Brand, BuildStoryBody, Story, StoryBody, StoryVoice, ClipOp, ClipView, Doctor, Engine, EngineInfo, ErrorBody, ExportBody, FilmstripInfo, Health, Job, ModelStatus,
   NewProjectBody, Project, Transcript,
 } from "./types";
 import { mockEngine } from "./mock";
@@ -103,6 +103,7 @@ export function createClient(opts: ClientOptions): Engine {
     clip: (pid, hid) => request<ClipView>("GET", `/projects/${enc(pid)}/clips/${enc(hid)}`),
     patchClip: (pid, hid, op: ClipOp) => request<ClipView>("PATCH", `/projects/${enc(pid)}/clips/${enc(hid)}`, op),
     setKept: (pid, hid, kept) => request<Project>("PUT", `/projects/${enc(pid)}/clips/${enc(hid)}/kept`, { kept }),
+    suggestBroll: (pid, hid, body: BrollBody) => request<BrollSuggestions>("POST", `/projects/${enc(pid)}/clips/${enc(hid)}/broll`, body),
     exportClips: (pid, body: ExportBody) => job(request<Job>("POST", `/projects/${enc(pid)}/export`, body)),
     getJob: (id) => job(request<Job>("GET", `/jobs/${enc(id)}`)),
     activeJobs: async (project, kind) => {

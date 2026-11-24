@@ -1,14 +1,17 @@
 #!/usr/bin/env python3
-"""Build captions.ass (+ .srt) for the EDITED timeline from edl.json. render.py calls this automatically;
+r"""Build captions.ass (+ .srt) for the EDITED timeline from edl.json. render.py calls this automatically;
 run it alone to inspect/tweak captions.
 
   python captions.py edl.json [--out captions.ass]
 
 edl.json "captions" block (all optional):
-  {"enabled": true, "style": "pop" | "box" | "clean", "max_words": 3, "font": "Arial", "size": null,
+  {"enabled": true, "style": "pop" | "box" | "clean" | "karaoke" | "emoji", "max_words": 3, "font": "Arial", "size": null,
    "color": "#FFFFFF", "highlight": "#FFD400", "uppercase": true, "position": "lower" | "middle" | "bottom",
    "hide_fillers": true, "srt": true, "replace": {"teh": "the"}, "min_show": 0.7,
-   "speaker_colors": {"maria": "#FF6FB5", "narrator": "#FFD400"}}   # skits: active word colored per speaker
+   "speaker_colors": {"maria": "#FF6FB5", "narrator": "#FFD400"},   # skits: active word colored per speaker
+   "emoji_font": "Segoe UI Emoji"}
+karaoke: the whole group shows and each word fills with the highlight colour while it is spoken (libass \kf).
+emoji: pop captions with an emoji after keywords from EMOJI (English and Filipino).
 Text overlays (titles, lower-thirds, callouts) come from edl.json "overlays" entries with "type": "text".
 """
 from __future__ import annotations
@@ -22,6 +25,40 @@ from typing import NamedTuple
 sys.path.insert(0, str(Path(__file__).parent))
 from common import hex_to_ass, norm_word  # noqa: E402
 from edl import Timeline  # noqa: E402
+
+
+# keyword (as norm_word spells it) -> emoji shown after it by the "emoji" style. English and Filipino/Taglish.
+EMOJI = {
+    # greetings, thanks
+    "hello": "👋", "hi": "👋", "hey": "👋", "bye": "👋", "welcome": "🙌", "thanks": "🙏", "thank": "🙏",
+    "salamat": "🙏", "kumusta": "👋", "mabuhay": "🙌", "paalam": "👋",
+    # feelings
+    "love": "❤️", "mahal": "❤️", "happy": "😊", "masaya": "😊", "sad": "😢", "malungkot": "😢", "funny": "😂",
+    "nakakatawa": "😂", "haha": "😂", "lol": "😂", "angry": "😠", "galit": "😠", "scared": "😱", "takot": "😱",
+    "wow": "😮", "grabe": "😮", "omg": "😱", "sorry": "🙏", "tired": "😴", "pagod": "😴", "sleep": "😴",
+    "tulog": "😴", "kilig": "🥰", "cute": "🥰",
+    # praise, hype
+    "amazing": "🔥", "awesome": "🔥", "fire": "🔥", "hot": "🔥", "galing": "🔥", "astig": "😎", "cool": "😎",
+    "best": "🏆", "win": "🏆", "panalo": "🏆", "perfect": "💯", "sure": "💯", "totoo": "💯", "yes": "✅",
+    "oo": "✅", "no": "❌", "nobody": "🙅", "wala": "🙅", "hindi": "❌", "wrong": "❌", "mali": "❌", "tama": "✅", "right": "✅",
+    "beautiful": "✨", "maganda": "✨", "ganda": "✨", "pogi": "😎", "new": "✨", "bago": "✨",
+    # things, actions
+    "money": "💰", "pera": "💰", "food": "🍜", "pagkain": "🍜", "kain": "🍜", "eat": "🍜", "coffee": "☕",
+    "kape": "☕", "music": "🎵", "kanta": "🎵", "song": "🎵", "video": "🎬", "phone": "📱", "cellphone": "📱",
+    "home": "🏠", "bahay": "🏠", "car": "🚗", "kotse": "🚗", "travel": "✈️", "beach": "🏖️", "dagat": "🌊",
+    "sun": "☀️", "araw": "☀️", "rain": "🌧️", "ulan": "🌧️", "time": "⏰", "oras": "⏰", "idea": "💡",
+    "think": "🤔", "isip": "🤔", "why": "🤔", "bakit": "🤔", "question": "❓", "secret": "🤫", "sikreto": "🤫",
+    "work": "💼", "trabaho": "💼", "school": "🏫", "eskwela": "🏫", "book": "📚", "libro": "📚", "gym": "💪",
+    "strong": "💪", "lakas": "💪", "family": "👨‍👩‍👧", "pamilya": "👨‍👩‍👧", "friend": "🤝", "kaibigan": "🤝",
+    "tropa": "🤝", "watching": "👀", "watch": "👀", "look": "👀", "tingnan": "👀", "subscribe": "🔔",
+    "like": "👍", "share": "📤", "build": "🛠️", "editor": "🎬", "first": "1️⃣", "goal": "🎯", "birthday": "🎂",
+    "party": "🎉", "congrats": "🎉", "congratulations": "🎉", "christmas": "🎄", "pasko": "🎄",
+}
+
+
+def emoji_for(text: str) -> str | None:
+    """The emoji that follows `text` in the emoji style, if it is one of the keywords."""
+    return EMOJI.get(norm_word(text))
 
 
 def ass_time(t: float) -> str:
@@ -136,7 +173,7 @@ def _plan(tl: Timeline):
     W, H = tl.out["width"], tl.out["height"]
     vertical = H > W
     style = cfg["style"]
-    upper = cfg["uppercase"] if cfg["uppercase"] is not None else style in ("pop", "box")
+    upper = cfg["uppercase"] if cfg["uppercase"] is not None else style in ("pop", "box", "karaoke", "emoji")
     if style == "clean":
         size = cfg.get("size") or round((W * 0.058) if vertical else (H * 0.056))
         max_words, max_chars = cfg.get("max_words", 10), cfg.get("max_chars", 22 if vertical else 42)
@@ -165,6 +202,7 @@ def _plan(tl: Timeline):
             groups.append((g, g_end))
 
     box = style == "box"
+    emoji = style == "emoji"
     spk = {k: _hex(v) for k, v in (cfg.get("speaker_colors") or {}).items()}
     events = []
     for g, g_end in groups:
@@ -176,6 +214,8 @@ def _plan(tl: Timeline):
                           "hl_start": g[0]["ostart"] if k == 0 else w["ostart"],
                           "hl_end": g[k + 1]["ostart"] if k + 1 < len(g) else g_end,
                           "speaker": w.get("speaker")})
+            if emoji and emoji_for(w["text"]):
+                words[-1]["emoji"] = emoji_for(w["text"])
         events.append({"start": g[0]["ostart"], "end": g_end, "words": words})
     # output time at which the edited clips begin: an intro bumper pushes every caption time (and the whole timeline)
     # later by its length, but the live preview skips bumpers, so it subtracts this
@@ -193,6 +233,29 @@ def _plan(tl: Timeline):
         "events": events,
     }
     return public, _Plan(cfg, W, H, style, bool(upper), size, margin_v, font, outline, act, groups)
+
+
+def karaoke_text(g, texts, g_end, hi: str, col: str, spk_colors: dict) -> str:
+    r"""One line for the whole group: words wait in the base colour (SecondaryColour while karaoke runs) and each fills
+    left to right with the highlight (PrimaryColour) over the time it is spoken (\kf); pauses between words are
+    empty \k syllables so the next word starts filling exactly when it is said. Times are centiseconds from the group
+    start, rounded from absolute times so they never drift."""
+    t0 = g[0]["ostart"]
+
+    def cs(t):
+        return max(0, round((t - t0) * 100))
+
+    out, cur = [r"{\1c" + hi + r"\2c" + col + "}"], 0
+    for k, (w, t) in enumerate(zip(g, texts)):
+        s = max(cur, cs(w["ostart"]))
+        e = max(s + 1, cs(min(w["oend"], g_end)))
+        tag = (rf"\k{s - cur}" if s > cur else "") + rf"\kf{e - s}"
+        sc = spk_colors.get(w.get("speaker"))
+        if sc:
+            tag += r"\1c" + sc
+        out.append(("{" + tag + "}") + (" " if k else "") + t)
+        cur = e
+    return "".join(out)
 
 
 def caption_events(tl: Timeline) -> dict:
@@ -226,11 +289,18 @@ Style: Lower,{font},{round(size * 0.75)},&H00FFFFFF,&H00FFFFFF,&H00000000,&H9000
 Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
 """
     spk_colors = {k: hex_to_ass(v) for k, v in (cfg.get("speaker_colors") or {}).items()}
+    emoji_font = cfg.get("emoji_font") or ("Segoe UI Emoji" if sys.platform == "win32" else "Noto Emoji")
     events, srt = [], []
     for g, g_end in x.groups:
         texts = [esc(w["text"].upper() if upper else w["text"]) for w in g]
+        emojis = [emoji_for(w["text"]) if style == "emoji" else None for w in g]
+        srt.append((g[0]["ostart"], g_end, " ".join(t + (" " + e if e else "") for t, e in zip(texts, emojis))))
         plain = " ".join(texts)
-        srt.append((g[0]["ostart"], g_end, plain))
+        if style == "karaoke":
+            if g_end > g[0]["ostart"]:  # like pop, a group with no time on screen (a cut retake) draws nothing
+                events.append(f"Dialogue: 0,{ass_time(g[0]['ostart'])},{ass_time(g_end)},Cap,,0,0,0,,"
+                              + karaoke_text(g, texts, g_end, hi, col, spk_colors))
+            continue
         if style == "clean":
             sc = spk_colors.get(g[0].get("speaker"))
             tag = (r"{\c" + sc + "}") if sc else ""
@@ -248,6 +318,8 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
                     parts.append(r"{\c" + h + rf"\fscx{act}\fscy{act}}}" + t + r"{\c" + col + r"\fscx100\fscy100}")
                 else:
                     parts.append(t)
+                if emojis[j]:  # drawn in the base colour, unscaled, in a font that has the glyph
+                    parts[-1] += r" {\fn" + emoji_font + "}" + emojis[j] + r"{\fn" + font + "}"
             pop = r"{\fad(0,0)}" if k else r"{\fscx90\fscy90\t(0,80,\fscx100\fscy100)}"
             events.append(f"Dialogue: 0,{ass_time(s)},{ass_time(e)},Cap,,0,0,0,,{pop}{' '.join(parts)}")
 

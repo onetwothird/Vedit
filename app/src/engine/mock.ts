@@ -4,7 +4,7 @@
 import {
   EngineError,
   type AnalyzeBody, type CaptionTrack, type ClipOp, type ClipView, type Doctor, type Edl, type EdlClip, type Engine,
-  type AiTestResult, type Batch, type BatchBody, type Brand, type ExportBody, type Story, type StoryBody, type StoryScene, type FilmstripInfo, type Health, type Highlight, type Job, type ModelStatus, type NewProjectBody, type Project, type ProjectType,
+  type AiTestResult, type Batch, type BatchBody, type Brand, type BrollBody, type BrollSuggestion, type BrollSuggestions, type ExportBody, type Story, type StoryBody, type StoryScene, type FilmstripInfo, type Health, type Highlight, type Job, type ModelStatus, type NewProjectBody, type Project, type ProjectType,
   type ProjectClip, type RenderPlanEntry, type Transcript, type TranscriptWord,
 } from "./types";
 import { spelledAs } from "../edit/spelling";
@@ -122,6 +122,11 @@ function applyOp(edl: Edl, op: ClipOp): Edl {
 
 const SAMPLE_SEC = 12; // public/mock/sample.mp4 is this long; every mock clip plays from its start
 
+/** A few of scripts/captions.py EMOJI keywords: enough for the mock passage and the tests. */
+const MOCK_EMOJI: Record<string, string> = {
+  hello: "👋", thanks: "🙏", salamat: "🙏", galing: "🔥", first: "1️⃣", nobody: "🙅", love: "❤️", money: "💰", watching: "👀",
+};
+
 /** The caption look and grouping the edl asks for, as scripts/captions.py _plan reads edl.captions. */
 function captionTrack(edl: Edl, spoken: { text: string; start: number; end: number; speaker: string | null }[]): CaptionTrack {
   const cfg: Record<string, unknown> = { style: "pop", hide_fillers: true, ...((edl.captions ?? {}) as Record<string, unknown>) };
@@ -139,9 +144,12 @@ function captionTrack(edl: Edl, spoken: { text: string; start: number; end: numb
     const end = g[g.length - 1].end + 0.15;
     events.push({
       start: g[0].start, end,
-      words: g.map((w, k) => ({
-        ...w, hl_start: k === 0 ? g[0].start : w.start, hl_end: k + 1 < g.length ? g[k + 1].start : end,
-      })),
+      words: g.map((w, k) => {
+        const emoji = style === "emoji" ? MOCK_EMOJI[w.text.toLowerCase().replace(/[^\p{L}\p{N}']/gu, "")] : undefined;
+        return {
+          ...w, hl_start: k === 0 ? g[0].start : w.start, hl_end: k + 1 < g.length ? g[k + 1].start : end, ...(emoji ? { emoji } : {}),
+        };
+      }),
     });
   }
   return {
@@ -177,6 +185,72 @@ function clipView(edl: Edl, tr: Transcript): ClipView {
     t += kr[1] - kr[0];
   });
   return { edl: copy(edl), kept_ranges, captions: captionTrack(edl, spoken), sample_offset: base };
+}
+
+// ---- b-roll suggestions: a small port of scripts/broll.py over a fixed mock folder --------------------------------
+
+/** What any picked folder holds in the mock; a folder whose name ends in "empty" holds nothing. */
+const MOCK_BROLL = ["first-gig.jpg", "new_year party.mp4", "office.png", "exit-door.jpg"];
+const BROLL_LEN = 3;
+const BROLL_STOP = new Set(["img", "dsc", "photo", "video", "clip", "final", "copy", "the", "and", "new", "party"]);
+
+const normWord = (w: string): string => {
+  const x = w.toLowerCase().normalize("NFKD").replace(/[^0-9a-z]/g, "");
+  return x.length > 3 && x.endsWith("s") && !x.endsWith("ss") ? x.slice(0, -1) : x;
+};
+const nameWords = (file: string): string[] =>
+  [...new Set(file.replace(/\.[^.]+$/, "").split(/[^0-9A-Za-z]+/).map(normWord))].filter((w) => w.length >= 3 && !BROLL_STOP.has(w));
+
+function mockBroll(edl: Edl, tr: Transcript, body: BrollBody): BrollSuggestions {
+  const folder = body.folder.trim();
+  if (!/^([A-Za-z]:[\\/]|\/)/.test(folder)) throw new EngineError(400, "bad_request", "folder must be an existing absolute folder");
+  const files = /empty[\\/]?$/i.test(folder) ? [] : MOCK_BROLL;
+  const sep = folder.includes("\\") ? "\\" : "/";
+  const pathOf = (f: string) => `${folder.replace(/[\\/]+$/, "")}${sep}${f}`;
+  // the words the clip plays, each with the end of its kept range
+  const said: { i: number; end: number }[] = [];
+  for (const [a, b] of wordRanges(edl)) {
+    for (let i = a; i <= b && i < tr.words.length; i++) if (tr.words[i].filler !== "hard") said.push({ i, end: tr.words[b].end });
+  }
+  const make = (f: string, k: number, word: string, source: "name" | "ai", why: string): BrollSuggestion => {
+    const w = tr.words[said[k].i];
+    return {
+      path: pathOf(f), name: f, type: /\.(mp4|mov|m4v|webm|mkv)$/i.test(f) ? "video" : "image", t: w.start,
+      duration: round(Math.max(0.5, Math.min(BROLL_LEN, said[k].end - w.start))), word, source, why,
+    };
+  };
+  const found: BrollSuggestion[] = [];
+  if (body.ai?.api_key && files.length) {
+    const k = said.findIndex(({ i }) => normWord(tr.words[i].text) === "quit");
+    if (k >= 0) found.push(make("exit-door.jpg", k, "quit", "ai", "Almost quitting: someone walking out a door"));
+  }
+  for (const f of files) {
+    const keys = nameWords(f);
+    let best: [number, number] | null = null;
+    for (let k = 0; k < said.length; k++) {
+      if (!keys.includes(normWord(tr.words[said[k].i].text))) continue;
+      const near = new Set(said.slice(Math.max(0, k - 4), k + 5).map((x) => normWord(tr.words[x.i].text)).filter((n) => keys.includes(n)));
+      const score = near.size + near.size / keys.length;
+      if (!best || score > best[0]) best = [score, k];
+    }
+    if (best) found.push(make(f, best[1], tr.words[said[best[1]].i].text.replace(/[^\p{L}\p{N}'-]/gu, ""), "name", ""));
+  }
+  const spans: [number, number][] = [];
+  const used = new Set<string>();
+  for (const o of (edl.overlays as { type?: string; path?: string; at?: { t: number }; duration?: number }[] | undefined) ?? []) {
+    if (o.type === "text") continue;
+    if (o.path) used.add(o.path);
+    if (o.at) spans.push([o.at.t, o.at.t + (o.duration ?? 0)]);
+  }
+  const out: BrollSuggestion[] = [];
+  for (const s of found) {
+    if (used.has(s.path) || spans.some(([x, y]) => s.t < y && x < s.t + s.duration)) continue;
+    out.push(s);
+    used.add(s.path);
+    spans.push([s.t, s.t + s.duration]);
+  }
+  out.sort((a, b) => a.t - b.t);
+  return { suggestions: out, files: files.length, ai: body.ai?.api_key ? "ok" : null };
 }
 
 // ---- the engine -----------------------------------------------------------------------------------------------
@@ -533,6 +607,12 @@ export function createMockEngine(opts: { tickMs?: number; persist?: Pick<Storage
       edls.set(key, next);
       save(key, next);
       return clipView(next, transcript);
+    },
+    async suggestBroll(pid, hid, body) {
+      project(pid);
+      const edl = edls.get(`${pid}/${hid}`);
+      if (!edl) throw notFound(`clip ${hid}`);
+      return mockBroll(edl, transcript, body);
     },
     async setKept(pid, hid, kept) {
       const p = project(pid);

@@ -78,4 +78,24 @@ describe("B-roll tool", () => {
     act(() => radio("In a corner").click());
     expect((p.onOverlays as ReturnType<typeof vi.fn>).mock.calls[0][0][1]).toMatchObject({ id: "b1", mode: "pip", position: "top-right" });
   });
+
+  it("offers Suggest b-roll only when the editor can ask the engine, and adds accepted ones to the clip's layers", async () => {
+    act(() => root.render(<BrollTool {...props()} />));
+    expect(host.querySelector(".bs")).toBeNull();
+    const suggestBroll = vi.fn(async () => ({ files: 1, ai: null, suggestions: [
+      { path: "C:/pics/cake.jpg", name: "cake.jpg", type: "image" as const, t: 4, duration: 3, word: "cake", source: "name" as const, why: "" },
+    ] }));
+    const p = props({ suggestBroll });
+    act(() => root.render(<BrollTool {...p} />));
+    const input = host.querySelector<HTMLInputElement>(".bs input")!;
+    act(() => {
+      Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")!.set!.call(input, "C:/pics");
+      input.dispatchEvent(new Event("input", { bubbles: true }));
+    });
+    await act(async () => host.querySelector<HTMLFormElement>(".bs form")!.requestSubmit());
+    act(() => host.querySelector<HTMLButtonElement>('button[aria-label="Add cake.jpg"]')!.click());
+    const items = (p.onOverlays as ReturnType<typeof vi.fn>).mock.calls[0][0] as Overlay[];
+    expect(items.map((o) => o.id)).toEqual(["t1", "b1", items[2].id]);
+    expect(items[2]).toMatchObject({ type: "image", path: "C:/pics/cake.jpg", at: { t: 4 }, duration: 2 });
+  });
 });

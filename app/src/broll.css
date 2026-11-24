@@ -1,0 +1,22 @@
+/* Suggest b-roll, in the B-roll tool */
+.bs { margin-top: 14px; padding-top: 12px; border-top: 1px solid var(--line); }
+.bs-title { margin: 0 0 4px; font: 600 13px var(--sans); color: var(--ink); }
+.bs-form { display: flex; flex-direction: column; gap: 6px; margin: 10px 0; }
+.bs-row { display: flex; gap: 8px; }
+.bs-input {
+  flex: 1; min-width: 0; height: 36px; padding: 0 10px; border-radius: var(--r-chip); border: 1px solid var(--line-2);
+  background: var(--bg); color: var(--ink); font-size: 12px;
+}
+.bs-input:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+.bs-go { align-self: flex-start; }
+.bs-head { display: flex; justify-content: space-between; align-items: center; gap: 8px; margin: 4px 0 6px; }
+.bs-list { list-style: none; padding: 0; margin: 0; display: flex; flex-direction: column; gap: 4px; }
+.bs-item {
+  display: flex; justify-content: space-between; align-items: center; gap: 10px; padding: 8px 8px 8px 12px;
+  border-radius: var(--r-chip); background: var(--chip); border-left: 3px solid #38bdf8; font-size: 13px; color: var(--ink);
+}
+.bs-what { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.bs-when { font-size: 11px; color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.bs-why { font-size: 12px; color: var(--body); }
+.bs-item .row { flex: none; }
+.bs-item .row button { padding: 4px 10px; }

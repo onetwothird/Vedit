@@ -149,6 +149,8 @@ export interface CaptionWord {
   hl_start: number;
   hl_end: number;
   speaker: string | null;
+  /** Emoji caption style: the emoji drawn after this word (it is one of the engine's keywords). */
+  emoji?: string;
 }
 
 export interface CaptionEvent {
@@ -190,7 +192,7 @@ export interface ClipView {
   sharp_zoom?: number;
 }
 
-export type EditSection = "captions" | "audio" | "color" | "framing" | "output" | "overlays";
+export type EditSection = "captions" | "audio" | "color" | "framing" | "output" | "overlays" | "transition";
 
 export type ClipOp =
   | { op: "cut"; w0: number; w1: number }
@@ -250,6 +252,33 @@ export interface Brand {
   intro: string;
   outro: string;
   music: string;
+}
+
+/** POST /projects/{pid}/clips/{hid}/broll: suggest b-roll from the photos and videos in `folder` (scripts/broll.py). */
+export interface BrollBody {
+  folder: string;
+  ai?: AnalyzeBody["ai"];
+}
+
+/** A moment the clip names a thing or place, and the file that shows it. `t` is source time on the main video. */
+export interface BrollSuggestion {
+  path: string;
+  name: string;
+  type: "image" | "video";
+  t: number;
+  duration: number;
+  /** The words that matched (by file name) or that the AI picked. */
+  word: string;
+  source: "name" | "ai";
+  why: string;
+}
+
+export interface BrollSuggestions {
+  suggestions: BrollSuggestion[];
+  /** Photos and videos found in the folder. */
+  files: number;
+  /** null when no AI key was sent; "ai_failed" keeps the file-name matches. */
+  ai: null | "ok" | "ai_failed";
 }
 
 export interface AiTestBody {
@@ -368,6 +397,7 @@ export interface Engine {
   clip(pid: string, hid: string): Promise<ClipView>;
   patchClip(pid: string, hid: string, op: ClipOp): Promise<ClipView>;
   setKept(pid: string, hid: string, kept: boolean): Promise<Project>;
+  suggestBroll(pid: string, hid: string, body: BrollBody): Promise<BrollSuggestions>;
   exportClips(pid: string, body: ExportBody): Promise<Job>;
   getJob(id: string): Promise<Job>;
   cancelJob(id: string): Promise<Job>;
