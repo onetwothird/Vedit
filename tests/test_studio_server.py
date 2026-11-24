@@ -181,7 +181,8 @@ def test_create_and_get_project(client, auth, tiny_video):
     assert bad.status_code == 400
 
 
-def test_analyze_submits_expected_steps(client, auth, fake_queue, tiny_video):
+def test_analyze_submits_expected_steps(client, auth, fake_queue, tiny_video, monkeypatch):
+    monkeypatch.setattr(accel, "gpu_ready", lambda: True)  # same steps on any machine (no CPU model swap)
     pid = client.post("/projects", headers=auth, json={"source": str(tiny_video), "language": "tl",
                                                        "platform": "shorts"}).json()["id"]
     job = client.post(f"/projects/{pid}/analyze", headers=auth, json={}).json()

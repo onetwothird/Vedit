@@ -52,9 +52,12 @@ Every edit is stored as a plain JSON file (`edl.json`, an *edit decision list*).
 - **Multi-format export.** Render one edit as 16:9, 9:16, 1:1 and 4:5, with face-aware cropping.
 - **Overlays.** Titles, lower thirds, b-roll, picture-in-picture, images, sound effects.
 - **Motion and color.** Ken Burns zoom and pan, speed ramps, fades, color adjustment, 3D LUTs.
+- **Transitions.** Crossfade or whip between cuts, centred on each cut so the clip keeps its length.
+- **B-roll suggestions.** Finds the moments the transcript names a thing or place and matching photos or clips in a folder.
 
 ### Captions
-- Animated word-by-word captions (`pop`, `box`) or standard subtitles (`clean`)
+- Animated word-by-word captions (`pop`, `box`, `karaoke`, `emoji`) or standard subtitles (`clean`)
+- `emoji` adds an emoji after keywords, in English and Filipino/Taglish
 - `.srt` export for upload to YouTube and other platforms
 - Custom spelling fixes and caption colors per speaker
 
@@ -95,7 +98,7 @@ Every edit is stored as a plain JSON file (`edl.json`, an *edit decision list*).
 |---|---|
 | Python 3.9+ | |
 | FFmpeg | Must include `libass` (standard builds do) |
-| *Optional:* NVIDIA GPU | Speeds up transcription automatically |
+| *Optional:* NVIDIA GPU | Used automatically for transcription and the preview copy (NVENC). PyTorch is not needed. On Windows also run `pip install nvidia-cublas-cu12 nvidia-cudnn-cu12` (or point `VEDIT_CUDA` at a folder with `cublas64_12.dll` and `cudnn64_9.dll`). Set `VEDIT_DEVICE=cpu` to turn the GPU off |
 | *Optional:* `OPENAI_API_KEY` / `ELEVENLABS_API_KEY` | Premium voices in story mode |
 
 ## Installation
@@ -265,6 +268,7 @@ Start from Home with one of five things to make:
    | Framing | Shape (9:16, 1:1, 4:5, 16:9), face tracking, zoom |
    | Color | Brightness, contrast, saturation, sharpen, vignette |
    | Speed | 1× to 2×; voices keep their pitch, captions and layers stay on their words |
+   | Transition | Cut, crossfade or whip between kept pieces, with a length; shown in the export |
 
    The timeline under the player has split, trim, delete, undo and redo, zoom, and lanes for text and b-roll you
    can drag. The preview shows what the export will draw: the same cuts, speed, captions, text, b-roll and colour
@@ -425,10 +429,20 @@ vedit/
 ├── scripts/               Python package (installed as `vedit`)
 │   ├── vedit.py           CLI entry point
 │   ├── studio_server.py   local API the desktop app talks to (127.0.0.1, token-protected)
+│   ├── studio_jobs.py     background jobs and progress for the app
+│   ├── studio_projects.py saved projects
+│   ├── studio_stories.py  story projects for the app
+│   ├── engine_entry.py    entry point of the packaged engine
 │   ├── edl_ops.py         the edits the app sends: cut, restore, trim, fix a word, patch a section
 │   ├── auto.py            one-command pipeline
 │   ├── analyze.py         footage analysis
-│   ├── transcribe.py      word-level transcription
+│   ├── transcribe.py      word-level transcription (batched, GPU when available)
+│   ├── accel.py           NVIDIA GPU detection for speech recognition and NVENC
+│   ├── models.py          Whisper model downloads and status
+│   ├── proxy.py           fast preview copy of the source video
+│   ├── highlights.py      finds the moments worth posting
+│   ├── highlights_llm.py  optional AI ranking of those moments
+│   ├── broll.py           b-roll suggestions from the transcript
 │   ├── autocut.py         draft edit generation
 │   ├── presets.py         platform presets and brand kit
 │   ├── edl.py             edit decision list → timeline
@@ -461,7 +475,8 @@ vedit/
 | `can't open file '...\scripts\vedit.py'` | You are in the wrong folder. `cd` into the `vedit` folder first |
 | `ffmpeg not found` | Install FFmpeg and open a new terminal so `PATH` refreshes |
 | pip warnings about `license` / `BuildBackendWarning` | Harmless setuptools deprecation notices; ignore them |
-| First run is slow | The Whisper model is downloaded once (~500 MB for `small`). Use `--model base` on slower machines |
+| First run is slow | The Whisper model is downloaded once: `small` 484 MB, `large-v3` 3 GB, `large-v3-turbo` 1.6 GB. Use `--model base` on slower machines |
+| Transcription is slow on a laptop | Without an NVIDIA GPU, Vedit uses `large-v3-turbo` in place of `large-v3` (about 2× real time on a 6-core CPU). With a GPU, check `pip install nvidia-cublas-cu12 nvidia-cudnn-cu12` on Windows |
 | Wrong transcription language | Pass `--language en` (or `tl`, `es`, `ja`, …) |
 | Captions use the wrong font | Set `captions.font` to an installed font, or add `.ttf` files to `fonts/` |
 | Vertical crop misses the subject | `pip install opencv-python`, or set `crop_x` per clip (see `vedit frames VIDEO --grid`) |

@@ -1,6 +1,12 @@
 # Changelog
 
 ## Unreleased
+- **Faster on NVIDIA GPUs**: speech recognition runs on the GPU through CTranslate2 (no PyTorch needed), batched
+  with silence skipped and int8 weights: 120 s of Taglish went from 257 s on the CPU to 10 s. The preview copy
+  encodes with NVENC when it works (`scripts/accel.py`). `VEDIT_DEVICE=cpu` turns the GPU off; on Windows the
+  cuBLAS/cuDNN DLLs come from the `nvidia-cublas-cu12` / `nvidia-cudnn-cu12` wheels or `VEDIT_CUDA`
+- **Computers without an NVIDIA GPU** use the new `large-v3-turbo` model in place of `large-v3` (downloaded
+  automatically, 1.6 GB): about 2x real time on a 6-core CPU
 - Editor: **Suggest b-roll** in the B-roll tool finds the moments a clip names a thing or place and the photos or
   videos in a folder you pick that show it (by file name, and by meaning with an AI key); add or skip each one
   (`scripts/broll.py`, `POST /projects/{pid}/clips/{hid}/broll`)
