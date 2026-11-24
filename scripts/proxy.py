@@ -158,7 +158,9 @@ def filmstrip(video: Path, wd: Path, every: float = 2.0, height: int = 96) -> Pa
     video, wd = Path(video), Path(wd)
     need("ffmpeg")
     wd.mkdir(parents=True, exist_ok=True)
-    duration = float(probe(video).get("format", {}).get("duration", 0) or 0)
+    info = probe(video)
+    # the picture's own length: the container's can run past it where the audio encoder pads its last frame
+    duration = float((video_stream(info) or {}).get("duration") or info.get("format", {}).get("duration", 0) or 0)
     count = max(1, math.ceil(duration / every))
     cols = min(count, MAX_STRIP_COLS)
     rows = math.ceil(count / cols)

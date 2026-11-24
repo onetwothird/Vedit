@@ -2,10 +2,12 @@
 import math
 import os
 import subprocess
+from pathlib import Path
 
 import pytest
 
 from common import ffmpeg_bin, load_json
+import proxy  # noqa: E402
 from proxy import filmstrip, make_proxy, needs_proxy, probe, rotation, video_stream
 
 MP4 = "mov,mp4,m4a,3gp,3g2,mj2"
@@ -131,3 +133,20 @@ def test_proxy_keyframes_every_second(tmp_path):
     keys = [float(x.rstrip(",")) for x in out.split()]
     assert keys[0] == 0 and len(keys) == 5
     assert all(abs((b - a) - 1.0) < 0.05 for a, b in zip(keys, keys[1:]))
+
+
+def test_filmstrip_counts_from_the_video_not_padded_audio(tmp_path, monkeypatch):
+    # Linux FFmpeg pads the AAC track, so the container can run a little past the video (2.023 s vs 2.000 s);
+    # the strip has one frame per 2 s of picture, so that is still one frame
+    src = _clip(tmp_path / "a.mp4", dur=2)
+    real = proxy.probe
+
+    def padded(path):
+        info = real(path)
+        if Path(path) == src:
+            info["format"]["duration"] = "2.023000"
+        return info
+
+    monkeypatch.setattr(proxy, "probe", padded)
+    filmstrip(src, tmp_path)
+    assert load_json(tmp_path / "filmstrip.json")["count"] == 1
