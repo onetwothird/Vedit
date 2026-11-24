@@ -95,9 +95,9 @@ test("the caption preview shows each caption style", async ({ page }) => {
     await preview.getByRole("radio", { name }).check();
     await expect(preview).toHaveAttribute("data-style", name.toLowerCase());
   }
-  await expect(preview.locator(".cap-emoji")).toHaveText(/🔥/);
+  await expect(preview.locator("[data-emoji]")).toHaveText(/🔥/);
   await preview.getByRole("radio", { name: "Karaoke" }).check();
-  await expect(preview.locator(".cap-fill")).toHaveText("galing");
+  await expect(preview.locator("[data-fill]").nth(1)).toHaveText("galing");
 });
 
 test("updates show the version and wait for the installed app", async ({ page }) => {
@@ -124,9 +124,9 @@ test("fits a 375px phone without sideways scrolling", async ({ page }) => {
 test("the caption preview follows the brand kit as you edit", async ({ page }) => {
   await page.goto("/#/settings");
   await page.getByLabel("Caption font").fill("Poppins");
-  await expect(page.locator(".cap-line")).toHaveCSS("font-family", /Poppins/);
+  await expect(page.locator(".cap-preview [data-caption]")).toHaveCSS("font-family", /Poppins/);
   await page.getByLabel("Caption color").fill("#ff0000");
-  await expect(page.locator(".cap-line")).toHaveCSS("color", "rgb(255, 0, 0)");
+  await expect(page.locator(".cap-preview [data-caption]")).toHaveCSS("color", "rgb(255, 0, 0)");
 });
 
 for (const scheme of ["dark", "light"] as const) {

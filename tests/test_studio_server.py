@@ -72,6 +72,12 @@ class FakeQueue:
         self.shut = True
 
 
+@pytest.fixture(autouse=True)
+def _gpu(monkeypatch):
+    """The same analyze steps on any machine: a GPU runs the model asked for (tests that need a CPU patch it again)."""
+    monkeypatch.setattr(accel, "gpu_ready", lambda: True)
+
+
 @pytest.fixture
 def home(tmp_path, monkeypatch):
     h = tmp_path / "home"

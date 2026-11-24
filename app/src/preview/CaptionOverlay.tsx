@@ -1,6 +1,7 @@
 import type { CSSProperties } from "react";
 import type { CaptionTrack } from "../engine/types";
 import { activeCaption } from "./playback";
+import { cssFont } from "../edit/captionFonts";
 
 function rgba(hex: string, alpha: number): string {
   const h = hex.replace("#", "");
@@ -27,8 +28,8 @@ export default function CaptionOverlay({ track, outT, frameHeight }: { track: Ca
 
   const wrap: CSSProperties = {
     position: "absolute", left: 0, right: 0, bottom: `${track.baseline_frac * H}px`, padding: "0 6%",
-    textAlign: "center", pointerEvents: "none", lineHeight: 1.1, fontWeight: 700,
-    fontFamily: `${track.font}, Arial, sans-serif`, fontSize: `${track.size_frac * H}px`,
+    textAlign: "center", pointerEvents: "none", lineHeight: 1.1, fontWeight: track.bold === false ? 400 : 700,
+    fontFamily: cssFont(track.font), fontSize: `${track.size_frac * H}px`,
     textTransform: track.uppercase ? "uppercase" : "none", color: track.color,
     ...(box
       ? {}

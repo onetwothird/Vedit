@@ -5,11 +5,16 @@ run it alone to inspect/tweak captions.
   python captions.py edl.json [--out captions.ass]
 
 edl.json "captions" block (all optional):
-  {"enabled": true, "style": "pop" | "box" | "clean" | "karaoke" | "emoji", "max_words": 3, "font": "Arial", "size": null,
+  {"enabled": true, "style": "pop" | "box" | "clean" | "karaoke" | "emoji", "max_words": 3, "font": "Montserrat ExtraBold", "size": null,
    "color": "#FFFFFF", "highlight": "#FFD400", "uppercase": true, "position": "lower" | "middle" | "bottom",
    "hide_fillers": true, "srt": true, "replace": {"teh": "the"}, "min_show": 0.7,
    "speaker_colors": {"maria": "#FF6FB5", "narrator": "#FFD400"},   # skits: active word colored per speaker
-   "emoji_font": "Segoe UI Emoji"}
+   "emoji_font": "Segoe UI Emoji", "scale": 100, "outline_color": "#000000", "outline_scale": 100, "shadow": 1,
+   "bold": null, "active_scale": 108}
+scale: % of the style's default size (lines hold fewer words as it grows). outline_scale: % of the default outline
+(0 = none). bold: null = bold unless the font has one weight only (SINGLE_WEIGHT, drawn as designed).
+Fonts in fonts/ (Poppins, Montserrat ExtraBold, Anton, Bebas Neue, Bangers, Archivo Black, Permanent Marker,
+Pacifico, DM Serif Display) look the same on every computer; other names need the font installed.
 karaoke: the whole group shows and each word fills with the highlight colour while it is spoken (libass \kf).
 emoji: pop captions with an emoji after keywords from EMOJI (English and Filipino).
 Text overlays (titles, lower-thirds, callouts) come from edl.json "overlays" entries with "type": "text".
@@ -25,6 +30,21 @@ from typing import NamedTuple
 sys.path.insert(0, str(Path(__file__).parent))
 from common import hex_to_ass, norm_word  # noqa: E402
 from edl import Timeline  # noqa: E402
+
+
+# the default caption font: heavy, rounded and readable at phone size, the usual Reels/TikTok caption look;
+# bundled in fonts/, so every computer draws it the same
+DEFAULT_FONT = "Montserrat ExtraBold"
+
+# bundled display fonts that come in one weight: asking libass for bold would smear them with a fake bold
+SINGLE_WEIGHT = {"Anton", "Bebas Neue", "Bangers", "Archivo Black", "Permanent Marker", "Pacifico", "DM Serif Display"}
+
+
+def _pct(v, default: float = 100.0, lo: float = 0.0, hi: float = 300.0) -> float:
+    """A percentage setting from edl.json, clamped; anything that is not a number is the default."""
+    if isinstance(v, bool) or not isinstance(v, (int, float)):
+        return default
+    return min(hi, max(lo, float(v)))
 
 
 # keyword (as norm_word spells it) -> emoji shown after it by the "emoji" style. English and Filipino/Taglish.
@@ -163,6 +183,9 @@ class _Plan(NamedTuple):
     font: str
     outline: float
     act: int
+    bold: bool
+    base_size: int  # before "scale": titles and lower thirds use it
+    base_outline: float
     groups: list  # [(words, group_end_seconds)]
 
 
@@ -174,18 +197,30 @@ def _plan(tl: Timeline):
     vertical = H > W
     style = cfg["style"]
     upper = cfg["uppercase"] if cfg["uppercase"] is not None else style in ("pop", "box", "karaoke", "emoji")
+    scale = _pct(cfg.get("scale"), lo=40) / 100
     if style == "clean":
         size = cfg.get("size") or round((W * 0.058) if vertical else (H * 0.056))
         max_words, max_chars = cfg.get("max_words", 10), cfg.get("max_chars", 22 if vertical else 42)
     else:
         size = cfg.get("size") or round((W * 0.085) if vertical else (H * 0.075))
         max_words, max_chars = cfg.get("max_words", 3), cfg.get("max_chars", 16 if vertical else 24)
+    base_size, size = size, max(8, round(size * scale))
+    max_chars = max(6, round(max_chars / scale))  # bigger letters, fewer per line, so a line still fits the frame
+    # max_words chosen in edl.json (the editor's "Words at a time") is exact: never more words on screen, and a group
+    # may wrap to a second line instead of splitting early. Unset: the style's default, and fast speech may join two.
+    exact = "max_words" in (tl.edl.get("captions") or {})
+    if exact:
+        max_words, max_chars = max(1, int(max_words)), max_chars * 2
     pos = cfg.get("position") or ("lower" if style != "clean" else "bottom")
     # position: preset name, or a number = distance of the caption baseline from the bottom (fraction of height)
     margin_v = pos if isinstance(pos, (int, float)) else \
         {"bottom": 0.07, "lower": 0.24 if vertical else 0.14, "middle": 0.45}.get(pos, 0.14)
-    font = cfg.get("font", "Arial")
+    font = str(cfg.get("font") or DEFAULT_FONT).replace(",", " ").strip() or DEFAULT_FONT  # a comma would break the ASS style
+    bold = cfg["bold"] if isinstance(cfg.get("bold"), bool) else font not in SINGLE_WEIGHT
     outline = cfg.get("outline") or max(2, round(size * (0.07 if style != "clean" else 0.06)))
+    base_outline = outline
+    if _pct(cfg.get("outline_scale")) != 100:
+        outline = round(outline * _pct(cfg.get("outline_scale")) / 100, 2)
     act = int(cfg.get("active_scale", 108))  # % size of the word being spoken (100 = no jump)
 
     groups = []
@@ -194,7 +229,9 @@ def _plan(tl: Timeline):
         words = join_hyphen_pieces(words)
         apply_replacements(words, cfg.get("replace") or {})
         min_show = float(cfg.get("min_show", 0.7))  # seconds a caption must stay up to be readable
-        raw = merge_fast(group_words(words, max_words, max_chars), max_words, max_chars, min_show)
+        raw = group_words(words, max_words, max_chars)
+        if not exact:
+            raw = merge_fast(raw, max_words, max_chars, min_show)
         for gi, g in enumerate(raw):
             g_end = max(g[-1]["oend"] + 0.15, g[0]["ostart"] + min_show)  # hold short ones, if there is room
             if gi + 1 < len(raw):
@@ -221,7 +258,7 @@ def _plan(tl: Timeline):
     # later by its length, but the live preview skips bumpers, so it subtracts this
     lead_in = next((c["t0"] for c in tl.clips if not c.get("_bumper")), 0.0)
     public = {
-        "style": style, "font": font, "size_frac": size / H, "baseline_frac": margin_v, "uppercase": bool(upper),
+        "style": style, "font": font, "bold": bold, "size_frac": size / H, "baseline_frac": margin_v, "uppercase": bool(upper),
         "color": _hex(cfg.get("color", "#FFFFFF")), "highlight": _hex(cfg.get("highlight", "#FFD400")),
         "outline_frac": outline / H, "active_scale": act,
         "outline_color": _hex(cfg.get("outline_color"), "#000000"),
@@ -232,7 +269,7 @@ def _plan(tl: Timeline):
         "lead_in": round(lead_in, 4),
         "events": events,
     }
-    return public, _Plan(cfg, W, H, style, bool(upper), size, margin_v, font, outline, act, groups)
+    return public, _Plan(cfg, W, H, style, bool(upper), size, margin_v, font, outline, act, bold, base_size, base_outline, groups)
 
 
 def karaoke_text(g, texts, g_end, hi: str, col: str, spk_colors: dict) -> str:
@@ -267,6 +304,9 @@ def build(tl: Timeline):
     _, x = _plan(tl)
     cfg, W, H, style, upper, size = x.cfg, x.W, x.H, x.style, x.upper, x.size
     margin_v, font, outline, act = x.margin_v, x.font, x.outline, x.act
+    b = -1 if x.bold else 0
+    # titles and lower thirds share the font, not the caption's size and outline settings
+    tsize, tout = x.base_size, x.base_outline
     col, hi = hex_to_ass(cfg.get("color", "#FFFFFF")), hex_to_ass(cfg.get("highlight", "#FFD400"))
     oc = hex_to_ass(cfg["outline_color"]) if cfg.get("outline_color") else "&H00000000"
     shadow = cfg.get("shadow", 1 if style != "box" else 0)
@@ -281,9 +321,9 @@ ScaledBorderAndShadow: yes
 
 [V4+ Styles]
 Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding
-Style: Cap,{font},{size},{col},{hi},{oc},{back},-1,0,0,0,100,100,0,0,{border_style},{outline},{shadow},2,{round(W * 0.06)},{round(W * 0.06)},{round(H * margin_v)},1
-Style: Title,{font},{round(size * 1.15)},&H00FFFFFF,&H00FFFFFF,&H00000000,&H90000000,-1,0,0,0,100,100,0,0,1,{outline},2,8,{round(W * 0.05)},{round(W * 0.05)},{round(H * 0.08)},1
-Style: Lower,{font},{round(size * 0.75)},&H00FFFFFF,&H00FFFFFF,&H00000000,&H90000000,-1,0,0,0,100,100,0,0,3,{round(outline * 1.5)},0,1,{round(W * 0.05)},{round(W * 0.05)},{round(H * 0.12)},1
+Style: Cap,{font},{size},{col},{hi},{oc},{back},{b},0,0,0,100,100,0,0,{border_style},{outline},{shadow},2,{round(W * 0.06)},{round(W * 0.06)},{round(H * margin_v)},1
+Style: Title,{font},{round(tsize * 1.15)},&H00FFFFFF,&H00FFFFFF,&H00000000,&H90000000,{b},0,0,0,100,100,0,0,1,{tout},2,8,{round(W * 0.05)},{round(W * 0.05)},{round(H * 0.08)},1
+Style: Lower,{font},{round(tsize * 0.75)},&H00FFFFFF,&H00FFFFFF,&H00000000,&H90000000,{b},0,0,0,100,100,0,0,3,{round(tout * 1.5)},0,1,{round(W * 0.05)},{round(W * 0.05)},{round(H * 0.12)},1
 
 [Events]
 Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text

@@ -21,6 +21,63 @@
   font-style: normal;
   font-display: block;
 }
+/* Caption fonts (edit/captionFonts.ts): the same files the export draws with, from fonts/. */
+@font-face {
+  font-family: "Montserrat ExtraBold";
+  src: url("../fonts/Montserrat-ExtraBold.ttf") format("truetype");
+  font-weight: 800;
+  font-style: normal;
+  font-display: swap;
+}
+@font-face {
+  font-family: "Anton";
+  src: url("../fonts/Anton-Regular.ttf") format("truetype");
+  font-weight: 400;
+  font-style: normal;
+  font-display: swap;
+}
+@font-face {
+  font-family: "Bebas Neue";
+  src: url("../fonts/BebasNeue-Regular.ttf") format("truetype");
+  font-weight: 400;
+  font-style: normal;
+  font-display: swap;
+}
+@font-face {
+  font-family: "Archivo Black";
+  src: url("../fonts/ArchivoBlack-Regular.ttf") format("truetype");
+  font-weight: 400;
+  font-style: normal;
+  font-display: swap;
+}
+@font-face {
+  font-family: "Bangers";
+  src: url("../fonts/Bangers-Regular.ttf") format("truetype");
+  font-weight: 400;
+  font-style: normal;
+  font-display: swap;
+}
+@font-face {
+  font-family: "Permanent Marker";
+  src: url("../fonts/PermanentMarker-Regular.ttf") format("truetype");
+  font-weight: 400;
+  font-style: normal;
+  font-display: swap;
+}
+@font-face {
+  font-family: "Pacifico";
+  src: url("../fonts/Pacifico-Regular.ttf") format("truetype");
+  font-weight: 400;
+  font-style: normal;
+  font-display: swap;
+}
+@font-face {
+  font-family: "DM Serif Display";
+  src: url("../fonts/DMSerifDisplay-Regular.ttf") format("truetype");
+  font-weight: 400;
+  font-style: normal;
+  font-display: swap;
+}
 @font-face {
   font-family: "Geist Pixel";
   src: url("../fonts/GeistPixel-Square.woff2") format("woff2");

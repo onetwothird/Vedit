@@ -1,6 +1,13 @@
 # Changelog
 
 ## Unreleased
+- **Caption look in the editor**: font (ten bundled fonts, so preview and export match everywhere), size, text colour,
+  outline and its colour, shadow, all caps, word bounce and Reset look. Default font is now Montserrat ExtraBold.
+  Engine keys `scale`, `outline_scale`, `bold` (`scripts/captions.py`)
+- **Words at a time is exact**: a count chosen in the editor is never exceeded (fast speech no longer joins two groups);
+  Clean offers 4-12 words
+- Settings: the brand-kit caption preview is drawn by the editor's caption renderer, so each style looks as exported
+- Caption panels wrap instead of scrolling sideways on narrow windows and phones
 - **Faster on NVIDIA GPUs**: speech recognition runs on the GPU through CTranslate2 (no PyTorch needed), batched
   with silence skipped and int8 weights: 120 s of Taglish went from 257 s on the CPU to 10 s. The preview copy
   encodes with NVENC when it works (`scripts/accel.py`). `VEDIT_DEVICE=cpu` turns the GPU off; on Windows the

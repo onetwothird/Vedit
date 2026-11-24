@@ -58,6 +58,8 @@ Every edit is stored as a plain JSON file (`edl.json`, an *edit decision list*).
 ### Captions
 - Animated word-by-word captions (`pop`, `box`, `karaoke`, `emoji`) or standard subtitles (`clean`)
 - `emoji` adds an emoji after keywords, in English and Filipino/Taglish
+- Ten bundled caption fonts (Montserrat ExtraBold by default, the usual Reels look), so the preview and the export
+  match on any computer; size, text and highlight colour, outline, shadow, all caps and an exact words-at-a-time count
 - `.srt` export for upload to YouTube and other platforms
 - Custom spelling fixes and caption colors per speaker
 
@@ -261,7 +263,7 @@ Start from Home with one of five things to make:
    | Tool | What it does |
    |---|---|
    | Transcript | Click a word to cut it or fix its spelling; crossed-out words are removed |
-   | Captions | Caption style, size, colours and position |
+   | Captions | Style, font, size, all caps, exact words at a time, text and highlight colour, outline, shadow, word bounce, position; Reset look |
    | Text | Add text at the playhead, type it, place it top, middle or bottom, copy or delete it |
    | B-roll | A photo or video over the clip, full screen or in a corner, with a fade. **Suggest b-roll** finds the moments the clip names a thing or place and the photos or videos in a folder you pick that show it (by file name, and by meaning with an AI key; only the words and file names are sent) |
    | Sound | Loudness, voice polish, noise reduction, background music |
@@ -515,6 +517,8 @@ Built on [FFmpeg](https://ffmpeg.org/), [libass](https://github.com/libass/libas
 
 The code is released under the [MIT License](LICENSE). © 2026 Angelito P. Decatoria III
 
-- Fonts in `fonts/` and `app/src/fonts/` are Poppins, under the [SIL Open Font License 1.1](fonts/OFL.txt).
+- Fonts in `fonts/` and `app/src/fonts/` are under the [SIL Open Font License 1.1](fonts/OFL.txt): Poppins, Montserrat,
+  Anton, Bebas Neue, Archivo Black, Bangers, Pacifico and DM Serif Display (each with its `*-OFL.txt`); Permanent Marker
+  is under the Apache License 2.0 (`fonts/PermanentMarker-LICENSE.txt`).
 - Videos you edit stay yours. No third-party footage is included in this repository or in release builds.
 - The **Juan Fact a Day** name, mascot, logo and artwork are **not** included in this repository and are not covered by the MIT License.

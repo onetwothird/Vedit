@@ -95,7 +95,7 @@ def test_emoji_burns_in_after_keywords(emoji_wd):
     tl = Timeline(emoji_wd / "edl.json")
     ass, srt, _ = build(tl)
     texts = [x[2] for x in caption_lines(ass)]
-    tag = r"{\fnSegoe UI Emoji}👋{\fnArial}"
+    tag = r"{\fnSegoe UI Emoji}👋{\fnMontserrat ExtraBold}"
     assert any("HELLO" in t and tag in t for t in texts)
     assert all(t.index(tag) > t.index("HELLO") for t in texts if tag in t)
     assert any("🙏" in t for t in texts) and any("👀" in t for t in texts)

@@ -1,6 +1,7 @@
 {
  "style": "pop",
- "font": "Arial",
+ "font": "Montserrat ExtraBold",
+ "bold": true,
  "size_frac": 0.0484,
  "baseline_frac": 0.24,
  "uppercase": true,

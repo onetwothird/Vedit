@@ -5,7 +5,9 @@ import Avatar from "../components/Avatar";
 import Screen from "../components/Screen";
 import { engine, isTauri } from "../engine/client";
 import { useJob } from "../engine/events";
-import type { Brand, Language, ModelStatus, Platform } from "../engine/types";
+import type { Brand, CaptionTrack, Language, ModelStatus, Platform } from "../engine/types";
+import { CAPTION_FONTS, DEFAULT_CAPTION_FONT } from "../edit/captionFonts";
+import CaptionOverlay from "../preview/CaptionOverlay";
 import { t } from "../i18n/t";
 import { baseName, loadAiKey, pickFileNative, pickFolderNative, removeAiKey, saveAiKey } from "../lib/native";
 import {
@@ -485,45 +487,60 @@ function FileField({ id, label, value, kind, onChange }: { id: string; label: st
   );
 }
 
-/** Black or white, whichever reads on `hex` (a #rrggbb colour). */
-function inkOn(hex: string): string {
-  const n = parseInt(hex.slice(1), 16);
-  const [r, g, b] = [n >> 16, (n >> 8) & 255, n & 255];
-  return 0.299 * r + 0.587 * g + 0.114 * b > 150 ? "#111" : "#fff";
-}
-
 const CAPTION_STYLES = ["pop", "box", "clean", "karaoke", "emoji"] as const;
 type CaptionStyle = (typeof CAPTION_STYLES)[number];
 
 /**
- * What the brand kit does: a 9:16 frame with a sample caption in the chosen font and colours, drawn in each caption style
- * the editor offers (the style itself is picked per clip, so this choice only changes the preview).
+ * A one-group caption track drawn the way scripts/captions.py draws `style` on a 9:16 video (its default size, outline,
+ * baseline, box and capitals), held at the moment "galing" is half spoken, for the real CaptionOverlay to paint.
+ */
+export function sampleTrack(style: CaptionStyle, font: string, color: string, highlight: string): { track: CaptionTrack; at: number } {
+  const clean = style === "clean";
+  const box = style === "box";
+  const texts = [t("settings.brand.sample.before"), t("settings.brand.sample.word"), ...t("settings.brand.sample.after").split(" ")]
+    .slice(0, clean ? 10 : 3);
+  const words = texts.map((text, i) => ({
+    text, start: i * 0.4, end: i * 0.4 + 0.38, hl_start: i * 0.4, hl_end: (i + 1) * 0.4, speaker: null,
+    ...(style === "emoji" && i === 1 ? { emoji: "🔥" } : {}),
+  }));
+  const size = clean ? 0.058 * 9 / 16 : 0.085 * 9 / 16; // a share of the width, as a share of the 9:16 frame height
+  const fontName = font || DEFAULT_CAPTION_FONT;
+  return {
+    at: 0.6,
+    track: {
+      style, font: fontName, bold: !CAPTION_FONTS.some((f) => f.family === fontName && f.single),
+      size_frac: size, baseline_frac: clean ? 0.07 : 0.24, uppercase: !clean, color, highlight,
+      outline_frac: size * (clean ? 0.06 : 0.07), active_scale: 108, outline_color: "#000000", shadow: box ? 0 : 1,
+      back_color: box ? "#000000" : null, back_alpha: box ? 0.5608 : null, speaker_colors: {},
+      events: [{ start: 0, end: words.length * 0.4, words }],
+    },
+  };
+}
+
+/**
+ * What the brand kit does: a 9:16 frame with a sample caption in the chosen font and colours, drawn by the editor's own
+ * caption renderer in each style (the style itself is picked per clip, so this choice only changes the preview).
  */
 function CaptionPreview({ brand }: { brand: Brand }) {
   const [style, setStyle] = useState<CaptionStyle>("pop");
+  const frame = useRef<HTMLDivElement>(null);
+  const [height, setHeight] = useState(0);
+  useEffect(() => {
+    const el = frame.current;
+    if (!el) return;
+    const measure = () => setHeight(el.clientHeight);
+    measure();
+    const ro = typeof ResizeObserver === "undefined" ? null : new ResizeObserver(measure);
+    ro?.observe(el);
+    return () => ro?.disconnect();
+  }, []);
   const font = brand.font.replace(/["\\;{}]/g, "").trim();
-  const color = brand.caption_color || "#ffffff";
-  const hl = brand.highlight || "#ffffff";
-  const word = t("settings.brand.sample.word");
-  let spoken: ReactNode;
-  if (style === "clean") spoken = word;
-  else if (style === "karaoke") {
-    // "Ang" is said, "galing" is half way through filling, the rest waits
-    spoken = <span className="cap-fill" style={{ backgroundImage: `linear-gradient(90deg, ${hl} 55%, ${color} 55%)` }}>{word}</span>;
-  } else if (style === "box") spoken = <span style={{ color: hl }}>{word}</span>;
-  else spoken = <span className="cap-hl" style={{ background: hl, color: inkOn(hl) }}>{word}</span>;
+  const { track, at } = sampleTrack(style, font, brand.caption_color || "#FFFFFF", brand.highlight || "#FFD400");
   return (
     <figure className="cap-preview" data-style={style}>
-      <div className="cap-frame" aria-hidden="true">
+      <div className="cap-frame" ref={frame} aria-hidden="true">
         <img src={poster} alt="" loading="lazy" decoding="async" />
-        <p className="cap-line" style={{ color, fontFamily: font ? `"${font}", var(--sans)` : undefined }}>
-          <span className="cap-text">
-            {style === "karaoke" ? <span style={{ color: hl }}>{t("settings.brand.sample.before")}</span> : t("settings.brand.sample.before")}{" "}
-            {spoken}
-            {style === "emoji" && <span className="cap-emoji"> 🔥</span>}{" "}
-            {t("settings.brand.sample.after")}
-          </span>
-        </p>
+        {height > 0 && <CaptionOverlay track={track} outT={at} frameHeight={height} />}
       </div>
       <div className="cap-styles">
         <Seg<CaptionStyle>

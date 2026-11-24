@@ -3,6 +3,7 @@ import { isTauri } from "../engine/client";
 import type { Aspect, Edl, EditSection } from "../engine/types";
 import { OUTPUT_ASPECTS, TRANSITION_DURATION, TRANSITIONS, type Transition } from "../edit/timeline";
 import { BrollTool, TextTool, type LayerToolProps } from "./LayerTools";
+import { CAPTION_FONTS, DEFAULT_CAPTION_FONT, LOOK_KEYS, cssFont } from "../edit/captionFonts";
 import { t } from "../i18n/t";
 import { AUDIO_ACCEPT, baseName, pickAudioNative } from "../lib/native";
 
@@ -51,17 +52,21 @@ interface Option<T> {
 }
 
 /** A labelled row with one segmented choice. */
-function Choice<T extends string | number | boolean>({ label, sub, name, value, options, onChange }: {
+function Choice<T extends string | number | boolean>({ label, sub, hint, name, value, options, onChange, stack }: {
   label: string; sub?: string; name: string; value: T | undefined; options: Option<T>[]; onChange(v: T): void;
+  /** A sentence under the row, wrapping to the panel's width. */
+  hint?: string;
+  /** Label above, options across the full width (for choices with many options). */
+  stack?: boolean;
 }) {
   const id = useId();
   return (
-    <div className="ed-row">
+    <div className={stack ? "ed-row ed-row-stack" : "ed-row"}>
       <span className="ed-label">
         <span id={id}>{label}</span>
         {sub && <span className="ed-file">{sub}</span>}
       </span>
-      <div className="seg" role="radiogroup" aria-labelledby={id}>
+      <div className="seg" role="radiogroup" aria-labelledby={id} aria-describedby={hint ? `${id}-hint` : undefined}>
         {options.map((o) => (
           <label key={String(o.value)} className="seg-opt">
             <input type="radio" name={`${name}-${id}`} checked={value === o.value} aria-label={o.aria} onChange={() => onChange(o.value)} />
@@ -69,6 +74,7 @@ function Choice<T extends string | number | boolean>({ label, sub, name, value, 
           </label>
         ))}
       </div>
+      {hint && <p className="ed-hint" id={`${id}-hint`}>{hint}</p>}
     </div>
   );
 }
@@ -145,25 +151,88 @@ function Color({ label, value, onCommit }: { label: string; value: string; onCom
   );
 }
 
+/** Caption fonts as tiles, each name drawn in its own font, so the choice is made by eye. */
+function FontPicker({ value, onChange }: { value: string; onChange(v: string): void }) {
+  const id = useId();
+  return (
+    <div className="ed-row ed-row-stack">
+      <span className="ed-label" id={id}>{t("edit.cap.font")}</span>
+      <div className="cap-fonts" role="radiogroup" aria-labelledby={id}>
+        {CAPTION_FONTS.map((f) => (
+          <label key={f.family} className="cap-font">
+            <input type="radio" name={`cap-font-${id}`} checked={value === f.family} aria-label={f.family} onChange={() => onChange(f.family)} />
+            <span title={f.family} style={{ fontFamily: cssFont(f.family), fontWeight: f.single ? 400 : 700 }}>{f.short ?? f.family}</span>
+          </label>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+/** "Words at a time" choices: short pops for animated styles, subtitle lines for Clean (its default, 10, is one). */
+const wordChoices = (clean: boolean) => (clean ? [4, 6, 8, 10, 12] : [1, 2, 3, 4, 5]);
+
 function Captions({ edl, onPatch }: Pick<InspectorProps, "edl" | "onPatch">) {
   const c = rec(edl.captions);
   const style = (c.style as string | undefined) ?? "pop";
   const clean = style === "clean";
+  const box = style === "box";
   const patch = (p: Rec) => onPatch("captions", p);
+  const pct = (v: unknown) => (typeof v === "number" ? v : 100);
+  const changed = LOOK_KEYS.some((k) => c[k] !== undefined);
   return (
     <>
       <p className="hint">{t("edit.cap.hint")}</p>
       <Choice
-        label={t("edit.cap.style")} name="cap-style" value={style}
+        label={t("edit.cap.style")} name="cap-style" value={style} stack
         options={["pop", "box", "clean", "karaoke", "emoji"].map((s) => ({ value: s, label: t(`edit.cap.style.${s}`) }))}
-        onChange={(v) => patch({ style: v })}
+        onChange={(v) => {
+          // a word count only one style offers (3 for Pop, 10 for Clean) goes back to the new style's default
+          const fits = c.max_words === undefined || wordChoices(v === "clean").includes(Number(c.max_words));
+          patch(fits ? { style: v } : { style: v, max_words: null });
+        }}
+      />
+
+      <h3 className="ed-sub">{t("edit.cap.group.text")}</h3>
+      <FontPicker value={String(c.font ?? DEFAULT_CAPTION_FONT)} onChange={(v) => patch({ font: v })} />
+      <Slider
+        label={t("edit.cap.size")} value={pct(c.scale)} min={50} max={200} step={5}
+        format={(v) => `${Math.round(v)}%`} onCommit={(v) => patch({ scale: v === 100 ? null : v })}
       />
       <Choice
-        label={t("edit.cap.words")} name="cap-words" value={Number(c.max_words ?? (clean ? 10 : 3))}
-        options={[1, 2, 3, 4, 5].map((n) => ({ value: n, label: String(n) }))}
+        label={t("edit.cap.upper")} name="cap-upper" value={typeof c.uppercase === "boolean" ? c.uppercase : !clean}
+        options={onOff(t("edit.cap.upper"))} onChange={(v) => patch({ uppercase: v })}
+      />
+      <Choice
+        label={t("edit.cap.words")} hint={t("edit.cap.words.hint")} name="cap-words" value={Number(c.max_words ?? (clean ? 10 : 3))}
+        options={wordChoices(clean).map((n) => ({ value: n, label: String(n) }))}
         onChange={(v) => patch({ max_words: v })}
       />
+
+      <h3 className="ed-sub">{t("edit.cap.group.color")}</h3>
+      <Color label={t("edit.cap.color")} value={String(c.color ?? "#FFFFFF")} onCommit={(v) => patch({ color: v })} />
       <Color label={t("edit.cap.highlight")} value={String(c.highlight ?? "#FFD400")} onCommit={(v) => patch({ highlight: v })} />
+      <Slider
+        label={box ? t("edit.cap.padding") : t("edit.cap.outline")} value={pct(c.outline_scale)} min={0} max={200} step={10}
+        format={(v) => (v === 0 ? t("edit.off") : `${Math.round(v)}%`)} onCommit={(v) => patch({ outline_scale: v === 100 ? null : v })}
+      />
+      {!box && (
+        <Color label={t("edit.cap.outline.color")} value={String(c.outline_color ?? "#000000")} onCommit={(v) => patch({ outline_color: v })} />
+      )}
+      {!box && (
+        <Choice
+          label={t("edit.cap.shadow")} name="cap-shadow" value={Number(c.shadow ?? 1) > 0}
+          options={onOff(t("edit.cap.shadow"))} onChange={(v) => patch({ shadow: v ? 2 : 0 })}
+        />
+      )}
+      {!clean && style !== "karaoke" && (
+        <Choice
+          label={t("edit.cap.bounce")} name="cap-bounce" value={Number(c.active_scale ?? 108) > 100}
+          options={onOff(t("edit.cap.bounce"))} onChange={(v) => patch({ active_scale: v ? null : 100 })}
+        />
+      )}
+
+      <h3 className="ed-sub">{t("edit.cap.group.place")}</h3>
       <Choice
         label={t("edit.cap.position")} name="cap-pos" value={(c.position as string | undefined) ?? (clean ? "bottom" : "lower")}
         options={["lower", "middle", "bottom"].map((p) => ({ value: p, label: t(`edit.cap.position.${p}`) }))}
@@ -173,6 +242,11 @@ function Captions({ edl, onPatch }: Pick<InspectorProps, "edl" | "onPatch">) {
         label={t("edit.cap.fillers")} name="cap-fill" value={c.hide_fillers !== false}
         options={onOff(t("edit.cap.fillers"))} onChange={(v) => patch({ hide_fillers: v })}
       />
+      {changed && (
+        <button type="button" className="secondary ed-reset" onClick={() => patch(Object.fromEntries(LOOK_KEYS.map((k) => [k, null])))}>
+          {t("edit.cap.reset")}
+        </button>
+      )}
     </>
   );
 }
