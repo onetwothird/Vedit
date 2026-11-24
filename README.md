@@ -275,6 +275,27 @@ folder. Without it, a debug build looks for the bundled engine, which only exist
 `npm run dev:mock` (in `app/`) opens a **demo** in the browser with a built-in sample clip and a pretend engine. It
 never reads your files, so use it to try the screens, not to edit your videos.
 
+### Building the installer
+
+Vedit Studio ships as one Windows installer (NSIS) with the engine and FFmpeg inside, so the people who install it
+need nothing else. From the repo root, on Windows with Python 3.10+, Node 20+ and Rust:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File packaging\build_installer.ps1
+```
+
+It makes a clean virtual environment with only the engine's dependencies, packs the engine with PyInstaller,
+copies FFmpeg from your PATH (or pass `--ffmpeg-dir <folder>`), and builds
+`app\src-tauri\target\release\bundle\nsis\Vedit Studio_<version>_x64-setup.exe`. The installer needs no admin
+rights; it installs for the current user.
+
+Updates are signed. The private updater key lives outside the repo (`%USERPROFILE%\.tauri\vedit-updater.key`, made
+with `npx tauri signer generate`); only its public half is in `tauri.conf.json`. Keep a backup of the private key:
+without it, installed copies can't be updated. A release uploads the setup `.exe`, its `.sig` and a `latest.json` to
+GitHub Releases, where the app checks for updates.
+
+FFmpeg is a separate program under its own license, shipped beside the app with its license file.
+
 ## Presets
 
 | Preset | Use case | Aspect | Max pause | Captions | Loudness |

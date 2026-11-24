@@ -100,12 +100,24 @@ fn main() {
                 let _ = window.set_focus();
             }
         }))
+        // vedit:// links (the browser hands Google/Facebook sign in back to the app); after single-instance, which
+        // forwards a link opened while the app runs to this instance
+        .plugin(tauri_plugin_deep_link::init())
+        .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_shell::init())
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_process::init())
         .plugin(tauri_plugin_updater::Builder::new().build())
         .manage(Engine::new())
         .setup(|app| {
+            // Installed builds register vedit:// in the installer; a dev run registers it for this exe.
+            #[cfg(all(debug_assertions, windows))]
+            {
+                use tauri_plugin_deep_link::DeepLinkExt;
+                if let Err(e) = app.deep_link().register_all() {
+                    eprintln!("[vedit] vedit:// link registration: {e}");
+                }
+            }
             // Start the engine while the UI loads; engine_info awaits the same start.
             let handle = app.handle().clone();
             tauri::async_runtime::spawn(async move {
