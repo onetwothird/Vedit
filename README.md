@@ -474,7 +474,7 @@ See [`docs/USAGE.md`](docs/USAGE.md) for a step-by-step guide.
 
 ## Roadmap
 
-- [ ] Crossfade and whip transitions
+- [x] Crossfade and whip transitions
 - [x] Automatic b-roll suggestions from the transcript
 - [ ] Speaker diarization for single-microphone podcasts
 - [ ] Karaoke and emoji caption styles

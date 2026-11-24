@@ -190,7 +190,7 @@ export interface ClipView {
   sharp_zoom?: number;
 }
 
-export type EditSection = "captions" | "audio" | "color" | "framing" | "output" | "overlays";
+export type EditSection = "captions" | "audio" | "color" | "framing" | "output" | "overlays" | "transition";
 
 export type ClipOp =
   | { op: "cut"; w0: number; w1: number }

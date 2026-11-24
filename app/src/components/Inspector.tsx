@@ -1,13 +1,13 @@
 import { useEffect, useId, useRef, useState, type KeyboardEvent, type ReactNode } from "react";
 import { isTauri } from "../engine/client";
 import type { Aspect, Edl, EditSection } from "../engine/types";
-import { OUTPUT_ASPECTS } from "../edit/timeline";
+import { OUTPUT_ASPECTS, TRANSITION_DURATION, TRANSITIONS, type Transition } from "../edit/timeline";
 import { BrollTool, TextTool, type LayerToolProps } from "./LayerTools";
 import { t } from "../i18n/t";
 import { AUDIO_ACCEPT, baseName, pickAudioNative } from "../lib/native";
 
-export type InspectorTab = "transcript" | "captions" | "text" | "broll" | "sound" | "framing" | "color" | "speed";
-export const TABS: InspectorTab[] = ["transcript", "captions", "text", "broll", "sound", "framing", "color", "speed"];
+export type InspectorTab = "transcript" | "captions" | "text" | "broll" | "sound" | "framing" | "color" | "speed" | "transition";
+export const TABS: InspectorTab[] = ["transcript", "captions", "text", "broll", "sound", "framing", "color", "speed", "transition"];
 
 /* One icon per tool, drawn on the same 24px grid and stroke as the timeline's tools. */
 const TOOL_ICON: Record<InspectorTab, string> = {
@@ -19,6 +19,7 @@ const TOOL_ICON: Record<InspectorTab, string> = {
   framing: "M8 3H5a2 2 0 0 0-2 2v3M16 3h3a2 2 0 0 1 2 2v3M8 21H5a2 2 0 0 1-2-2v-3M16 21h3a2 2 0 0 0 2-2v-3M9 8h6v8H9z",
   color: "M12 3a9 9 0 1 0 0 18c1.2 0 2-.8 2-1.8 0-.5-.2-.9-.5-1.2-.3-.3-.5-.7-.5-1.2 0-1 .8-1.8 1.8-1.8H17a4 4 0 0 0 4-4C21 6.6 17 3 12 3zM7.5 11.5h.01M10 7.5h.01M15 7.5h.01",
   speed: "M12 14l4-5M4.9 19a9 9 0 1 1 14.2 0",
+  transition: "M3 5h8v14H3zM13 5h8v14h-8zM9 12h6M13 9.5l2 2.5-2 2.5",
 };
 
 export interface InspectorProps {
@@ -330,7 +331,34 @@ function SpeedTool({ edl, onPatch }: Pick<InspectorProps, "edl" | "onPatch">) {
   );
 }
 
-/** The right pane: one rail with every tool (transcript, captions, text, b-roll, sound, framing, colour, speed) and
+const TRANSITION_LENGTHS = [0.2, 0.4, 0.6, 0.8];
+
+/** The effect where one kept piece of the clip meets the next: a hard cut, a crossfade or a whip (a fast blurred
+    slide). The export draws it, centred on each cut, so the clip keeps its length and its sound. */
+function TransitionTool({ edl, onPatch }: Pick<InspectorProps, "edl" | "onPatch">) {
+  const tr = rec(edl.transition);
+  const type: Transition = (TRANSITIONS as readonly unknown[]).includes(tr.type) ? (tr.type as Transition) : "none";
+  const length = typeof tr.duration === "number" ? tr.duration : TRANSITION_DURATION;
+  return (
+    <>
+      <Choice
+        label={t("edit.tr.type")} name="transition" value={type}
+        options={TRANSITIONS.map((v) => ({ value: v, label: t(`edit.tr.type.${v}`) }))}
+        onChange={(v) => onPatch("transition", { type: v === "none" ? null : v })}
+      />
+      {type !== "none" && (
+        <Choice
+          label={t("edit.tr.length")} name="transition-length" value={length}
+          options={TRANSITION_LENGTHS.map((v) => ({ value: v, label: t("edit.tr.length.value", { n: v }) }))}
+          onChange={(v) => onPatch("transition", { duration: v })}
+        />
+      )}
+      <p className="hint">{t(type === "none" ? "edit.tr.hint.none" : "edit.tr.hint")}</p>
+    </>
+  );
+}
+
+/** The right pane: one rail with every tool (transcript, captions, text, b-roll, sound, framing, colour, speed, transition) and
     the chosen tool's settings. Every setting is one `patch` op on the clip. */
 export default function Inspector({ edl, tab, onTab, transcript, onPatch, layers, aspect, sharpZoom }: InspectorProps) {
   const id = useId();
@@ -390,6 +418,7 @@ export default function Inspector({ edl, tab, onTab, transcript, onPatch, layers
             {k === "framing" && <Framing edl={edl} onPatch={onPatch} aspect={aspect} sharpZoom={sharpZoom} />}
             {k === "color" && <ColorTool edl={edl} onPatch={onPatch} />}
             {k === "speed" && <SpeedTool edl={edl} onPatch={onPatch} />}
+            {k === "transition" && <TransitionTool edl={edl} onPatch={onPatch} />}
           </div>
         ))}
       </div>

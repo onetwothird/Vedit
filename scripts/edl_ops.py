@@ -13,11 +13,11 @@ from typing import Literal
 sys.path.insert(0, str(Path(__file__).parent))
 from autocut import make_edl  # noqa: E402
 from common import load_json, parse_time  # noqa: E402
-from edl import DEFAULT_PAD, clip_span, word_range  # noqa: E402
+from edl import DEFAULT_PAD, TRANSITIONS, clip_span, transition_of, word_range  # noqa: E402
 from highlights import Highlight  # noqa: E402
 from presets import make_edl_kwargs  # noqa: E402
 
-Section = Literal["captions", "audio", "color", "framing", "output", "overlays"]
+Section = Literal["captions", "audio", "color", "framing", "output", "overlays", "transition"]
 OUTPUT_ASPECTS = ("9:16", "4:5", "1:1", "16:9")
 
 # Overlays the editor places on its timeline: text, and b-roll (an image or a video). render.py draws them.
@@ -207,6 +207,7 @@ def fix_word(edl: dict, wrong: str, right: str) -> dict:
 def patch_section(edl: dict, section: Section, patch: dict) -> dict:
     """Shallow-merge `patch` into a section. "framing" maps crop_x/zoom/speed onto every clip and fit onto the edl;
     "output" takes only the aspect (one of OUTPUT_ASPECTS), the shape the clip is previewed and saved in.
+    "transition" takes type (one of edl.TRANSITIONS) and duration (seconds), the effect between kept segments.
     A null value removes the key (the undo of setting a key that was absent)."""
     e = deepcopy(edl)
     if section in ("captions", "audio", "color"):
@@ -262,6 +263,24 @@ def patch_section(edl: dict, section: Section, patch: dict) -> dict:
                 out["aspect"] = a
             else:
                 raise ValueError(f"aspect must be one of {', '.join(OUTPUT_ASPECTS)}")
+    elif section == "transition":
+        bad = set(patch) - {"type", "duration"}
+        if bad:
+            raise ValueError(f"unknown transition keys: {sorted(bad)}")
+        tr = dict(e.get("transition") or {})
+        for k, v in patch.items():
+            if v is None:
+                tr.pop(k, None)
+            else:
+                tr[k] = v
+        if "type" in tr and tr["type"] not in TRANSITIONS:
+            raise ValueError(f"transition type must be one of {', '.join(TRANSITIONS)}")
+        if "duration" in tr:  # checked even while the type is "none", so a later type change cannot fail on it
+            transition_of({"transition": {**tr, "type": "crossfade"}})
+        if tr:
+            e["transition"] = tr
+        else:
+            e.pop("transition", None)
     else:
         raise ValueError(f"unknown section '{section}'")
     return e

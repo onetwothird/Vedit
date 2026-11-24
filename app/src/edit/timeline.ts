@@ -13,6 +13,11 @@ export type Op =
 
 /** edl_ops.OUTPUT_ASPECTS: the shapes an "output" patch may set. */
 export const OUTPUT_ASPECTS = ["9:16", "4:5", "1:1", "16:9"] as const;
+/** The effect between kept segments on export (edl.py TRANSITIONS); "none" is a hard cut. */
+export const TRANSITIONS = ["none", "crossfade", "whip"] as const;
+export type Transition = (typeof TRANSITIONS)[number];
+export const TRANSITION_RANGE = [0.1, 1.5] as const; // seconds, as edl.py checks it
+export const TRANSITION_DURATION = 0.4; // when a type is set without one
 
 export const DEFAULT_PAD: [number, number] = [0.1, 0.18];
 
@@ -190,6 +195,23 @@ export function patchSection(edl: Edl, section: EditSection, patch: Record<strin
       else if (typeof a === "string" && (OUTPUT_ASPECTS as readonly string[]).includes(a)) out.aspect = a;
       else throw new Error(`aspect must be one of ${OUTPUT_ASPECTS.join(", ")}`);
     }
+  } else if (section === "transition") {
+    const bad = Object.keys(patch).filter((k) => k !== "type" && k !== "duration");
+    if (bad.length) throw new Error(`unknown transition keys: ${bad.sort().join(", ")}`);
+    const tr = { ...((e.transition ?? {}) as Record<string, unknown>) };
+    for (const [k, v] of Object.entries(patch)) {
+      if (v === null) delete tr[k];
+      else tr[k] = v;
+    }
+    if ("type" in tr && !(TRANSITIONS as readonly unknown[]).includes(tr.type)) {
+      throw new Error(`transition type must be one of ${TRANSITIONS.join(", ")}`);
+    }
+    const d = tr.duration;
+    if (d !== undefined && (typeof d !== "number" || d < TRANSITION_RANGE[0] || d > TRANSITION_RANGE[1])) {
+      throw new Error(`transition duration must be a number from ${TRANSITION_RANGE[0]} to ${TRANSITION_RANGE[1]}`);
+    }
+    if (Object.keys(tr).length) e.transition = tr;
+    else delete e.transition;
   } else {
     throw new Error(`unknown section '${String(section)}'`);
   }
