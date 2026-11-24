@@ -333,6 +333,7 @@
   "settings.models.error": "Could not read the models. The engine may not be running.",
   "settings.model.small": "Small",
   "settings.model.large-v3": "Large v3",
+  "settings.model.large-v3-turbo": "Large v3 Turbo (faster, for computers without an NVIDIA graphics card)",
   "settings.model.installed": "Installed",
   "settings.model.missing": "Not installed",
   "settings.model.download": "Download",

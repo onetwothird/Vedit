@@ -285,7 +285,7 @@ export function createMockEngine(opts: { tickMs?: number; persist?: Pick<Storage
   const jobs = new Map<string, Job>();
   const timers = new Map<string, ReturnType<typeof setTimeout>>();
   const listeners = new Set<(job: Job) => void>();
-  const models: ModelStatus = { small: { installed: true, size_mb: 484 }, "large-v3": { installed: false, size_mb: 3090 } };
+  const models: ModelStatus = { small: { installed: true, size_mb: 484 }, "large-v3": { installed: false, size_mb: 3090 }, "large-v3-turbo": { installed: false, size_mb: 1620 } };
   let brand: Brand = { font: "", caption_color: "", highlight: "", logo: "", intro: "", outro: "", music: "" };
   const failedOnce = new Set<string>(); // projects whose first analyze already failed on purpose
   // stories outlive a reload too, as the real engine's story files do

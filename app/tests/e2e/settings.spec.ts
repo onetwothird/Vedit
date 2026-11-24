@@ -39,7 +39,7 @@ test("a bad key says the provider did not accept it", async ({ page }) => {
 
 test("downloading a model shows progress, then Installed", async ({ page }) => {
   await page.goto("/#/settings");
-  const row = page.getByRole("listitem").filter({ hasText: "Large v3" });
+  const row = page.getByRole("listitem").filter({ hasText: /Large v3(?! Turbo)/ });
   await expect(row).toContainText("3.1 GB");
   await expect(row).toContainText("Not installed");
   await row.getByRole("button", { name: "Download" }).click();
