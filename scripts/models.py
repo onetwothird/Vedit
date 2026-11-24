@@ -25,6 +25,8 @@ from common import die, progress  # noqa: E402
 MODELS = {
     "small": {"repo": "Systran/faster-whisper-small", "size_mb": 484, "for": ["en"]},
     "large-v3": {"repo": "Systran/faster-whisper-large-v3", "size_mb": 3090, "for": ["tl", "taglish"]},
+    # large-v3 with 4 decoder layers instead of 32: close to its accuracy, several times faster (the CPU choice)
+    "large-v3-turbo": {"repo": "mobiuslabsgmbh/faster-whisper-large-v3-turbo", "size_mb": 1620, "for": ["tl", "taglish"]},
 }
 REQUIRED_FILES = ("model.bin", "config.json")
 SENTINEL = ".vedit-complete"  # written only after a download finished; a partial folder never has it

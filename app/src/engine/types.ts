@@ -162,6 +162,8 @@ export interface CaptionEvent {
 export interface CaptionTrack {
   style: string;
   font: string;
+  /** False for one-weight display fonts (drawn as designed). Older engines leave it out: bold. */
+  bold?: boolean;
   size_frac: number;
   baseline_frac: number;
   uppercase: boolean;

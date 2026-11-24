@@ -1,6 +1,19 @@
 # Changelog
 
 ## Unreleased
+- **Caption look in the editor**: font (ten bundled fonts, so preview and export match everywhere), size, text colour,
+  outline and its colour, shadow, all caps, word bounce and Reset look. Default font is now Montserrat ExtraBold.
+  Engine keys `scale`, `outline_scale`, `bold` (`scripts/captions.py`)
+- **Words at a time is exact**: a count chosen in the editor is never exceeded (fast speech no longer joins two groups);
+  Clean offers 4-12 words
+- Settings: the brand-kit caption preview is drawn by the editor's caption renderer, so each style looks as exported
+- Caption panels wrap instead of scrolling sideways on narrow windows and phones
+- **Faster on NVIDIA GPUs**: speech recognition runs on the GPU through CTranslate2 (no PyTorch needed), batched
+  with silence skipped and int8 weights: 120 s of Taglish went from 257 s on the CPU to 10 s. The preview copy
+  encodes with NVENC when it works (`scripts/accel.py`). `VEDIT_DEVICE=cpu` turns the GPU off; on Windows the
+  cuBLAS/cuDNN DLLs come from the `nvidia-cublas-cu12` / `nvidia-cudnn-cu12` wheels or `VEDIT_CUDA`
+- **Computers without an NVIDIA GPU** use the new `large-v3-turbo` model in place of `large-v3` (downloaded
+  automatically, 1.6 GB): about 2x real time on a 6-core CPU
 - Editor: **Suggest b-roll** in the B-roll tool finds the moments a clip names a thing or place and the photos or
   videos in a folder you pick that show it (by file name, and by meaning with an AI key); add or skip each one
   (`scripts/broll.py`, `POST /projects/{pid}/clips/{hid}/broll`)

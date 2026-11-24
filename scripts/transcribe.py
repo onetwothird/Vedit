@@ -15,6 +15,7 @@ import tempfile
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent))
+import accel  # noqa: E402
 import models  # noqa: E402
 from common import (FILLER_PHRASES, FILLERS_HARD, FILLERS_SOFT, die, ffmpeg_bin, need, norm_word,  # noqa: E402
                     progress, run, save_json, ts, workdir_for)
@@ -80,25 +81,22 @@ def _load_wav16k(path: str):
 def transcribe_words(wav: str, model_name: str, language: str | None, keep_fillers: bool):
     prompt = pick_prompt(language, keep_fillers)
     try:
-        from faster_whisper import WhisperModel  # type: ignore
-        device, compute = "cpu", "int8"
-        try:
-            import torch  # type: ignore
-            if torch.cuda.is_available():
-                device, compute = "cuda", "float16"
-        except Exception:
-            pass
+        from faster_whisper import BatchedInferencePipeline, WhisperModel  # type: ignore
         audio = _load_wav16k(wav)  # hand over samples: avoids PyAV decoding (breaks on some av versions)
 
-        def run(device, compute):
-            print(f"[transcribe] faster-whisper model={model_name} device={device}", file=sys.stderr)
-            if models.is_installed(model_name):  # managed download (Studio): load the local folder
-                model = WhisperModel(str(models.model_dir() / model_name), device=device, compute_type=compute)
+        def run(plan):
+            name, device = plan["model"], plan["device"]
+            print(f"[transcribe] faster-whisper model={name} device={device} compute={plan['compute']} "
+                  f"batch={plan['batch']}", file=sys.stderr)
+            if models.is_installed(name):  # managed download (Studio): load the local folder
+                model = WhisperModel(str(models.model_dir() / name), device=device, compute_type=plan["compute"])
             else:  # plain CLI: faster-whisper downloads into the same managed folder
-                model = WhisperModel(model_name, device=device, compute_type=compute,
+                model = WhisperModel(name, device=device, compute_type=plan["compute"],
                                      download_root=str(models.model_dir()))
-            segs, info = model.transcribe(audio if audio is not None else wav, language=language, word_timestamps=True,
-                                          initial_prompt=prompt, vad_filter=False, condition_on_previous_text=False, beam_size=5)
+            # batched: speech is cut into chunks at the silences (which are skipped) and the chunks decoded together
+            segs, info = BatchedInferencePipeline(model).transcribe(
+                audio if audio is not None else wav, language=language, word_timestamps=True, initial_prompt=prompt,
+                condition_on_previous_text=False, beam_size=5, batch_size=plan["batch"])
             words = []
             for s in segs:  # lazy: GPU errors (missing CUDA/cuBLAS DLLs) show up here, not at load
                 if echoes_prompt([(w.word, w.probability) for w in s.words or []], prompt):
@@ -112,12 +110,12 @@ def transcribe_words(wav: str, model_name: str, language: str | None, keep_fille
             print(file=sys.stderr)
             return words, info.language
 
-        if device == "cuda":
+        if accel.gpu_ready():
             try:
-                return run(device, compute)
-            except (RuntimeError, OSError) as e:  # e.g. "cublas64_12.dll is not found": fall back instead of crashing
+                return run(accel.speech_plan(model_name, on_gpu=True))
+            except (RuntimeError, OSError) as e:  # out of GPU memory, a driver too old: fall back instead of crashing
                 print(f"\n[transcribe] GPU not usable ({e}); using CPU instead", file=sys.stderr)
-        return run("cpu", "int8")
+        return run(accel.speech_plan(model_name, on_gpu=False))
     except ImportError:
         pass
     try:

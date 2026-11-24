@@ -23,6 +23,7 @@ from conftest import SCRIPTS  # noqa: E402
 from highlights import find_highlights  # noqa: E402
 from studio_jobs import Job  # noqa: E402
 from studio_projects import create_project, load_project, output_dir, output_name, save_project  # noqa: E402
+import accel  # noqa: E402
 from studio_server import create_app  # noqa: E402
 
 TOKEN = "t-" + "studio" + "-test"
@@ -69,6 +70,12 @@ class FakeQueue:
 
     def shutdown(self):
         self.shut = True
+
+
+@pytest.fixture(autouse=True)
+def _gpu(monkeypatch):
+    """The same analyze steps on any machine: a GPU runs the model asked for (tests that need a CPU patch it again)."""
+    monkeypatch.setattr(accel, "gpu_ready", lambda: True)
 
 
 @pytest.fixture
@@ -160,7 +167,8 @@ def test_health_and_allowed_origins(client, auth):
 
 def test_doctor_shape(client, auth):
     d = client.get("/doctor", headers=auth).json()
-    assert isinstance(d["ffmpeg"], bool) and isinstance(d["libass"], bool) and set(d["models"]) == {"small", "large-v3"}
+    assert isinstance(d["ffmpeg"], bool) and isinstance(d["libass"], bool) and isinstance(d["gpu"], bool)
+    assert set(d["models"]) == {"small", "large-v3", "large-v3-turbo"}
 
 
 # ---- projects -------------------------------------------------------------------------------------------------
@@ -179,7 +187,8 @@ def test_create_and_get_project(client, auth, tiny_video):
     assert bad.status_code == 400
 
 
-def test_analyze_submits_expected_steps(client, auth, fake_queue, tiny_video):
+def test_analyze_submits_expected_steps(client, auth, fake_queue, tiny_video, monkeypatch):
+    monkeypatch.setattr(accel, "gpu_ready", lambda: True)  # same steps on any machine (no CPU model swap)
     pid = client.post("/projects", headers=auth, json={"source": str(tiny_video), "language": "tl",
                                                        "platform": "shorts"}).json()["id"]
     job = client.post(f"/projects/{pid}/analyze", headers=auth, json={}).json()
@@ -196,6 +205,7 @@ def test_analyze_submits_expected_steps(client, auth, fake_queue, tiny_video):
 
 def test_analyze_prepends_model_step_when_missing(client, auth, fake_queue, tiny_video, monkeypatch):
     installed(monkeypatch, "small")  # tagalog needs large-v3
+    monkeypatch.setattr(accel, "gpu_ready", lambda: True)  # a GPU runs large-v3 itself
     pid = client.post("/projects", headers=auth, json={"source": str(tiny_video), "language": "tl",
                                                        "platform": "shorts"}).json()["id"]
     client.post(f"/projects/{pid}/analyze", headers=auth, json={})
@@ -204,6 +214,17 @@ def test_analyze_prepends_model_step_when_missing(client, auth, fake_queue, tiny
     assert steps[0][1][-3:] == ["models.py", "download", "large-v3"] or steps[0][1][-2:] == ["download", "large-v3"]
     assert [s[2] for s in steps] == pytest.approx([0.3, 0.07, 0.42, 0.105, 0.105])
     assert sum(s[2] for s in steps) == pytest.approx(1.0)
+
+
+def test_analyze_on_cpu_downloads_turbo_instead_of_large_v3(client, auth, fake_queue, tiny_video, monkeypatch):
+    installed(monkeypatch, "small")
+    monkeypatch.setattr(accel, "gpu_ready", lambda: False)
+    pid = client.post("/projects", headers=auth, json={"source": str(tiny_video), "language": "taglish",
+                                                       "platform": "reels"}).json()["id"]
+    client.post(f"/projects/{pid}/analyze", headers=auth, json={})
+    steps = fake_queue.steps
+    assert steps[0][0] == "model" and steps[0][1][-2:] == ["download", "large-v3-turbo"]
+    assert steps[2][0] == "analyze" and "large-v3" in steps[2][1]  # transcribe swaps to turbo itself
 
 
 def test_analyze_without_body(client, auth, fake_queue, tiny_video):
@@ -824,7 +845,8 @@ def test_render_crf_flag(pipeline_workdir, tmp_path, monkeypatch):
 def test_models_status_route(client, auth, monkeypatch):
     installed(monkeypatch, "small")
     r = client.get("/models", headers=auth).json()
-    assert r == {"small": {"installed": True, "size_mb": 484}, "large-v3": {"installed": False, "size_mb": 3090}}
+    assert r == {"small": {"installed": True, "size_mb": 484}, "large-v3": {"installed": False, "size_mb": 3090},
+                 "large-v3-turbo": {"installed": False, "size_mb": 1620}}
 
 
 def test_model_download_submits_model_job(client, auth, fake_queue):

@@ -13,10 +13,12 @@ import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
+import accel  # noqa: E402
 from common import die, ffmpeg_bin, load_json, need, progress, save_json, workdir_for  # noqa: E402
 
 PROXY_SHORT_SIDE = 1080  # the preview crops to vertical and zooms, so it needs the source's detail up to 1080p
 PROXY_CRF = "20"
+PROXY_CQ = "27"  # NVENC constant quality: about the size and look of x264 at PROXY_CRF
 MAX_DIRECT_SECONDS = 1800
 MAX_STRIP_COLS = 50  # keeps the sprite under the 65535 px JPEG limit for any realistic source
 
@@ -90,8 +92,21 @@ def _fps(v: dict) -> int:
     return 30
 
 
-def _encode(cmd: list[str], duration: float, tmp: Path) -> None:
-    """Run ffmpeg, mapping its -progress output onto progress('proxy', 0..100)."""
+def video_codec(ffmpeg: str, gop: str, gpu: bool | None = None) -> list[str]:
+    """H.264 settings for the proxy: on an NVIDIA GPU (NVENC: several times faster, CPU left free for the speech
+    step) when this ffmpeg can use one, else x264. Both put a keyframe every second so the player seeks fast."""
+    if gpu is None:
+        gpu = accel.nvenc_ready(ffmpeg)
+    if gpu:
+        return ["-c:v", "h264_nvenc", "-preset", "p4", "-rc", "vbr", "-cq", PROXY_CQ, "-b:v", "0",
+                "-g", gop, "-no-scenecut", "1"]
+    return ["-c:v", "libx264", "-preset", "veryfast", "-crf", PROXY_CRF, "-g", gop, "-keyint_min", gop,
+            "-sc_threshold", "0"]
+
+
+def _encode(cmd: list[str], duration: float, tmp: Path, fail_ok: bool = False) -> bool:
+    """Run ffmpeg, mapping its -progress output onto progress('proxy', 0..100). On failure: False when `fail_ok`
+    (the caller tries another encoder), else stop with ffmpeg's error."""
     proc = subprocess.Popen(cmd + ["-progress", "pipe:1", "-nostats"], stdout=subprocess.PIPE,
                             stderr=subprocess.PIPE, encoding="utf-8", errors="replace")
     try:
@@ -139,13 +154,19 @@ def make_proxy(video: Path, wd: Path) -> Path:
     g = str(_fps(v))
     tmp = wd / "proxy.part.mp4"
     meta.unlink(missing_ok=True)
-    cmd = [ffmpeg_bin("ffmpeg"), "-y", "-v", "error", "-i", str(video), "-vf", f"scale={scale}", "-pix_fmt", "yuv420p",
-           "-c:v", "libx264", "-preset", "veryfast", "-crf", PROXY_CRF, "-g", g, "-keyint_min", g,
-           "-sc_threshold", "0"]
-    cmd += ["-c:a", "aac", "-b:a", "128k"] if audio_stream(info) else ["-an"]
-    cmd += ["-movflags", "+faststart", "-f", "mp4", str(tmp)]
+    ff = ffmpeg_bin("ffmpeg")
+    duration = float(info.get("format", {}).get("duration", 0) or 0)
+
+    def cmd(gpu: bool) -> list[str]:
+        c = [ff, "-y", "-v", "error", "-i", str(video), "-vf", f"scale={scale}", "-pix_fmt", "yuv420p"]
+        c += video_codec(ff, g, gpu)
+        c += ["-c:a", "aac", "-b:a", "128k"] if audio_stream(info) else ["-an"]
+        return c + ["-movflags", "+faststart", "-f", "mp4", str(tmp)]
+
     progress("proxy", 0, "Building preview proxy")
-    _encode(cmd, float(info.get("format", {}).get("duration", 0) or 0), tmp)
+    gpu = accel.nvenc_ready(ff)
+    if not (gpu and _encode(cmd(True), duration, tmp, fail_ok=True)):
+        _encode(cmd(False), duration, tmp)
     os.replace(tmp, out)
     save_json(key, meta)
     progress("proxy", 100, "Proxy ready")

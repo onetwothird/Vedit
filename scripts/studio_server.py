@@ -32,6 +32,7 @@ from fastapi.responses import FileResponse, JSONResponse  # noqa: E402
 from pydantic import BaseModel, Field  # noqa: E402
 from starlette.exceptions import HTTPException as StarletteHTTPException  # noqa: E402
 
+import accel  # noqa: E402
 import broll  # noqa: E402
 import models  # noqa: E402
 import vedit  # noqa: E402
@@ -874,7 +875,7 @@ def create_app(token: str, queue: JobQueue | None = None) -> FastAPI:
     @app.get("/doctor")
     def doctor():
         ffmpeg, libass = _ffmpeg_status()
-        return {"ffmpeg": ffmpeg, "libass": libass, "models": models.status()}
+        return {"ffmpeg": ffmpeg, "libass": libass, "models": models.status(), "gpu": accel.gpu_ready()}
 
     @app.get("/models")
     def model_status():
@@ -951,8 +952,10 @@ def create_app(token: str, queue: JobQueue | None = None) -> FastAPI:
         stages = ANALYZE_STEPS if p.type == "clip" else WHOLE_STEPS
         steps = [(stage, argv[stage], share) + ((step_env[stage],) if stage in step_env else ())
                  for stage, share in stages]
-        if not models.status()[model]["installed"]:  # fetch the speech model first, as 30% of the job
-            steps = [("model", py_cmd("models.py", "download", model), 0.3)] +                     [(st, argv_, share * 0.7, *rest) for st, argv_, share, *rest in steps]
+        # the model this computer will run: without a GPU, the faster stand-in (see accel.speech_plan)
+        need = model if accel.gpu_ready() else accel.CPU_SWAP.get(model, model)
+        if not models.status()[need]["installed"]:  # fetch the speech model first, as 30% of the job
+            steps = [("model", py_cmd("models.py", "download", need), 0.3)] +                     [(st, argv_, share * 0.7, *rest) for st, argv_, share, *rest in steps]
         return _job_dict(engine.submit(pid, "analyze", steps))
 
     @app.get("/projects/{pid}/transcript")

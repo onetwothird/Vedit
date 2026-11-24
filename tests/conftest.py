@@ -74,9 +74,11 @@ def talking(tmp_path_factory, ffmpeg_ok):
     ff("-f", "lavfi", "-i", f"testsrc2=s=640x360:r=30:d={t}", "-i", str(d / "speech.wav"),
        "-c:v", "libx264", "-preset", "ultrafast", "-c:a", "aac", "-shortest", str(d / "raw.mp4"))
     run_script("analyze.py", d / "raw.mp4", "--no-transcribe")
-    from transcribe import build, write_txt
+    from transcribe import TRANSCRIBE_VERSION, build, write_txt
     from common import save_json
     data = build(str(d / "raw.mp4"), words, "en", "main", t)
+    # as auto.py's defaults would have made it: auto.py keeps it instead of transcribing the tones (no speech)
+    data["made_with"] = {"model": "small", "language": None, "version": TRANSCRIBE_VERSION}
     save_json(data, d / "raw.edit" / "transcript.main.json")
     write_txt(d / "raw.edit" / "transcript.main.txt", data)
     shutil.copytree(d / "raw.edit", d / "pristine.edit")  # tests like auto.py overwrite raw.edit; keep a clean copy

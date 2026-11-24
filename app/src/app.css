@@ -461,6 +461,23 @@ html.theme-fade, html.theme-fade * { transition: background-color .3s ease, bord
 .ed-slider { display: inline-flex; align-items: center; gap: 10px; }
 .ed-slider input[type="range"] { accent-color: var(--accent); width: 120px; }
 .ed-value { font-size: 12px; color: var(--body); font-variant-numeric: tabular-nums; min-width: 4ch; text-align: right; }
+.ed-hint { flex: 1 0 100%; margin: 0; font-size: 12px; line-height: 1.4; color: var(--muted); }
+.ed-sub { font: 600 11px var(--sans); color: var(--muted); margin: 18px 0 2px; }
+/* label above a full-width control; a grid, since a wrapping flex column sizes an auto-fill grid as one column */
+.ed-row-stack { display: grid; grid-template-columns: minmax(0, 1fr); justify-content: stretch; align-items: stretch; gap: 8px; }
+.ed-row-stack .seg { display: grid; grid-template-columns: repeat(auto-fit, minmax(64px, 1fr)); }
+.ed-row-stack .seg-opt span { text-align: center; padding: 6px 4px; }
+.cap-fonts { display: grid; grid-template-columns: repeat(auto-fill, minmax(104px, 1fr)); gap: 6px; }
+/* a choice with many options wraps inside its row instead of pushing the panel sideways */
+.ed-row .seg { flex-wrap: wrap; max-width: 100%; }
+.cap-font { position: relative; display: block; cursor: pointer; }
+.cap-font input { position: absolute; inset: 0; opacity: 0; margin: 0; cursor: pointer; }
+.cap-font span { display: block; padding: 8px 10px; border: 1px solid var(--line); border-radius: var(--r-chip); background: var(--bg);
+  color: var(--body); font-size: 15px; line-height: 1.2; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.cap-font:hover span { color: var(--ink); border-color: var(--line-2); }
+.cap-font input:checked + span { color: var(--ink); border-color: var(--accent); background: var(--chip-2); }
+.cap-font input:focus-visible + span { outline: 2px solid var(--accent); outline-offset: 2px; }
+.ed-reset { margin-top: 14px; }
 .ed-color { width: 36px; height: 28px; padding: 2px; border: 1px solid var(--line-2); border-radius: var(--r-chip); background: var(--bg); cursor: pointer; }
 .ed-input { height: 32px; width: 100%; padding: 0 10px; border: 1px solid var(--line-2); border-radius: var(--r-control); background: var(--bg); color: var(--ink); font: 13px var(--sans); }
 

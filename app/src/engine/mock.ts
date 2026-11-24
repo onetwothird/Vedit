@@ -7,6 +7,7 @@ import {
   type AiTestResult, type Batch, type BatchBody, type Brand, type BrollBody, type BrollSuggestion, type BrollSuggestions, type ExportBody, type Story, type StoryBody, type StoryScene, type FilmstripInfo, type Health, type Highlight, type Job, type ModelStatus, type NewProjectBody, type Project, type ProjectType,
   type ProjectClip, type RenderPlanEntry, type Transcript, type TranscriptWord,
 } from "./types";
+import { CAPTION_FONTS, DEFAULT_CAPTION_FONT } from "../edit/captionFonts";
 import { spelledAs } from "../edit/spelling";
 import { fixWord, patchSection } from "../edit/timeline";
 import { defaultOutputFolder, joinPath } from "../lib/outputFolder";
@@ -127,6 +128,11 @@ const MOCK_EMOJI: Record<string, string> = {
   hello: "👋", thanks: "🙏", salamat: "🙏", galing: "🔥", first: "1️⃣", nobody: "🙅", love: "❤️", money: "💰", watching: "👀",
 };
 
+/** A percentage caption setting, clamped like scripts/captions.py _pct. */
+function pct(v: unknown, lo: number): number {
+  return typeof v === "number" && Number.isFinite(v) ? Math.min(300, Math.max(lo, v)) : 100;
+}
+
 /** The caption look and grouping the edl asks for, as scripts/captions.py _plan reads edl.captions. */
 function captionTrack(edl: Edl, spoken: { text: string; start: number; end: number; speaker: string | null }[]): CaptionTrack {
   const cfg: Record<string, unknown> = { style: "pop", hide_fillers: true, ...((edl.captions ?? {}) as Record<string, unknown>) };
@@ -137,7 +143,11 @@ function captionTrack(edl: Edl, spoken: { text: string; start: number; end: numb
   const vertical = aspect === "9:16" || aspect === "4:5";
   const maxWords = Number(cfg.max_words ?? (clean ? 10 : 3));
   const pos = cfg.position ?? (clean ? "bottom" : "lower");
+  const font = String(cfg.font || DEFAULT_CAPTION_FONT).replace(/,/g, " ").trim() || DEFAULT_CAPTION_FONT;
   const baseline = typeof pos === "number" ? pos : ({ bottom: 0.07, lower: vertical ? 0.24 : 0.14, middle: 0.45 } as Record<string, number>)[String(pos)] ?? 0.14;
+  // scripts/captions.py _plan: a share of the width on vertical video, of the height otherwise, times "scale"
+  const base = vertical ? (clean ? 0.058 : 0.085) * (aspect === "4:5" ? 4 / 5 : 9 / 16) : clean ? 0.056 : 0.075;
+  const size = base * pct(cfg.scale, 40) / 100;
   const events = [];
   for (let i = 0; i < spoken.length; i += maxWords) {
     const g = spoken.slice(i, i + maxWords);
@@ -153,10 +163,12 @@ function captionTrack(edl: Edl, spoken: { text: string; start: number; end: numb
     });
   }
   return {
-    style, font: "Arial", size_frac: clean ? 0.0327 : 0.0479, baseline_frac: baseline,
+    style, font, bold: typeof cfg.bold === "boolean" ? cfg.bold : !CAPTION_FONTS.some((f) => f.family === font && f.single),
+    size_frac: size, baseline_frac: baseline,
     uppercase: typeof cfg.uppercase === "boolean" ? cfg.uppercase : !clean, color: String(cfg.color ?? "#FFFFFF"),
-    highlight: String(cfg.highlight ?? "#FFD400"), outline_frac: 0.0031, active_scale: 108, outline_color: "#000000",
-    shadow: box ? 0 : 1, back_color: box ? "#000000" : null, back_alpha: box ? 0.5608 : null, speaker_colors: {}, events,
+    highlight: String(cfg.highlight ?? "#FFD400"), outline_frac: size * (clean ? 0.06 : 0.07) * pct(cfg.outline_scale, 0) / 100,
+    active_scale: Number(cfg.active_scale ?? 108), outline_color: String(cfg.outline_color ?? "#000000"),
+    shadow: Number(cfg.shadow ?? (box ? 0 : 1)), back_color: box ? "#000000" : null, back_alpha: box ? 0.5608 : null, speaker_colors: {}, events,
   };
 }
 
@@ -285,7 +297,7 @@ export function createMockEngine(opts: { tickMs?: number; persist?: Pick<Storage
   const jobs = new Map<string, Job>();
   const timers = new Map<string, ReturnType<typeof setTimeout>>();
   const listeners = new Set<(job: Job) => void>();
-  const models: ModelStatus = { small: { installed: true, size_mb: 484 }, "large-v3": { installed: false, size_mb: 3090 } };
+  const models: ModelStatus = { small: { installed: true, size_mb: 484 }, "large-v3": { installed: false, size_mb: 3090 }, "large-v3-turbo": { installed: false, size_mb: 1620 } };
   let brand: Brand = { font: "", caption_color: "", highlight: "", logo: "", intro: "", outro: "", music: "" };
   const failedOnce = new Set<string>(); // projects whose first analyze already failed on purpose
   // stories outlive a reload too, as the real engine's story files do

@@ -119,6 +119,44 @@ test("karaoke and emoji caption styles draw in the preview", async ({ page }) =>
   await expect(page.locator("[data-caption] [data-emoji]")).toHaveText(" 🙅"); // "Nobody tells you"
 });
 
+test("caption font, size, colours, outline and reset update the overlay", async ({ page }) => {
+  await open(page);
+  await page.getByRole("tab", { name: "Captions" }).click();
+  const cap = page.locator("[data-caption]");
+  await expect(cap).toHaveCSS("font-family", /Montserrat ExtraBold/); // the default font
+  await expect(page.getByRole("radio", { name: "Montserrat ExtraBold" })).toBeChecked();
+  await page.getByRole("radio", { name: "Anton" }).check();
+  await expect(cap).toHaveCSS("font-family", /Anton/);
+  await expect(cap).toHaveCSS("font-weight", "400"); // one-weight font: never fake-bolded
+
+  const px = () => cap.evaluate((e) => parseFloat(getComputedStyle(e).fontSize));
+  const before = await px();
+  const size = page.getByRole("slider", { name: "Size" });
+  await size.focus();
+  for (let i = 0; i < 10; i++) await page.keyboard.press("ArrowRight"); // 100% -> 150%
+  await expect.poll(px).toBeCloseTo(before * 1.5, 0);
+
+  await page.getByLabel("Text color").fill("#ff0000");
+  await expect(cap).toHaveCSS("color", "rgb(255, 0, 0)");
+  await page.getByRole("radio", { name: "All caps: Off" }).check();
+  await expect(cap).toHaveCSS("text-transform", "none");
+
+  await page.getByRole("button", { name: "Reset look" }).click();
+  await expect(cap).toHaveCSS("font-family", /Montserrat ExtraBold/);
+  await expect.poll(px).toBeCloseTo(before, 0);
+  await expect(page.getByRole("button", { name: "Reset look" })).toHaveCount(0);
+});
+
+test("Clean offers subtitle-length word counts and keeps one selected", async ({ page }) => {
+  await open(page);
+  await page.getByRole("tab", { name: "Captions" }).click();
+  await page.getByRole("radio", { name: "1", exact: true }).check();
+  await page.getByRole("radio", { name: "Clean" }).check();
+  await expect(page.getByRole("radio", { name: "10", exact: true })).toBeChecked();
+  await page.getByRole("radio", { name: "4", exact: true }).check();
+  await expect.poll(() => page.locator("[data-caption] [data-word]").count()).toBeLessThanOrEqual(4);
+});
+
 test("framing and sound settings save to the clip", async ({ page }) => {
   await open(page);
   await page.getByRole("tab", { name: "Framing" }).click();

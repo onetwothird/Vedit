@@ -48,7 +48,8 @@ def test_model_dir_env_and_default(mdir, monkeypatch):
 
 def test_status_empty(mdir):
     assert models.status() == {"small": {"installed": False, "size_mb": 484},
-                               "large-v3": {"installed": False, "size_mb": 3090}}
+                               "large-v3": {"installed": False, "size_mb": 3090},
+                               "large-v3-turbo": {"installed": False, "size_mb": 1620}}
 
 
 def test_installed_needs_sentinel_and_files(mdir):
@@ -143,8 +144,11 @@ def test_transcribe_loads_local_folder_when_installed(mdir, monkeypatch):
             seen.append((name, kw))
             raise RuntimeError("stop")
 
-    monkeypatch.setitem(sys.modules, "faster_whisper", types.SimpleNamespace(WhisperModel=FakeWhisper))
-    monkeypatch.setitem(sys.modules, "torch", None)
+    monkeypatch.setitem(sys.modules, "faster_whisper",
+                        types.SimpleNamespace(WhisperModel=FakeWhisper, BatchedInferencePipeline=object))
+    monkeypatch.setenv("VEDIT_DEVICE", "cpu")  # the CPU path, whatever card this machine has
+    import accel
+    accel.gpu_ready.cache_clear()
     mdir.mkdir()
     wav = mdir / "x.wav"
     wav.write_bytes(b"")
