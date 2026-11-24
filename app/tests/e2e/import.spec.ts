@@ -20,14 +20,15 @@ test("the whole Clip card opens Import, and its sound button plays sound without
   await expect(page).toHaveURL(/\/p\/new\/import$/);
 });
 
-test("home shows five tiles and only one is active", async ({ page }) => {
+test("home shows five tiles: clip, vlog and Quick Reel open Import", async ({ page }) => {
   await page.goto("/#/");
   await expect(page.getByRole("heading", { name: "What are you making?" })).toBeVisible();
   await expect(page.locator("[data-tile]")).toHaveCount(5);
-  await expect(page.locator("[data-tile][aria-disabled='true']")).toHaveCount(4);
+  await expect(page.locator("[data-tile][aria-disabled='true']")).toHaveCount(2);
   await expect(page.getByRole("link", { name: /Clip a long video/ })).toBeVisible();
-  await expect(page.getByRole("button", { name: /Edit a vlog/ })).toHaveCount(0);
-  await expect(page.getByText("Coming soon")).toHaveCount(4);
+  await expect(page.getByRole("link", { name: /Edit a vlog/ })).toHaveAttribute("href", "#/p/new/import?type=vlog");
+  await expect(page.getByRole("link", { name: /Quick Reel/ })).toHaveAttribute("href", "#/p/new/import?type=reel");
+  await expect(page.getByText("Coming soon")).toHaveCount(2);
   // recent projects come from the seeded mock engine
   await expect(page.getByRole("link", { name: /podcast-ep12\.mp4/ })).toContainText("12 clips");
 });

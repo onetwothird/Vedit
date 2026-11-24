@@ -5,6 +5,7 @@ import { engine, isTauri } from "../engine/client";
 import { jobStore, useJob, useJobs } from "../engine/events";
 import type { Aspect, ExportBody, ExportResult, Job, Project, ProjectClip } from "../engine/types";
 import { t } from "../i18n/t";
+import { defaultFormat, isWhole } from "../lib/projectKind";
 import { sortClips } from "../lib/clips";
 import { baseName, pickFolderNative, showInFolder } from "../lib/native";
 import { defaultOutputFolder } from "../lib/outputFolder";
@@ -150,6 +151,7 @@ export default function Export() {
       (p) => {
         if (!alive) return;
         setProject(p);
+        setFormats(new Set<Aspect>([defaultFormat(p.type)]));
         // coming back to a running export (after a reload the live events may not have arrived yet): ask the engine
         // for every active export of this project, so they are shown and Export waits for all of them
         void seedActive(p.id);
@@ -172,7 +174,7 @@ export default function Export() {
   // an explicit folder is sent to the engine; "next to the video" is the engine's own default
   const sendFolder = override ?? (settings.outputMode === "folder" ? settings.outputFolder : "");
   const shownFolder = sendFolder || (project ? defaultOutputFolder(project.source) : "");
-  const bar = { fileName: project ? baseName(project.source) : undefined, step: 4 as const };
+  const bar = { fileName: project ? baseName(project.source) : undefined, step: 4 as const, whole: isWhole(project?.type) };
 
   function bodyFor(row: Row): ExportBody {
     return {

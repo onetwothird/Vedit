@@ -12,9 +12,12 @@ export interface StageShare {
   share: number;
 }
 
+// a vlog or Quick Reel project edits the whole video, so it skips the highlight search
+const WHOLE_SHARES: [StageKey, number][] = [["proxy", 0.15], ["analyze", 0.85]];
+
 /** The stages of one analyze job, in order, with the share of overall progress each one covers. */
-export function stageShares(hasModel: boolean): StageShare[] {
-  const list = BASE_SHARES.map(([key, share]) => ({ key, share: hasModel ? share * 0.7 : share }));
+export function stageShares(hasModel: boolean, whole = false): StageShare[] {
+  const list = (whole ? WHOLE_SHARES : BASE_SHARES).map(([key, share]) => ({ key, share: hasModel ? share * 0.7 : share }));
   return hasModel ? [{ key: "model" as StageKey, share: 0.3 }, ...list] : list;
 }
 
@@ -28,8 +31,8 @@ export interface StageRow {
 }
 
 /** Where each stage stands, from the job's current stage name and overall pct. */
-export function stageRows(stage: string, overallPct: number, hasModel: boolean, finished = false): StageRow[] {
-  const shares = stageShares(hasModel);
+export function stageRows(stage: string, overallPct: number, hasModel: boolean, finished = false, whole = false): StageRow[] {
+  const shares = stageShares(hasModel, whole);
   const at = shares.findIndex((s) => s.key === stage);
   let start = 0;
   return shares.map(({ key, share }, i) => {

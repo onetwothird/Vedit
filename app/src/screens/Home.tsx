@@ -7,13 +7,17 @@ import { engine } from "../engine/client";
 import type { Project } from "../engine/types";
 import { t } from "../i18n/t";
 import { baseName } from "../lib/native";
+import { isWhole, newImport, projectHome } from "../lib/projectKind";
 import { useFilmstrip } from "../lib/useFilmstrip";
 import { BatchArt, ClipArt, PhotosArt, ReelArt, VlogArt } from "./home/HomeArt";
 import "./home/home.css";
 
+const TILES = [
+  { key: "vlog", Art: VlogArt, type: "vlog" },
+  { key: "reel", Art: ReelArt, type: "reel" },
+] as const;
+
 const SOON = [
-  { key: "vlog", Art: VlogArt },
-  { key: "reel", Art: ReelArt },
   { key: "photos", Art: PhotosArt },
   { key: "batch", Art: BatchArt },
 ] as const;
@@ -60,6 +64,16 @@ export default function Home() {
         </li>
         <li>
           <ul className="mode-soon-row">
+            {TILES.map(({ key, Art, type }) => (
+              <li key={key}>
+                <Link className="mode-soon mode-live" to={newImport(type)} data-tile>
+                  <Art />
+                  <span className="m-title">{t(`home.tile.${key}.title`)}</span>
+                  <span className="m-desc">{t(`home.tile.${key}.desc`)}</span>
+                  <span className="m-go">{t(`home.tile.${key}.cta`)}</span>
+                </Link>
+              </li>
+            ))}
             {SOON.map(({ key, Art }) => {
               const title = t(`home.tile.${key}.title`);
               return (
@@ -100,14 +114,14 @@ function RecentItem({ p }: { p: Project }) {
   const n = p.clips.length;
   return (
     <li>
-      <Link className="recent-item" to={n > 0 ? `/p/${p.id}/pick` : `/p/${p.id}/import`}>
+      <Link className="recent-item" to={n > 0 ? projectHome(p) : `/p/${p.id}/import`}>
         <span className="r-thumb">
           <FilmFrame film={film} t={p.clips[0]?.highlight.start ?? 0} fit={{ width: 232, height: 130 }} />
         </span>
         <span className="r-name" title={baseName(p.source)}>{baseName(p.source)}</span>
         <span className="r-meta">
           <span>{formatDate(p.created)}</span>
-          <span>{n > 0 ? t(n === 1 ? "home.recent.clips.one" : "home.recent.clips.other", { n }) : t("home.recent.noclips")}</span>
+          <span>{isWhole(p.type) ? t(`home.recent.type.${p.type}`) : n > 0 ? t(n === 1 ? "home.recent.clips.one" : "home.recent.clips.other", { n }) : t("home.recent.noclips")}</span>
         </span>
       </Link>
     </li>

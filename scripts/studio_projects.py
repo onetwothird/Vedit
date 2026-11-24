@@ -17,7 +17,10 @@ from highlights import Highlight
 
 LANG_MODEL = {"en": ("en", "small"), "tl": ("tl", "large-v3"), "taglish": ("tl", "large-v3")}
 
-PLATFORMS = ("reels", "shorts", "tiktok")
+PLATFORMS = ("reels", "shorts", "tiktok", "youtube")
+# clip: many highlights cut from a long video. vlog / reel: the whole video as one tidied edit (16:9 or vertical).
+TYPES = ("clip", "vlog", "reel")
+PLATFORM_FOR = {"clip": ("reels", "shorts", "tiktok"), "reel": ("reels", "shorts", "tiktok"), "vlog": ("youtube",)}
 PROJECT_FILE = "project.json"
 MAX_NAME_LEN = 60  # whole name before ".mp4": "NN " prefix + title + any " (WxH)" suffix
 _ILLEGAL = re.compile(r'[<>:"/\\|?*\x00-\x1f\x7f]')
@@ -33,10 +36,10 @@ class ProjectClip:
 @dataclass
 class Project:
     id: str
-    type: Literal["clip"]
+    type: Literal["clip", "vlog", "reel"]
     source: str
     language: Literal["en", "tl", "taglish"]
-    platform: Literal["reels", "shorts", "tiktok"]
+    platform: Literal["reels", "shorts", "tiktok", "youtube"]
     created: str
     clips: list[ProjectClip] = field(default_factory=list)
     settings: dict = field(default_factory=dict)
@@ -47,9 +50,15 @@ def _now() -> str:
     return datetime.now(timezone.utc).isoformat()
 
 
-def project_id(source: Path) -> str:
-    key = os.path.normcase(str(Path(source).resolve()))
+def project_id(source: Path, kind: str = "clip") -> str:
+    """From the path, so opening the same video again finds its project. A clip project keeps the plain path's id."""
+    key = os.path.normcase(str(Path(source).resolve())) + ("" if kind == "clip" else f"|{kind}")
     return hashlib.sha1(key.encode("utf-8")).hexdigest()[:12]
+
+
+def project_file(kind: str) -> str:
+    """Each type has its own file in the video's workdir, so they share the transcript but never each other's edits."""
+    return PROJECT_FILE if kind == "clip" else f"project-{kind}.json"
 
 
 def _home() -> Path:
@@ -101,7 +110,7 @@ def _backup(path: Path) -> Path:
     return bak
 
 
-def _register(pid: str, wd: Path) -> None:
+def _register(pid: str, wd: Path, file: str = PROJECT_FILE) -> None:
     path = _registry_path()
     try:
         reg = json.loads(path.read_text(encoding="utf-8"))
@@ -112,14 +121,14 @@ def _register(pid: str, wd: Path) -> None:
     except ValueError:  # unparseable: keep a copy before rewriting
         _backup(path)
         reg = {}
-    reg[pid] = {"workdir": str(wd), "opened": _now()}
+    reg[pid] = {"workdir": str(wd), "opened": _now(), **({} if file == PROJECT_FILE else {"file": file})}
     _atomic_write_json(path, reg)
 
 
-def _touch_registry(pid: str, wd: Path) -> None:
+def _touch_registry(pid: str, wd: Path, file: str = PROJECT_FILE) -> None:
     """Recency bump is best-effort: the project itself is already safely on disk."""
     try:
-        _register(pid, wd)
+        _register(pid, wd, file)
     except Exception as e:  # noqa: BLE001
         print(f"vedit: could not update project registry: {e}", file=sys.stderr)
 
@@ -130,8 +139,8 @@ def _from_dict(d: dict) -> Project:
                    created=d["created"], clips=clips, settings=d["settings"], last_job=d["last_job"])
 
 
-def _read_project(wd: Path) -> Project:
-    f = wd / PROJECT_FILE
+def _read_project(wd: Path, file: str = PROJECT_FILE) -> Project:
+    f = wd / file
     try:
         return _from_dict(json.loads(f.read_text(encoding="utf-8")))
     except (ValueError, KeyError, TypeError) as e:  # other OSErrors (locks, permissions) propagate
@@ -139,10 +148,10 @@ def _read_project(wd: Path) -> Project:
 
 
 def save_project(p: Project) -> None:
-    _atomic_write_json(workdir_for(p.source) / PROJECT_FILE, asdict(p))
+    _atomic_write_json(workdir_for(p.source) / project_file(p.type), asdict(p))
 
 
-def create_project(source: Path, language: str, platform: str) -> Project:
+def create_project(source: Path, language: str, platform: str, kind: str = "clip") -> Project:
     """New project for `source`. The id is derived from the path, so an existing project keeps its work.
 
     A missing project.json starts fresh; a corrupt one is moved to project.json.bak-<stamp> first; any other
@@ -150,19 +159,22 @@ def create_project(source: Path, language: str, platform: str) -> Project:
     """
     if language not in LANG_MODEL:
         raise ValueError(f"unsupported language: {language!r}")
-    if platform not in PLATFORMS:
-        raise ValueError(f"unsupported platform: {platform!r}")
+    if kind not in TYPES:
+        raise ValueError(f"unsupported project type: {kind!r}")
+    if platform not in PLATFORM_FOR[kind]:
+        raise ValueError(f"unsupported platform for a {kind} project: {platform!r}")
     source = Path(source).resolve()
     wd = workdir_for(source)
+    file = project_file(kind)
     try:
-        p = _read_project(wd)
+        p = _read_project(wd, file)
     except (FileNotFoundError, ValueError) as e:
         if isinstance(e, ValueError):
-            _backup(wd / PROJECT_FILE)
-        p = Project(id=project_id(source), type="clip", source=str(source), language=language,
+            _backup(wd / file)
+        p = Project(id=project_id(source, kind), type=kind, source=str(source), language=language,
                     platform=platform, created=_now())
         save_project(p)
-    _touch_registry(p.id, wd)
+    _touch_registry(p.id, wd, file)
     return p
 
 
@@ -170,11 +182,12 @@ def load_project(pid: str) -> Project:
     """Raises KeyError for an unknown id and ValueError for a missing or corrupt project file."""
     entry = _read_registry()[pid]
     wd = Path(entry["workdir"])
+    file = entry.get("file", PROJECT_FILE)
     try:
-        p = _read_project(wd)
+        p = _read_project(wd, file)
     except FileNotFoundError as e:
         raise ValueError(f"project file missing in {wd}") from e
-    _touch_registry(pid, wd)
+    _touch_registry(pid, wd, file)
     return p
 
 
@@ -183,7 +196,7 @@ def list_recent(limit: int = 10) -> list[Project]:
     out: list[Project] = []
     for _pid, entry in rows:
         try:
-            out.append(_read_project(Path(entry["workdir"])))
+            out.append(_read_project(Path(entry["workdir"]), entry.get("file", PROJECT_FILE)))
         except (OSError, ValueError, KeyError, TypeError):
             continue  # workdir or project.json gone/corrupt: skip, don't raise
         if len(out) >= limit:

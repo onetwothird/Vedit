@@ -391,6 +391,8 @@ html.theme-fade, html.theme-fade * { transition: background-color .3s ease, bord
   grid-template-columns: 268px minmax(0, 1fr) 380px; grid-template-rows: minmax(0, 1fr) auto; /* the timeline takes what its lanes need; the player gives way */
   grid-template-areas: "clips player insp" "clips tl tl";
 }
+/* a vlog or Quick Reel project is one clip: no clip list */
+.edit.whole { grid-template-columns: minmax(0, 1fr) 380px; grid-template-areas: "player insp" "tl tl"; }
 .ed-clips { grid-area: clips; border-right: 1px solid var(--line); display: flex; flex-direction: column; min-height: 0; min-width: 0; }
 .ed-player { grid-area: player; display: flex; flex-direction: column; gap: 8px; padding: 10px; min-width: 0; min-height: 0; }
 .ed-insp { grid-area: insp; border-left: 1px solid var(--line); display: flex; flex-direction: column; min-height: 0; min-width: 0; position: relative; }
@@ -552,6 +554,7 @@ html.theme-fade, html.theme-fade * { transition: background-color .3s ease, bord
     height: auto; grid-template-columns: minmax(0, 1fr); grid-template-rows: none;
     grid-template-areas: "player" "insp" "clips" "tl";
   }
+  .edit.whole { grid-template-columns: minmax(0, 1fr); grid-template-areas: "player" "insp" "tl"; }
   .ed-player .stage { flex: none; height: min(560px, 70vh); }
   .ed-insp { border-left: 0; border-top: 1px solid var(--line); }
   .ed-insp .ed-panel { flex: none; max-height: 440px; }

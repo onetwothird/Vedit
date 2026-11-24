@@ -47,6 +47,10 @@ ALLOWED_ORIGINS = ("tauri://localhost", "http://tauri.localhost", "http://localh
 FORMATS = ("9:16", "1:1", "4:5", "16:9")
 HIGH_CRF = "15"
 ANALYZE_STEPS = (("proxy", 0.1), ("analyze", 0.6), ("highlights", 0.15), ("framing", 0.15))
+# vlog / reel projects edit the whole video: no highlight search
+WHOLE_STEPS = (("proxy", 0.15), ("analyze", 0.85))
+WHOLE_ID = "h01"
+PRESET_FOR = {"vlog": "youtube"}  # clip and reel projects use their platform's preset
 TERMINAL = ("done", "failed", "cancelled")
 WS_QUEUE_MAX = 256
 OVERLAP_DROP = 0.5  # a new highlight overlapping a kept clip by more than this share of the shorter one is dropped
@@ -57,7 +61,8 @@ OVERLAP_DROP = 0.5  # a new highlight overlapping a kept clip by more than this 
 class NewProject(BaseModel):
     source: str
     language: Literal["en", "tl", "taglish"]
-    platform: Literal["reels", "shorts", "tiktok"]
+    platform: Literal["reels", "shorts", "tiktok", "youtube"]
+    type: Literal["clip", "vlog", "reel"] = "clip"
 
 
 class AIOptions(BaseModel):
@@ -432,6 +437,8 @@ class Engine:
 
     def _finish_analyze(self, p: Project) -> dict:
         """Add clips for new highlights. Existing clips whose edit file exists are never touched."""
+        if p.type != "clip":
+            return self._finish_whole(p)
         wd = workdir_for(p.source)
         data = load_json(wd / "highlights.json")
         language = LANG_MODEL[p.language][0]
@@ -463,6 +470,11 @@ class Engine:
             used.add(hid)
             added.append(ProjectClip(highlight={**h, "id": hid}, kept=True, edl_file=name))
         p.clips = preserved + added
+        self._set_media(p, wd)
+        return {"clips": len(p.clips), "new": len(added), "reason": data.get("reason")}
+
+    @staticmethod
+    def _set_media(p: Project, wd: Path) -> None:
         proxy = wd / "proxy.mp4"
         try:
             has_proxy = proxy.is_file() and load_json(wd / "proxy.json").get("src") == str(Path(p.source).resolve())
@@ -470,7 +482,30 @@ class Engine:
             has_proxy = False
         p.settings.update(workdir=str(wd), proxy=str(proxy if has_proxy else Path(p.source)),
                           filmstrip=str(wd / "filmstrip.json"))
-        return {"clips": len(p.clips), "new": len(added), "reason": data.get("reason")}
+
+    def _finish_whole(self, p: Project) -> dict:
+        """A vlog or reel project: one edit of the whole video, with the preset's cuts. An edit that already
+        exists is kept, so analysing again never throws away someone's work."""
+        wd = workdir_for(p.source)
+        name = f"{p.type}-{WHOLE_ID}.edl.json"
+        existing = [c for c in p.clips if c.edl_file == name and (wd / name).is_file()]
+        if existing:
+            p.clips = existing
+            self._set_media(p, wd)
+            return {"clips": 1, "new": 0, "reason": None}
+        h = whole_highlight(wd, p.source)
+        language = LANG_MODEL[p.language][0]
+        try:
+            edl = clip_edl(wd, h, PRESET_FOR.get(p.type, p.platform), language, usable_brand_file())
+        except ValueError:
+            raise ValueError("no speech was found in this video, so there is nothing to edit") from None
+        if not edl["output"].get("aspect"):
+            # a vlog keeps the video's own shape; saying it outright lets the Edit screen show the same shape
+            edl["output"]["aspect"] = source_aspect(p.source)
+        _atomic_write_json(wd / name, edl)
+        p.clips = [ProjectClip(highlight=h, kept=True, edl_file=name)]
+        self._set_media(p, wd)
+        return {"clips": 1, "new": 1, "reason": None}
 
     def _finish_export(self, job: Job) -> dict:
         """Finished files (+ .srt) and, on failure, which render failed. Always removes the temp edits."""
@@ -523,6 +558,30 @@ class Engine:
                 loop.call_soon_threadsafe(_offer, q, msg)
             except RuntimeError:  # loop already closed
                 self.remove_client((loop, q))
+
+
+def source_aspect(source: str) -> str:
+    """16:9 for a landscape (or square-ish wide) video, 9:16 for a portrait one."""
+    try:
+        v = next(s for s in cached_probe(source).get("streams", []) if s.get("codec_type") == "video")
+        w, h = int(v["width"]), int(v["height"])
+        if abs(int(v.get("tags", {}).get("rotate", 0) or 0)) in (90, 270):
+            w, h = h, w
+    except (StopIteration, KeyError, ValueError, TypeError, OSError):
+        return "16:9"
+    return "9:16" if h > w else "16:9"
+
+
+def whole_highlight(wd: Path, source: str) -> dict:
+    """The whole video as one "highlight": every word, titled after the file."""
+    tp = Path(wd) / "transcript.main.json"
+    words = load_json(tp).get("words", []) if tp.is_file() else []
+    if words:
+        start, end = float(words[0]["start"]), float(words[-1]["end"])
+    else:
+        start, end = 0.0, float(cached_probe(source).get("format", {}).get("duration") or 0)
+    return {"id": WHOLE_ID, "start": round(start, 3), "end": round(end, 3), "w0": 0, "w1": max(len(words) - 1, 0),
+            "score": 100, "title": Path(source).stem[:60] or "Video", "features": {}}
 
 
 def _safe_out_dir(raw: str) -> Path:
@@ -730,7 +789,7 @@ def create_app(token: str, queue: JobQueue | None = None) -> FastAPI:
         src = Path(body.source)
         if not src.is_file():
             raise ValueError(f"source video not found: {body.source}")
-        return _project_dict(create_project(src, body.language, body.platform))
+        return _project_dict(create_project(src, body.language, body.platform, body.type))
 
     @app.get("/projects/{pid}")
     def get_project(pid: str):
@@ -752,8 +811,9 @@ def create_app(token: str, queue: JobQueue | None = None) -> FastAPI:
                 "analyze": py_cmd("analyze.py", src, "--model", model, "--language", lang),
                 "highlights": py_cmd("highlights.py", src, *hl_args),
                 "framing": py_cmd("highlights.py", src, "--framing")}
+        stages = ANALYZE_STEPS if p.type == "clip" else WHOLE_STEPS
         steps = [(stage, argv[stage], share) + ((step_env[stage],) if stage in step_env else ())
-                 for stage, share in ANALYZE_STEPS]
+                 for stage, share in stages]
         if not models.status()[model]["installed"]:  # fetch the speech model first, as 30% of the job
             steps = [("model", py_cmd("models.py", "download", model), 0.3)] +                     [(st, argv_, share * 0.7, *rest) for st, argv_, share, *rest in steps]
         return _job_dict(engine.submit(pid, "analyze", steps))

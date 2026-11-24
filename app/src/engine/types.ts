@@ -1,7 +1,9 @@
 // Types mirroring the local engine server (scripts/studio_server.py and the dataclasses behind it).
 
 export type Language = "en" | "tl" | "taglish";
-export type Platform = "reels" | "shorts" | "tiktok";
+export type Platform = "reels" | "shorts" | "tiktok" | "youtube";
+/** clip: many highlights from a long video. vlog / reel: the whole video as one edit. */
+export type ProjectType = "clip" | "vlog" | "reel";
 export type Aspect = "9:16" | "1:1" | "4:5" | "16:9";
 
 /** Thrown by every engine method. status 0 means the request never got an answer (code "network"). */
@@ -90,7 +92,7 @@ export interface Job {
 
 export interface Project {
   id: string;
-  type: "clip";
+  type: ProjectType;
   source: string;
   language: Language;
   platform: Platform;
@@ -201,6 +203,8 @@ export interface NewProjectBody {
   source: string;
   language: Language;
   platform: Platform;
+  /** Defaults to "clip". */
+  type?: ProjectType;
 }
 
 export interface AnalyzeBody {

@@ -1,20 +1,20 @@
 import { useEffect, useRef, useState, type DragEvent } from "react";
-import { Link, useNavigate, useParams } from "react-router-dom";
+import { Link, useNavigate, useParams, useSearchParams } from "react-router-dom";
 import ProgressStages from "../components/ProgressStages";
 import Screen from "../components/Screen";
 import { engine, isTauri } from "../engine/client";
 import { useJob } from "../engine/events";
-import { EngineError, type Language, type Platform } from "../engine/types";
+import { EngineError, type Language, type Platform, type ProjectType } from "../engine/types";
 import { t } from "../i18n/t";
 import {
   VIDEO_ACCEPT, analyzeBody, baseName, isVideoName, listenNativeDrop, pickVideoNative, toPicked, type PickedFile,
 } from "../lib/native";
 import { getLanguage, getPlatform } from "../lib/prefs";
+import { PLATFORMS_FOR, isWhole, newImport, parseType, platformFor, projectHome } from "../lib/projectKind";
 import { hasModelStep } from "../lib/modelSeen";
 import { secondsLeft } from "../lib/progress";
 
 const LANGUAGES: Language[] = ["en", "tl", "taglish"];
-const PLATFORMS: Platform[] = ["reels", "shorts", "tiktok"];
 
 function Choice<T extends string>(props: {
   legend: string;
@@ -56,10 +56,13 @@ function timeLeftText(sec: number | null): string {
 export default function Import() {
   const { id } = useParams();
   const navigate = useNavigate();
+  const [params] = useSearchParams();
 
+  const [kind, setKind] = useState<ProjectType>(() => parseType(params.get("type")));
   const [file, setFile] = useState<PickedFile | null>(null);
   const [language, setLanguage] = useState<Language>(getLanguage);
-  const [platform, setPlatform] = useState<Platform>(getPlatform);
+  const [platform, setPlatform] = useState<Platform>(() => platformFor(parseType(params.get("type")), getPlatform()));
+  const whole = isWhole(kind);
   const [pid, setPid] = useState<string | null>(null);
   const [jobId, setJobId] = useState<string | undefined>();
   const [error, setError] = useState<string | null>(null);
@@ -91,6 +94,7 @@ export default function Import() {
       (p) => {
         if (!live) return;
         setPid(p.id);
+        setKind(p.type);
         setFile(toPicked(p.source));
         setLanguage(p.language);
         setPlatform(p.platform);
@@ -114,8 +118,8 @@ export default function Import() {
   }, [id]);
 
   useEffect(() => {
-    if (job?.state === "done") navigate(`/p/${job.project_id}/pick`, { state: { analyze: job.result } });
-  }, [job?.state, job?.project_id, job?.result, navigate]);
+    if (job?.state === "done") navigate(projectHome({ id: job.project_id, type: kind }), { state: { analyze: job.result } });
+  }, [job?.state, job?.project_id, job?.result, kind, navigate]);
 
   useEffect(() => {
     if (!running) return;
@@ -136,7 +140,7 @@ export default function Import() {
       ownedId.current = null;
       setPid(null);
       setJobId(undefined);
-      navigate("/p/new/import", { replace: true });
+      navigate(newImport(kind), { replace: true });
     }
   }
 
@@ -179,7 +183,7 @@ export default function Import() {
     try {
       let project = pid;
       if (!project) {
-        const p = await engine.createProject({ source: file.path, language, platform });
+        const p = await engine.createProject({ source: file.path, language, platform: platformFor(kind, platform), type: kind });
         project = p.id;
         ownedId.current = p.id;
         setPid(p.id);
@@ -205,7 +209,7 @@ export default function Import() {
     }
   }
 
-  const bar = { fileName: file?.name, step: 1 as const };
+  const bar = { fileName: file?.name, step: 1 as const, whole };
 
   if (missing) {
     return (
@@ -245,7 +249,7 @@ export default function Import() {
           >
             <i style={{ width: `${pct}%` }} />
           </div>
-          <ProgressStages stage={job.stage} pct={job.pct} hasModel={hasModelStep(job.id) || job.stage === "model"} />
+          <ProgressStages stage={job.stage} pct={job.pct} hasModel={hasModelStep(job.id) || job.stage === "model"} whole={whole} />
           {error && <p className="error" role="alert">{error}</p>}
           <button type="button" className="secondary" onClick={cancel}>{t("import.cancel")}</button>
         </section>
@@ -272,7 +276,7 @@ export default function Import() {
 
   return (
     <Screen bar={bar} narrow>
-      <h1 className="title">{t("import.title")}</h1>
+      <h1 className="title">{t(kind === "clip" ? "import.title" : `import.title.${kind}`)}</h1>
       <div className="import">
         <div
           className={`drop${over ? " over" : ""}${file ? " has-file" : ""}`}
@@ -316,19 +320,21 @@ export default function Import() {
             onChange={setLanguage}
             disabled={!!pid}
           />
-          <Choice<Platform>
-            legend={t("import.platform")}
-            name="platform"
-            keys={PLATFORMS}
-            labelPrefix="import.platform"
-            value={platform}
-            onChange={setPlatform}
-            disabled={!!pid}
-          />
+          {kind !== "vlog" && (
+            <Choice<Platform>
+              legend={t("import.platform")}
+              name="platform"
+              keys={PLATFORMS_FOR[kind]}
+              labelPrefix="import.platform"
+              value={platform}
+              onChange={setPlatform}
+              disabled={!!pid}
+            />
+          )}
         </div>
 
         <ol className="import-next" aria-label={t("import.next")}>
-          {(["listen", "find", "pick"] as const).map((k) => (
+          {(whole ? (["listen", "cut", "edit"] as const) : (["listen", "find", "pick"] as const)).map((k) => (
             <li key={k}>{t(`import.next.${k}`)}</li>
           ))}
         </ol>

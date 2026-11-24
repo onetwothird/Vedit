@@ -230,6 +230,13 @@ Claude analyzes the footage, drafts and refines the edit, renders a preview, che
 
 Vedit Studio is the same engine with a screen: drop in a long video, pick the best moments, edit each clip, export.
 
+Start from Home with one of three project types:
+
+- **Clip a long video.** A podcast, stream or interview becomes many 20 to 90 second clips (the steps below).
+- **Edit a vlog.** The whole video, tidied: dead air, filler words and retakes cut, clean captions, its own shape
+  (16:9 for a landscape video). Import goes straight to Edit.
+- **Quick Reel / Short.** One phone video as a fast vertical cut with pop-up captions, for Reels, Shorts or TikTok.
+
 <img src="docs/images/home.png" alt="The Vedit Studio welcome screen: a podcast cut into three vertical clips, next to sign-in" width="800">
 
 1. **Import.** Choose a video. Vedit listens to it, finds the 20 to 90 second moments worth posting and frames

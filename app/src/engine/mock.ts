@@ -4,7 +4,7 @@
 import {
   EngineError,
   type AnalyzeBody, type CaptionTrack, type ClipOp, type ClipView, type Doctor, type Edl, type EdlClip, type Engine,
-  type AiTestResult, type Brand, type ExportBody, type FilmstripInfo, type Health, type Highlight, type Job, type ModelStatus, type NewProjectBody, type Project,
+  type AiTestResult, type Brand, type ExportBody, type FilmstripInfo, type Health, type Highlight, type Job, type ModelStatus, type NewProjectBody, type Project, type ProjectType,
   type ProjectClip, type RenderPlanEntry, type Transcript, type TranscriptWord,
 } from "./types";
 import { spelledAs } from "../edit/spelling";
@@ -241,10 +241,28 @@ export function createMockEngine(opts: { tickMs?: number; persist?: Pick<Storage
     });
   }
 
-  function newProject(source: string, language: Project["language"], platform: Project["platform"], withClips: boolean): Project {
+  /** A vlog or Quick Reel project: the whole sample as one clip, cut with the preset (16:9 or vertical). */
+  function wholeClip(pid: string, type: "vlog" | "reel", source: string): ProjectClip {
+    const w1 = transcript.words.length - 1;
+    const highlight: Highlight = {
+      id: "h01", start: transcript.words[0].start, end: transcript.words[w1].end, w0: 0, w1, score: 100,
+      title: (source.split(/[\\/]/).pop() ?? "").replace(/\.[^.]+$/, "") || "Video", features: {},
+    };
+    let edl: Edl = {
+      clips: [{ src: "main", words: [0, w1] }],
+      output: { aspect: type === "vlog" ? "16:9" : "9:16", fps: 30 },
+      captions: { style: type === "vlog" ? "clean" : "pop" },
+    };
+    for (let i = 0; i <= w1; i++) if (HARD_FILLERS.has(i % PASSAGE_LEN)) edl = applyOp(edl, { op: "cut", w0: i, w1: i });
+    edls.set(`${pid}/h01`, saved()[`${pid}/h01`] ?? edl);
+    return { highlight, kept: true, edl_file: `${type}-h01.edl.json` };
+  }
+
+  function newProject(source: string, language: Project["language"], platform: Project["platform"], withClips: boolean,
+                      type: ProjectType = "clip"): Project {
     const id = `mock-${++seq}`;
     const p: Project = {
-      id, type: "clip", source, language, platform, created: new Date().toISOString(), clips: [], settings: {}, last_job: null,
+      id, type, source, language, platform, created: new Date().toISOString(), clips: [], settings: {}, last_job: null,
     };
     projects.set(id, p);
     if (withClips) {
@@ -313,7 +331,14 @@ export function createMockEngine(opts: { tickMs?: number; persist?: Pick<Storage
     async recent() { return [...projects.values()].map(snapshot); },
     async createProject(body: NewProjectBody) {
       if (!body.source) throw new EngineError(400, "bad_request", `source video not found: ${body.source}`);
-      return snapshot(newProject(body.source, body.language, body.platform, false));
+      const type = body.type ?? "clip";
+      const allowed: Record<ProjectType, Project["platform"][]> = {
+        clip: ["reels", "shorts", "tiktok"], reel: ["reels", "shorts", "tiktok"], vlog: ["youtube"],
+      };
+      if (!allowed[type].includes(body.platform)) {
+        throw new EngineError(400, "bad_request", `unsupported platform for a ${type} project: ${body.platform}`);
+      }
+      return snapshot(newProject(body.source, body.language, body.platform, false, type));
     },
     async getProject(pid) { return snapshot(project(pid)); },
     async filmstrip(pid) {
@@ -323,7 +348,10 @@ export function createMockEngine(opts: { tickMs?: number; persist?: Pick<Storage
     },
     async analyze(pid, body?: AnalyzeBody) {
       const p = project(pid); // the AI key in the body is deliberately never read or stored
-      const stages: [string, number][] = [["proxy", 0.1], ["analyze", 0.6], ["highlights", 0.15], ["framing", 0.15]];
+      const whole = p.type !== "clip";
+      const stages: [string, number][] = whole
+        ? [["proxy", 0.15], ["analyze", 0.85]]
+        : [["proxy", 0.1], ["analyze", 0.6], ["highlights", 0.15], ["framing", 0.15]];
       // test trigger: a source file name containing "fail" makes the first analyze of that project fail halfway
       const failing = /fail/i.test(p.source) && !failedOnce.has(pid);
       if (failing) failedOnce.add(pid);
@@ -332,6 +360,12 @@ export function createMockEngine(opts: { tickMs?: number; persist?: Pick<Storage
         // test trigger: a source file name containing "silent" has no speech to find clips in
         if (!had && /silent/i.test(p.source)) {
           job.result = { clips: 0, new: 0, reason: "no_speech" };
+          return;
+        }
+        if (whole) {
+          if (!had) p.clips = [wholeClip(pid, p.type as "vlog" | "reel", p.source)];
+          p.settings = { workdir: "C:/mock/work", proxy: p.source, filmstrip: "C:/mock/work/filmstrip.json" };
+          job.result = { clips: 1, new: had ? 0 : 1, reason: null };
           return;
         }
         if (!had) {

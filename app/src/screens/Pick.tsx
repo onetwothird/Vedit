@@ -8,6 +8,7 @@ import { engine } from "../engine/client";
 import { useJob } from "../engine/events";
 import type { Aspect, AnalyzeResult, ClipView, Project, Transcript } from "../engine/types";
 import { t } from "../i18n/t";
+import { isWhole, projectHome } from "../lib/projectKind";
 import { keptCount, sortClips, type ClipSort } from "../lib/clips";
 import { analyzeBody, baseName } from "../lib/native";
 import { formatClock, formatLength } from "../lib/time";
@@ -73,6 +74,10 @@ export default function Pick() {
     engine.getProject(id).then(
       (p) => {
         if (!live) return;
+        if (isWhole(p.type)) {
+          navigate(projectHome(p), { replace: true });
+          return;
+        }
         setProject(p);
         const last = p.last_job;
         if (last && last.kind === "analyze" && (last.state === "queued" || last.state === "running")) {
