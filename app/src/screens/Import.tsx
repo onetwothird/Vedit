@@ -12,7 +12,36 @@ import {
 import { getLanguage, getPlatform } from "../lib/prefs";
 import { PLATFORMS_FOR, isWhole, newImport, parseType, platformFor, projectHome } from "../lib/projectKind";
 import { hasModelStep } from "../lib/modelSeen";
-import { secondsLeft } from "../lib/progress";
+import { secondsLeft, stageRows } from "../lib/progress";
+import "./import.css";
+
+interface Meta {
+  duration: number;
+  width: number;
+  height: number;
+}
+
+/** 00:42:07 for a duration in seconds; dashes before a video is known. */
+function timecode(sec: number | null): string {
+  if (sec === null || !Number.isFinite(sec)) return "--:--:--";
+  const s = Math.floor(sec);
+  return [Math.floor(s / 3600), Math.floor((s % 3600) / 60), s % 60].map((n) => String(n).padStart(2, "0")).join(":");
+}
+
+const reducedMotion = (): boolean =>
+  typeof window !== "undefined" && !!window.matchMedia?.("(prefers-reduced-motion: reduce)").matches;
+
+/** A URL the viewer can play for a picked file: the desktop app reads the file itself, a browser has the File. */
+async function previewFor(path: string, file?: File): Promise<string | null> {
+  if (file) return URL.createObjectURL(file);
+  if (!isTauri()) return null;
+  try {
+    const { convertFileSrc } = await import("@tauri-apps/api/core");
+    return convertFileSrc(path);
+  } catch {
+    return null;
+  }
+}
 
 const LANGUAGES: Language[] = ["en", "tl", "taglish"];
 
@@ -74,6 +103,11 @@ export default function Import() {
   const startedAt = useRef(Date.now());
   const ownedId = useRef<string | null>(null);
   const input = useRef<HTMLInputElement>(null);
+  const [preview, setPreview] = useState<string | null>(null);
+  const [meta, setMeta] = useState<Meta | null>(null);
+  const [previewFailed, setPreviewFailed] = useState(false);
+  const [playhead, setPlayhead] = useState(0);
+  const pickedFile = useRef<File | undefined>(undefined);
 
   const job = useJob(jobId);
   const running = job?.state === "queued" || job?.state === "running";
@@ -121,19 +155,42 @@ export default function Import() {
     if (job?.state === "done") navigate(projectHome({ id: job.project_id, type: kind }), { state: { analyze: job.result } });
   }, [job?.state, job?.project_id, job?.result, kind, navigate]);
 
+  // the viewer plays the chosen video, so you can see it is the right one before starting
+  useEffect(() => {
+    setMeta(null);
+    setPreviewFailed(false);
+    setPlayhead(0);
+    if (!file) {
+      setPreview(null);
+      return;
+    }
+    let live = true;
+    let made: string | null = null;
+    void previewFor(file.path, pickedFile.current).then((url) => {
+      made = url;
+      if (live) setPreview(url);
+      else if (url?.startsWith("blob:")) URL.revokeObjectURL(url);
+    });
+    return () => {
+      live = false;
+      if (made?.startsWith("blob:")) URL.revokeObjectURL(made);
+    };
+  }, [file]);
+
   useEffect(() => {
     if (!running) return;
     const timer = setInterval(() => setNow(Date.now()), 1000);
     return () => clearInterval(timer);
   }, [running]);
 
-  function accept(path: string) {
+  function accept(path: string, picked?: File) {
     if (locked.current) return; // a running analysis is never replaced by a dropped file
     if (!isVideoName(baseName(path))) {
       setError(t("import.unsupported"));
       return;
     }
     setError(null);
+    pickedFile.current = picked;
     setFile(toPicked(path));
     if (pid) {
       // a different video is a different project
@@ -166,14 +223,14 @@ export default function Import() {
   function onInput(e: React.ChangeEvent<HTMLInputElement>) {
     const f = e.target.files?.[0];
     e.target.value = ""; // the same file can be chosen again
-    if (f) accept(f.name);
+    if (f) accept(f.name, f);
   }
 
   function onDrop(e: DragEvent) {
     e.preventDefault();
     setOver(false);
     const f = e.dataTransfer.files[0];
-    if (f) accept(f.name);
+    if (f) accept(f.name, f);
   }
 
   async function start() {
@@ -231,28 +288,46 @@ export default function Import() {
 
   if (job && running) {
     const pct = Math.round(job.pct);
+    const rows = stageRows(job.stage, job.pct, hasModelStep(job.id) || job.stage === "model", false, whole);
+    const current = rows.find((r) => r.status === "current");
     return (
-      <Screen bar={bar} narrow>
-        <h1 className="title">{t("import.analyzing")}</h1>
-        <section className="run">
-          <div className="run-head">
-            <span className="mono eta">{timeLeftText(secondsLeft(now - startedAt.current, job.pct))}</span>
-            <span className="mono total">{pct}%</span>
+      <Screen bar={bar}>
+        <div className="imp">
+          <h1 className="title imp-title">{t("import.analyzing")}</h1>
+          <div className="imp-grid">
+            <div className="imp-monitor working" style={{ "--p": job.pct / 100 } as React.CSSProperties}>
+              <div className={`viewer has-file working${preview && !previewFailed ? " playing" : ""}`}>
+                {preview && !previewFailed ? (
+                  <video className="vf-video" src={preview} muted loop playsInline autoPlay={!reducedMotion()} aria-hidden="true"
+                    onError={() => setPreviewFailed(true)} />
+                ) : (
+                  <span className="vf-still" aria-hidden="true"><FilmIcon /></span>
+                )}
+                <span className="vf-scan" aria-hidden="true" />
+                <div className="vf-work">
+                  <span className="vf-work-pct">{pct}%</span>
+                  {current && <span className="vf-work-stage" aria-hidden="true" data-stage={t(`import.stage.${current.key}`)} />}
+                </div>
+                <div className="vf-bar">
+                  <span className="vf-tc mono">{timeLeftText(secondsLeft(now - startedAt.current, job.pct))}</span>
+                  <span className="vf-file">
+                    {file && <span className="file-name mono" title={file.path}>{file.name}</span>}
+                  </span>
+                </div>
+              </div>
+              <DropWave heard={job.pct / 100} />
+              <div className="meter imp-meter" role="progressbar" aria-label={t("import.progress")} aria-valuemin={0} aria-valuemax={100} aria-valuenow={pct}>
+                <i style={{ width: `${pct}%` }} />
+              </div>
+            </div>
+            <aside className="imp-slate" aria-label={t("import.progress")}>
+              <ProgressStages stage={job.stage} pct={job.pct} hasModel={hasModelStep(job.id) || job.stage === "model"} whole={whole} />
+              <p className="imp-start-note imp-wait">{t("import.working.note")}</p>
+              {error && <p className="error" role="alert">{error}</p>}
+              <button type="button" className="secondary" onClick={cancel}>{t("import.cancel")}</button>
+            </aside>
           </div>
-          <div
-            className="meter"
-            role="progressbar"
-            aria-label={t("import.progress")}
-            aria-valuemin={0}
-            aria-valuemax={100}
-            aria-valuenow={pct}
-          >
-            <i style={{ width: `${pct}%` }} />
-          </div>
-          <ProgressStages stage={job.stage} pct={job.pct} hasModel={hasModelStep(job.id) || job.stage === "model"} whole={whole} />
-          {error && <p className="error" role="alert">{error}</p>}
-          <button type="button" className="secondary" onClick={cancel}>{t("import.cancel")}</button>
-        </section>
+        </div>
       </Screen>
     );
   }
@@ -274,83 +349,129 @@ export default function Import() {
     );
   }
 
+  const portrait = !!meta && meta.height > meta.width;
+  // what Vedit will cut from a landscape video: the vertical frame (a vlog keeps its own shape)
+  const guide = !!file && !portrait && kind !== "vlog";
+  const steps = whole ? (["listen", "cut", "edit"] as const) : (["listen", "find", "pick"] as const);
+
   return (
-    <Screen bar={bar} narrow>
-      <h1 className="title">{t(kind === "clip" ? "import.title" : `import.title.${kind}`)}</h1>
-      <div className="import">
-        <div
-          className={`drop${over ? " over" : ""}${file ? " has-file" : ""}`}
-          role="group"
-          aria-label={t("import.drop.label")}
-          onDragOver={(e) => {
-            e.preventDefault();
-            setOver(true);
-          }}
-          onDragLeave={() => setOver(false)}
-          onDrop={onDrop}
-        >
-          {file ? (
-            <div className="drop-file">
-              <span className="drop-icon" aria-hidden="true"><FilmIcon /></span>
-              <span className="drop-file-text">
-                <span className="file-name mono" title={file.path}>{file.name}</span>
-                <span className="drop-hint">{t("import.ready")}</span>
-              </span>
-              <button type="button" className="secondary" onClick={choose}>{t("import.choose.another")}</button>
+    <Screen bar={bar}>
+      <div className="imp">
+        <h1 className="title imp-title">{t(kind === "clip" ? "import.title" : `import.title.${kind}`)}</h1>
+        <div className="imp-grid">
+          <div className="imp-monitor" style={{ "--t": meta?.duration ? Math.min(1, playhead / meta.duration) : 0 } as React.CSSProperties}>
+            <div
+              className={`viewer${over ? " over" : ""}${file ? " has-file" : ""}${preview && !previewFailed ? " playing" : ""}`}
+              role="group"
+              aria-label={t("import.drop.label")}
+              onDragOver={(e) => {
+                e.preventDefault();
+                setOver(true);
+              }}
+              onDragLeave={() => setOver(false)}
+              onDrop={onDrop}
+            >
+              <span className="vf-marks" aria-hidden="true"><i /><i /><i /><i /></span>
+              {file && preview && !previewFailed && (
+                <video
+                  key={preview}
+                  className="vf-video"
+                  src={preview}
+                  muted
+                  loop
+                  playsInline
+                  autoPlay={!reducedMotion()}
+                  preload="metadata"
+                  aria-hidden="true"
+                  onLoadedMetadata={(e) => {
+                    const v = e.currentTarget;
+                    setMeta({ duration: v.duration, width: v.videoWidth, height: v.videoHeight });
+                  }}
+                  onTimeUpdate={(e) => setPlayhead(e.currentTarget.currentTime)}
+                  onError={() => setPreviewFailed(true)}
+                />
+              )}
+              {guide && (
+                <span className="vf-guide" aria-hidden="true">
+                  <span className="vf-guide-label">{t("import.guide", { platform: t(`import.platform.${platform}`) })}</span>
+                </span>
+              )}
+              {file ? (
+                <>
+                  {(!preview || previewFailed) && (
+                    <span className="vf-still" aria-hidden="true"><FilmIcon /></span>
+                  )}
+                  <button type="button" className="vf-swap" onClick={choose}>{t("import.choose.another")}</button>
+                </>
+              ) : (
+                <div className="vf-empty">
+                  <span className="vf-empty-title">{t("import.drop.title")}</span>
+                  <span className="vf-empty-hint">{t("import.drop.formats")}</span>
+                  <button type="button" className="vf-choose" onClick={choose}>{t("import.choose")}</button>
+                </div>
+              )}
+              <div className="vf-bar">
+                <span className="vf-tc mono">
+                  {meta ? `${timecode(playhead)} / ${timecode(meta.duration)}` : timecode(null)}
+                </span>
+                {file ? (
+                  <span className="vf-file">
+                    <span className="file-name mono" title={file.path}>{file.name}</span>
+                    {meta && meta.width > 0 && <span className="vf-res mono">{meta.width}×{meta.height}</span>}
+                  </span>
+                ) : (
+                  <span className="vf-file vf-file-empty">{t("import.viewer.empty")}</span>
+                )}
+              </div>
+              <input ref={input} type="file" accept={VIDEO_ACCEPT} hidden onChange={onInput} />
             </div>
-          ) : (
-            <>
-              <span className="drop-icon" aria-hidden="true"><DropIcon /></span>
-              <span className="drop-title">{t("import.drop.title")}</span>
-              <span className="drop-hint">{t("import.drop.formats")}</span>
-              <button type="button" className="secondary" onClick={choose}>{t("import.choose")}</button>
-            </>
-          )}
-          <DropWave />
-          <input ref={input} type="file" accept={VIDEO_ACCEPT} hidden onChange={onInput} />
-        </div>
+            <DropWave />
+          </div>
 
-        <div className="fields import-opts">
-          <Choice<Language>
-            legend={t("import.language")}
-            name="language"
-            keys={LANGUAGES}
-            labelPrefix="import.language"
-            value={language}
-            onChange={setLanguage}
-            disabled={!!pid}
-          />
-          {kind !== "vlog" && (
-            <Choice<Platform>
-              legend={t("import.platform")}
-              name="platform"
-              keys={PLATFORMS_FOR[kind]}
-              labelPrefix="import.platform"
-              value={platform}
-              onChange={setPlatform}
-              disabled={!!pid}
-            />
-          )}
-        </div>
+          <aside className="imp-slate" aria-label={t("import.settings")}>
+            <div className="imp-fields">
+              <Choice<Language>
+                legend={t("import.language")}
+                name="language"
+                keys={LANGUAGES}
+                labelPrefix="import.language"
+                value={language}
+                onChange={setLanguage}
+                disabled={!!pid}
+              />
+              {kind !== "vlog" && (
+                <Choice<Platform>
+                  legend={t("import.platform")}
+                  name="platform"
+                  keys={PLATFORMS_FOR[kind]}
+                  labelPrefix="import.platform"
+                  value={platform}
+                  onChange={setPlatform}
+                  disabled={!!pid}
+                />
+              )}
+            </div>
 
-        <ol className="import-next" aria-label={t("import.next")}>
-          {(whole ? (["listen", "cut", "edit"] as const) : (["listen", "find", "pick"] as const)).map((k) => (
-            <li key={k}>{t(`import.next.${k}`)}</li>
-          ))}
-        </ol>
+            <div className="imp-next">
+              <h2 className="imp-next-h" id="next-h">{t("import.next")}</h2>
+              <ol className="imp-steps" aria-labelledby="next-h">
+                {steps.map((k) => <li key={k}>{t(`import.next.${k}`)}</li>)}
+              </ol>
+            </div>
 
-        {cancelled && (
-          <p className="notice" role="status">
-            <strong>{t("import.cancelled")}</strong>
-            <span>{t("import.cancelled.hint")}</span>
-          </p>
-        )}
-        {error && <p className="error" role="alert">{error}</p>}
+            {cancelled && (
+              <p className="notice" role="status">
+                <strong>{t("import.cancelled")}</strong>
+                <span>{t("import.cancelled.hint")}</span>
+              </p>
+            )}
+            {error && <p className="error" role="alert">{error}</p>}
 
-        <div className="row">
-          <button type="button" className="primary" onClick={start} disabled={!file || busy}>
-            {busy ? t("import.starting") : t("import.start")}
-          </button>
+            <button type="button" className="primary imp-start" onClick={start} disabled={!file || busy}>
+              {busy ? t("import.starting") : t("import.start")}
+            </button>
+            <p className="imp-start-note">{t(file ? "import.ready" : "import.start.needs")}</p>
+          </aside>
         </div>
       </div>
     </Screen>
@@ -363,13 +484,15 @@ const WAVE = Array.from({ length: 96 }, (_, i) => {
   return Math.max(0.12, Math.min(1, (0.55 + 0.45 * Math.sin(i / 6)) * (0.35 + 0.65 * r)));
 });
 
-function DropWave() {
+/** `heard` (0..1): how much of the video has been listened to; those bars fill in. */
+function DropWave({ heard }: { heard?: number }) {
+  const upTo = heard === undefined ? -1 : Math.round(heard * WAVE.length);
   return (
     <span className="drop-wave" aria-hidden="true">
       <svg viewBox={`0 0 ${WAVE.length * 6} 40`} preserveAspectRatio="none">
         {WAVE.map((v, i) => {
           const h = 4 + v * 32;
-          return <rect key={i} x={i * 6 + 1} y={(40 - h) / 2} width={3.4} height={h} rx={1.2} />;
+          return <rect key={i} className={i < upTo ? "heard" : undefined} x={i * 6 + 1} y={(40 - h) / 2} width={3.4} height={h} rx={1.2} />;
         })}
       </svg>
       <span className="drop-head"><i /></span>
@@ -379,14 +502,6 @@ function DropWave() {
 
 const ICON = { viewBox: "0 0 24 24", fill: "none", stroke: "currentColor", strokeWidth: 1.7, strokeLinecap: "round", strokeLinejoin: "round" } as const;
 
-function DropIcon() {
-  return (
-    <svg {...ICON}>
-      <rect x="3" y="5" width="18" height="14" rx="2.5" />
-      <path d="M12 15V9m-3 3 3-3 3 3" />
-    </svg>
-  );
-}
 
 function FilmIcon() {
   return (

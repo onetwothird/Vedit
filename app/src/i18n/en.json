@@ -38,7 +38,7 @@
   "import.drop.formats": "MP4, MOV, M4V, MKV, AVI, WebM, MTS or 3GP",
   "import.choose": "Choose a video",
   "import.choose.another": "Choose a different video",
-  "import.ready": "Ready to start",
+  "import.ready": "Ready when you are. Your video stays on this computer.",
   "import.next": "What happens next",
   "import.next.listen": "Vedit listens to what's said",
   "import.next.find": "It finds the best moments",
@@ -571,5 +571,10 @@
   "batch.row.cancelled": "Cancelled",
   "batch.row.progress": "Working on {name}",
   "batch.row.open": "Open",
-  "batch.row.openfix": "Open and try again"
+  "batch.row.openfix": "Open and try again",
+  "import.guide": "{platform} frame",
+  "import.viewer.empty": "No video yet",
+  "import.settings": "Settings for this video",
+  "import.start.needs": "Choose a video to start.",
+  "import.working.note": "You can leave this screen. The work carries on, and the project waits under Recent projects."
 }
