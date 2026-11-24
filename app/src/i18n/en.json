@@ -497,7 +497,7 @@
   "story.add.label": "Add photos or clips",
   "story.add.dialog": "Photos and clips",
   "story.add.empty": "Drop photos or clips here, in the order you want them.",
-  "story.add.more": "Drop more photos or clips here to add them at the end.",
+  "story.add.more": "or drop more here to add them at the end",
   "story.add.skipped.one": "1 file was skipped because it isn't a photo or a video.",
   "story.add.skipped.other": "{n} files were skipped because they aren't photos or videos.",
   "story.add.failed": "The file picker could not be opened.",
@@ -576,5 +576,18 @@
   "import.viewer.empty": "No video yet",
   "import.settings": "Settings for this video",
   "import.start.needs": "Choose a video to start.",
-  "import.working.note": "You can leave this screen. The work carries on, and the project waits under Recent projects."
+  "import.working.note": "You can leave this screen. The work carries on, and the project waits under Recent projects.",
+  "story.drop.title": "Add the photos and clips for your story",
+  "story.viewer.empty": "No scenes yet",
+  "story.scenes.hint": "Click a scene to preview it above.",
+  "batch.drop.title": "Add the videos to work through",
+  "batch.viewer.empty": "No videos yet",
+  "batch.start.needs": "Add at least one video to start.",
+  "batch.start.note": "Each video becomes its own project. You can leave this screen while they run.",
+  "batch.tally": "finished",
+  "settings.nav": "Settings sections",
+  "home.recent.pages": "Recent projects pages",
+  "home.recent.prev": "Previous page",
+  "home.recent.next": "Next page",
+  "home.recent.page": "Page {n} of {total}"
 }

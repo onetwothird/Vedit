@@ -73,6 +73,7 @@ export default function SignIn() {
   return (
     <div className="signin">
       <aside className="signin-show" aria-hidden="true">
+        <span className="signin-marks"><i /><i /><i /><i /></span>
         <div className="signin-brand">
           <Logo size={26} />
           <span className="signin-word">{t("app.name")}</span>

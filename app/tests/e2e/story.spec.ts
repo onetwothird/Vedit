@@ -63,3 +63,27 @@ test("an unknown story says so", async ({ page }) => {
   await page.getByRole("link", { name: "Back to Home" }).click();
   await expect(page).toHaveURL(/#\/$/);
 });
+
+test("Recent projects shows 12 at a time, newest first, with pages", async ({ page }) => {
+  await page.goto("/#/");
+  for (let i = 1; i <= 13; i++) {
+    await page.evaluate(() => { location.hash = "#/s/new"; });
+    await page.waitForFunction(() => /#\/s\/s\d/.test(location.hash));
+    await page.getByLabel("Name").fill(`Trip ${i}`);
+    await expect(page.getByRole("status").filter({ hasText: "Saved" })).toBeVisible();
+    await page.evaluate(() => { location.hash = "#/"; });
+  }
+  const list = page.locator(".recent-list > li");
+  const pages = page.getByRole("navigation", { name: "Recent projects pages" });
+  await expect(list).toHaveCount(12);
+  await expect(list.first()).toContainText("Trip 13");
+  await expect(pages.getByRole("button", { name: "Page 1 of 2" })).toHaveAttribute("aria-current", "page");
+  await expect(pages.getByRole("button", { name: "Previous page" })).toBeDisabled();
+
+  await pages.getByRole("button", { name: "Next page" }).click();
+  await expect(pages.getByRole("button", { name: "Page 2 of 2" })).toHaveAttribute("aria-current", "page");
+  await expect(list.first()).toContainText("Trip 1");
+  await expect(pages.getByRole("button", { name: "Next page" })).toBeDisabled();
+  await pages.getByRole("button", { name: "Page 1 of 2" }).click();
+  await expect(list.first()).toContainText("Trip 13");
+});

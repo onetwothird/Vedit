@@ -11,8 +11,10 @@ import { t } from "../i18n/t";
 import {
   VIDEO_ACCEPT, VIDEO_EXTENSIONS, analyzeBody, baseName, isVideoName, listenNativeDrop, pickManyNative, showInFolder,
 } from "../lib/native";
+import { overlayUrl, rememberPicked } from "../lib/overlayMedia";
 import { getLanguage, getPlatform, getSettings } from "../lib/prefs";
 import { PLATFORMS_FOR, defaultFormat, platformFor, projectHome } from "../lib/projectKind";
+import "./import.css";
 import "./story.css";
 
 const NO_STEPS = { steps: false };
@@ -28,6 +30,27 @@ const POLL_MS = 1500;
 const MAX_VIDEOS = 50;
 
 const message = (e: unknown, fallback: string): string => (e instanceof EngineError && e.status !== 0 ? e.message : fallback);
+const pad = (n: number) => String(n).padStart(2, "0");
+
+/** A video's first second as its thumbnail; a film icon when this session can't load the file. */
+function VideoThumb({ path }: { path: string }) {
+  const [broken, setBroken] = useState(false);
+  const url = overlayUrl(path);
+  useEffect(() => setBroken(false), [url]);
+  return (
+    <span className="bin-thumb" aria-hidden="true">
+      {url && !broken ? <video src={`${url}#t=1`} muted preload="metadata" onError={() => setBroken(true)} /> : <FilmIcon />}
+    </span>
+  );
+}
+
+function FilmIcon() {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round">
+      <rect x="3" y="5" width="18" height="14" rx="2.5" /><path d="m10 9.5 4.5 2.5-4.5 2.5z" />
+    </svg>
+  );
+}
 
 function Seg<T extends string>({ legend, name, keys, prefix, value, onChange }: {
   legend: string; name: string; keys: T[]; prefix: string; value: T; onChange(v: T): void;
@@ -98,7 +121,7 @@ function BatchForm() {
   function onDrop(e: DragEvent) {
     e.preventDefault();
     setOver(false);
-    if (!desktop) add([...e.dataTransfer.files].map((f) => f.name));
+    if (!desktop) add([...e.dataTransfer.files].map(rememberPicked));
   }
 
   function toggle(f: Aspect, on: boolean) {
@@ -131,86 +154,108 @@ function BatchForm() {
   }
 
   const noFormat = autoExport && formats.size === 0;
+  const full = files.length >= MAX_VIDEOS;
   return (
-    <Screen bar={NO_STEPS} narrow>
-      <h1 className="title">{t("batch.title")}</h1>
-      <div className="story">
-        <section aria-labelledby="videos-h">
-          <h2 id="videos-h">{t("batch.videos")}</h2>
-          {files.length > 0 && (
-            <ol className="batch-files">
-              {files.map((f) => (
-                <li key={f}>
-                  <span className="sc-name mono" title={f}>{baseName(f)}</span>
-                  <button type="button" className="icon-btn" aria-label={t("batch.remove", { name: baseName(f) })}
-                    onClick={() => setFiles((cur) => cur.filter((x) => x !== f))}>
-                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" aria-hidden="true"><path d="M6 6l12 12M18 6 6 18" /></svg>
-                  </button>
-                </li>
-              ))}
-            </ol>
-          )}
-          <div
-            className={`sc-drop${over ? " over" : ""}`}
-            role="group"
-            aria-label={t("batch.add.label")}
-            onDragOver={(e) => {
-              e.preventDefault();
-              setOver(true);
-            }}
-            onDragLeave={() => setOver(false)}
-            onDrop={onDrop}
-          >
-            <span>{files.length ? t(files.length === 1 ? "batch.count.one" : "batch.count.other", { n: files.length }) : t("batch.add.empty")}</span>
-            <button type="button" className="secondary" disabled={files.length >= MAX_VIDEOS} onClick={() => void choose()}>{t("batch.add")}</button>
-            <input ref={input} type="file" accept={VIDEO_ACCEPT} multiple hidden onChange={(e) => {
-              const picked = [...(e.target.files ?? [])].map((f) => f.name);
-              e.target.value = "";
-              add(picked);
-            }} />
+    <Screen bar={NO_STEPS}>
+      <div className="imp st">
+        <h1 className="title imp-title">{t("batch.title")}</h1>
+        <div className="imp-grid">
+          <div className="imp-monitor">
+            <div
+              className={`viewer bin${over ? " over" : ""}${files.length ? " has-file" : ""}`}
+              role="group"
+              aria-label={t("batch.add.label")}
+              onDragOver={(e) => {
+                e.preventDefault();
+                setOver(true);
+              }}
+              onDragLeave={() => setOver(false)}
+              onDrop={onDrop}
+            >
+              <span className="vf-marks" aria-hidden="true"><i /><i /><i /><i /></span>
+              {files.length ? (
+                <ol className="bin-grid" aria-labelledby="videos-h">
+                  {files.map((f, i) => (
+                    <li key={f} className="bin-tile">
+                      <VideoThumb path={f} />
+                      <span className="bin-num" aria-hidden="true">{pad(i + 1)}</span>
+                      <button type="button" className="bin-remove" aria-label={t("batch.remove", { name: baseName(f) })}
+                        onClick={() => setFiles((cur) => cur.filter((x) => x !== f))}>
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" aria-hidden="true"><path d="M7 7l10 10M17 7 7 17" /></svg>
+                      </button>
+                      <span className="bin-name mono" title={f}>{baseName(f)}</span>
+                    </li>
+                  ))}
+                  {!full && (
+                    <li className="bin-tile">
+                      <button type="button" className="bin-add" onClick={() => void choose()}>
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" aria-hidden="true"><path d="M12 5v14M5 12h14" /></svg>
+                        <span>{t("batch.add")}</span>
+                      </button>
+                    </li>
+                  )}
+                </ol>
+              ) : (
+                <div className="vf-empty">
+                  <span className="vf-empty-title">{t("batch.drop.title")}</span>
+                  <span className="vf-empty-hint">{t("batch.add.empty")}</span>
+                  <button type="button" className="vf-choose" onClick={() => void choose()}>{t("batch.add")}</button>
+                </div>
+              )}
+              <div className="vf-bar">
+                <span className="vf-tc mono">{pad(files.length)} / {MAX_VIDEOS}</span>
+                <span className="vf-file">
+                  <span id="videos-h" className={files.length ? undefined : "vf-file-empty"}>
+                    {files.length ? t(files.length === 1 ? "batch.count.one" : "batch.count.other", { n: files.length }) : t("batch.viewer.empty")}
+                  </span>
+                </span>
+              </div>
+              <input ref={input} type="file" accept={VIDEO_ACCEPT} multiple hidden onChange={(e) => {
+                const picked = [...(e.target.files ?? [])].map(rememberPicked);
+                e.target.value = "";
+                add(picked);
+              }} />
+            </div>
+            {notice && <p className="set-note" role="status">{notice}</p>}
           </div>
-          {notice && <p className="set-note" role="status">{notice}</p>}
-        </section>
 
-        <section aria-labelledby="make-h">
-          <h2 id="make-h">{t("batch.what")}</h2>
-          <div className="fields">
-            <Seg legend={t("batch.type")} name="type" keys={TYPES} prefix="batch.type" value={kind} onChange={changeKind} />
-            <Seg<Language> legend={t("import.language")} name="language" keys={LANGUAGES} prefix="import.language" value={language} onChange={setLanguage} />
-            {kind !== "vlog" && (
-              <Seg<Platform> legend={t("import.platform")} name="platform" keys={PLATFORMS_FOR[kind]} prefix="import.platform" value={platform} onChange={setPlatform} />
-            )}
-          </div>
-        </section>
+          <aside className="imp-slate" aria-label={t("batch.what")}>
+            <div className="imp-fields">
+              <Seg legend={t("batch.type")} name="type" keys={TYPES} prefix="batch.type" value={kind} onChange={changeKind} />
+              <Seg<Language> legend={t("import.language")} name="language" keys={LANGUAGES} prefix="import.language" value={language} onChange={setLanguage} />
+              {kind !== "vlog" && (
+                <Seg<Platform> legend={t("import.platform")} name="platform" keys={PLATFORMS_FOR[kind]} prefix="import.platform" value={platform} onChange={setPlatform} />
+              )}
+            </div>
 
-        <section aria-labelledby="export-h">
-          <h2 id="export-h">{t("batch.export")}</h2>
-          <label className="sc-own">
-            <input type="checkbox" checked={autoExport} onChange={(e) => setAutoExport(e.target.checked)} />
-            <span>{t(kind === "clip" ? "batch.export.auto.clips" : "batch.export.auto.video")}</span>
-          </label>
-          {autoExport && (
-            <fieldset className="field batch-formats">
-              <legend>{t("export.formats")}</legend>
-              {FORMATS.map((f) => (
-                <label key={f.value} className="sc-own">
-                  <input type="checkbox" checked={formats.has(f.value)} onChange={(e) => toggle(f.value, e.target.checked)} />
-                  <span>{t(f.label)}</span>
-                </label>
-              ))}
+            <fieldset className="field st-auto">
+              <legend>{t("batch.export")}</legend>
+              <label className="st-switch">
+                <input type="checkbox" checked={autoExport} onChange={(e) => setAutoExport(e.target.checked)} />
+                <span>{t(kind === "clip" ? "batch.export.auto.clips" : "batch.export.auto.video")}</span>
+              </label>
+              {autoExport && (
+                <fieldset className="field batch-formats">
+                  <legend className="sr-only">{t("export.formats")}</legend>
+                  {FORMATS.map((f) => (
+                    <label key={f.value} className="fmt-chip">
+                      <input type="checkbox" checked={formats.has(f.value)} onChange={(e) => toggle(f.value, e.target.checked)} />
+                      <span>{t(f.label)}</span>
+                    </label>
+                  ))}
+                </fieldset>
+              )}
+              <p className="set-note">{t(autoExport ? "batch.export.where" : "batch.export.later")}</p>
             </fieldset>
-          )}
-          <p className="set-note">{t(autoExport ? "batch.export.where" : "batch.export.later")}</p>
-        </section>
 
-        <div className="story-make">
-          {error && <p className="error" role="alert">{error}</p>}
-          <div className="row">
-            <button type="button" className="primary" disabled={!files.length || noFormat || busy} onClick={() => void start()}>
+            {error && <p className="error" role="alert">{error}</p>}
+            <button type="button" className="primary imp-start" disabled={!files.length || noFormat || busy} onClick={() => void start()}>
               {busy ? t("batch.starting") : t(files.length === 1 ? "batch.start.one" : "batch.start.other", { n: files.length })}
             </button>
-            {noFormat && <span className="set-note">{t("batch.export.needs")}</span>}
-          </div>
+            <p className={`imp-start-note${noFormat ? " warn" : ""}`}>
+              {t(noFormat ? "batch.export.needs" : files.length ? "batch.start.note" : "batch.start.needs")}
+            </p>
+          </aside>
         </div>
       </div>
     </Screen>
@@ -266,32 +311,46 @@ function BatchProgress({ bid }: { bid: string }) {
     );
   }
   const n = batch.items.length;
+  const done = settled.size === n;
   return (
-    <Screen bar={NO_STEPS} narrow>
-      <h1 className="title">{t("batch.progress.title")}</h1>
-      <p className="note-text" role="status">
-        {settled.size === n ? t("batch.progress.done") : t("batch.progress.note", { done: settled.size, n })}
-      </p>
-      <ol className="q-list batch-rows">
-        {batch.items.map((it, i) => (
-          <BatchRow key={it.analyze} item={it} exporting={batch.export} onSettled={(done) => setSettled((cur) => {
-            if (done === cur.has(i)) return cur;
-            const next = new Set(cur);
-            if (done) next.add(i);
-            else next.delete(i);
-            return next;
-          })} />
-        ))}
-      </ol>
-      <div className="row batch-foot">
-        <Link className="secondary" to="/batch">{t("batch.again")}</Link>
-        <Link className="secondary" to="/">{t("story.home")}</Link>
+    <Screen bar={NO_STEPS}>
+      <div className="imp st">
+        <h1 className="title imp-title">{t("batch.progress.title")}</h1>
+        <div className="imp-grid">
+          <div className="imp-monitor">
+            <ol className="q-list batch-rows bq">
+              {batch.items.map((it, i) => (
+                <BatchRow key={it.analyze} index={i} item={it} exporting={batch.export} onSettled={(fin) => setSettled((cur) => {
+                  if (fin === cur.has(i)) return cur;
+                  const next = new Set(cur);
+                  if (fin) next.add(i);
+                  else next.delete(i);
+                  return next;
+                })} />
+              ))}
+            </ol>
+          </div>
+          <aside className="imp-slate">
+            <div className={`bq-tally${done ? " done" : ""}`} aria-hidden="true">
+              <span className="bq-num">{pad(settled.size)}<span className="bq-of"> / {pad(n)}</span></span>
+              <span className="bq-label">{t("batch.tally")}</span>
+              <span className="bq-bar"><i style={{ width: `${n ? (settled.size / n) * 100 : 0}%` }} /></span>
+            </div>
+            <p className="note-text" role="status">
+              {done ? t("batch.progress.done") : t("batch.progress.note", { done: settled.size, n })}
+            </p>
+            <div className="bq-links">
+              <Link className="secondary" to="/batch">{t("batch.again")}</Link>
+              <Link className="secondary" to="/">{t("story.home")}</Link>
+            </div>
+          </aside>
+        </div>
       </div>
     </Screen>
   );
 }
 
-function BatchRow({ item, exporting, onSettled }: { item: BatchItem; exporting: boolean; onSettled(done: boolean): void }) {
+function BatchRow({ index, item, exporting, onSettled }: { index: number; item: BatchItem; exporting: boolean; onSettled(done: boolean): void }) {
   const analyze = useJob(item.analyze);
   const exp = useJob(item.export ?? undefined);
   const [showError, setShowError] = useState(false);
@@ -340,6 +399,11 @@ function BatchRow({ item, exporting, onSettled }: { item: BatchItem; exporting: 
 
   return (
     <li className={`q-row ${state === "analyzing" || state === "exporting" ? "running" : state}`}>
+      <span className="bq-thumb">
+        <VideoThumb path={item.source} />
+        <span className="bin-num" aria-hidden="true">{pad(index + 1)}</span>
+      </span>
+      <div className="bq-body">
       <div className="q-main">
         <span className="q-title" title={item.source}>{name}</span>
         <span className="q-state">
@@ -366,6 +430,7 @@ function BatchRow({ item, exporting, onSettled }: { item: BatchItem; exporting: 
       {item.project && settled && (
         <Link className="secondary batch-open" to={state === "failed" ? `/p/${item.project.id}/import` : projectHome(item.project)}>{t(state === "failed" ? "batch.row.openfix" : "batch.row.open")}</Link>
       )}
+      </div>
     </li>
   );
 }
