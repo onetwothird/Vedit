@@ -31,10 +31,11 @@ export function bars(n: number, seed: number): number[] {
    free for commercial use), first 6 s, 960x540, no audio. podcast-poster.jpg is its frame at 1 s. */
 const VIDEO_ASPECT = 16 / 9;
 
-/* A local, git-ignored preview of other footage (hero-local.mp4 + hero-local.jpg, 16:9), used only by the dev
-   server. Third-party footage stays out of git and out of release builds until it is cleared for use. */
+/* Local, git-ignored previews of other footage and pictures, used only by the dev server: hero-local.mp4 +
+   hero-local.jpg (16:9) for the hero, vlog-local.jpg (2:1) and reel-local.jpg (16:9, three people side by side)
+   for the Edit a vlog and Quick Reel tiles. Third-party media stays out of git and out of release builds. */
 const LOCAL = import.meta.env.DEV
-  ? (import.meta.glob("./hero-local.{mp4,jpg}", { eager: true, import: "default" }) as Record<string, string>)
+  ? (import.meta.glob("./{hero,vlog,reel}-local.{mp4,jpg}", { eager: true, import: "default" }) as Record<string, string>)
   : {};
 const HERO_LOCAL = Boolean(LOCAL["./hero-local.mp4"]);
 const heroVideo = LOCAL["./hero-local.mp4"] ?? podcast;
@@ -251,11 +252,22 @@ export function ClipArt() {
 /* Coming-soon tiles: Pexels photos (Pexels license), 560px wide. Each tile is composed for its own job. */
 
 /** Vlog: the take with its transcript; filler words struck out and the length it comes down to. */
+const vlogImg = LOCAL["./vlog-local.jpg"] ?? vlog;
+const reelLocal = LOCAL["./reel-local.jpg"];
+const reelImg = reelLocal ?? reel;
+/** Where the phone and the three shots look in the reel picture. The local one has three people side by side,
+    so each shot crops to one of them. */
+const REEL_PHONE = reelLocal ? "59% 50%" : undefined;
+const REEL_SHOTS: [string, React.CSSProperties][] = reelLocal
+  ? [["0.8s", { objectViewBox: "inset(5% 70% 65% 0%)" }], ["1.2s", { objectViewBox: "inset(8% 30% 62% 40%)" }],
+    ["0.6s", { objectViewBox: "inset(10% 6% 60% 64%)" }]] as [string, React.CSSProperties][]
+  : [["0.8s", { objectPosition: "50% 20%" }], ["1.2s", { objectPosition: "50% 45%" }], ["0.6s", { objectPosition: "30% 70%" }]];
+
 export function VlogArt() {
   const words: [string, boolean][] = [["So", false], ["um,", true], ["today", false], ["uh,", true], ["we fix it", false]];
   return (
     <div className="sa sa-vlog" aria-hidden="true">
-      <img src={vlog} alt="" loading="lazy" />
+      <img src={vlogImg} alt="" loading="lazy" />
       <span className="sa-chip mono">3:12 → 2:41</span>
       <p className="sa-transcript">
         {words.map(([w, cut], i) => (
@@ -271,13 +283,13 @@ export function ReelArt() {
   return (
     <div className="sa sa-reel" aria-hidden="true">
       <div className="sa-phone">
-        <img src={reel} alt="" loading="lazy" />
+        <img src={reelImg} alt="" loading="lazy" style={REEL_PHONE ? { objectPosition: REEL_PHONE } : undefined} />
         <p className="sa-pop"><span>WAIT</span> <span>FOR</span> <span>IT</span></p>
       </div>
       <ol className="sa-shots">
-        {[["0.8s", "50% 20%"], ["1.2s", "50% 45%"], ["0.6s", "30% 70%"]].map(([len, pos]) => (
+        {REEL_SHOTS.map(([len, crop]) => (
           <li key={len}>
-            <img src={reel} alt="" loading="lazy" style={{ objectPosition: pos }} />
+            <img src={reelImg} alt="" loading="lazy" style={crop} />
             <span className="mono">{len}</span>
           </li>
         ))}

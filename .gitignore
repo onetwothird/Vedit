@@ -37,5 +37,5 @@ app/src-tauri/engine/
 app/src-tauri/ffmpeg/
 app/src-tauri/gen/schemas/
 
-# Local-only hero preview (third-party footage, not cleared for release)
-app/src/screens/home/hero-local.*
+# Local-only previews (third-party footage and memes, not cleared for release)
+app/src/screens/home/*-local.*
