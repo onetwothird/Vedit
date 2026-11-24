@@ -24,20 +24,58 @@
       "csp": "default-src 'self'; media-src 'self' asset: http://asset.localhost http://127.0.0.1:*; connect-src 'self' ipc: http://ipc.localhost http://127.0.0.1:* ws://127.0.0.1:* https://*.supabase.co; img-src 'self' asset: http://asset.localhost http://127.0.0.1:* data: https://*.googleusercontent.com https://*.fbsbx.com https://*.fbcdn.net; font-src 'self'",
       "assetProtocol": {
         "enable": true,
-        "scope": ["**"]
+        "scope": [
+          "**"
+        ]
       }
     }
   },
   "bundle": {
     "active": true,
-    "targets": ["nsis"],
-    "icon": ["icons/32x32.png", "icons/128x128.png", "icons/128x128@2x.png", "icons/icon.icns", "icons/icon.ico"],
-    "externalBin": ["bin/vedit-engine"]
+    "targets": [
+      "nsis"
+    ],
+    "icon": [
+      "icons/32x32.png",
+      "icons/128x128.png",
+      "icons/128x128@2x.png",
+      "icons/icon.icns",
+      "icons/icon.ico"
+    ],
+    "resources": {
+      "engine/": "engine/",
+      "ffmpeg/": "bin/"
+    },
+    "publisher": "Vedit",
+    "copyright": "Copyright (c) Vedit contributors. MIT License.",
+    "category": "Video",
+    "shortDescription": "Turn long videos into ready-to-post clips",
+    "windows": {
+      "nsis": {
+        "installMode": "currentUser",
+        "languages": [
+          "English"
+        ]
+      }
+    },
+    "createUpdaterArtifacts": true
   },
   "plugins": {
     "updater": {
-      "pubkey": "PLACEHOLDER-TASK-22-UPDATER-PUBKEY",
-      "endpoints": ["https://updates.invalid/PLACEHOLDER-TASK-22/{{target}}/{{arch}}/{{current_version}}"]
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDc0RjRBM0FFQTQyRjk0MUUKUldRZWxDK2tycVAwZENjZDIza0E3bWZFTTE5Z3JCdnhWZ0dCSUNFQVZiTDl3cWdjVnZzV1g0R3cK",
+      "endpoints": [
+        "https://github.com/onetwothird/vedit/releases/latest/download/latest.json"
+      ],
+      "windows": {
+        "installMode": "passive"
+      }
+    },
+    "deep-link": {
+      "desktop": {
+        "schemes": [
+          "vedit"
+        ]
+      }
     }
   }
 }

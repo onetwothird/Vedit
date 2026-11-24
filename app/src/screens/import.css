@@ -1,0 +1,171 @@
+/* Import: a source viewer, like an editor's. The chosen video plays in it, with the frame Vedit will cut drawn
+   over it; the waveform under it is its timeline. Settings and Start sit in a narrow column beside it. */
+
+.imp { display: flex; flex-direction: column; }
+.imp-title { font: 400 44px/1.1 var(--pixel); font-synthesis: none; letter-spacing: 0; margin-bottom: 28px; }
+
+.imp-grid { display: grid; grid-template-columns: minmax(0, 1fr) 300px; gap: 36px; align-items: start; }
+
+/* ---- the viewer ---- */
+.imp-monitor { display: flex; flex-direction: column; gap: 10px; min-width: 0; }
+.viewer {
+  position: relative; overflow: hidden; border-radius: var(--r-surface);
+  background: #000; color: #f2f2f0; isolation: isolate;
+  box-shadow: 0 0 0 1px var(--line-2), 0 24px 60px -30px rgba(0, 0, 0, .55);
+  transition: box-shadow .2s;
+}
+/* the picture is exactly 16:9; the status bar sits under it */
+.viewer::before { content: ""; display: block; padding-top: calc(56.25% + 44px); }
+.viewer.over { box-shadow: 0 0 0 2px var(--accent), 0 24px 60px -30px rgba(0, 0, 0, .55); }
+
+/* crop marks in the corners; they close in while a file is dragged over */
+.vf-marks i { position: absolute; z-index: 3; width: 22px; height: 22px; border: 0 solid #ffffff59; transition: inset .25s cubic-bezier(.2, .8, .2, 1), border-color .2s; }
+.vf-marks i:nth-child(1) { top: 18px; left: 18px; border-top-width: 2px; border-left-width: 2px; }
+.vf-marks i:nth-child(2) { top: 18px; right: 18px; border-top-width: 2px; border-right-width: 2px; }
+.vf-marks i:nth-child(3) { bottom: 58px; left: 18px; border-bottom-width: 2px; border-left-width: 2px; }
+.vf-marks i:nth-child(4) { bottom: 58px; right: 18px; border-bottom-width: 2px; border-right-width: 2px; }
+.viewer.over .vf-marks i { border-color: #4ade80; }
+.viewer.over .vf-marks i:nth-child(1) { top: 34px; left: 34px; }
+.viewer.over .vf-marks i:nth-child(2) { top: 34px; right: 34px; }
+.viewer.over .vf-marks i:nth-child(3) { bottom: 74px; left: 34px; }
+.viewer.over .vf-marks i:nth-child(4) { bottom: 74px; right: 34px; }
+.viewer.playing .vf-marks { display: none; }
+
+.vf-empty {
+  position: absolute; inset: 0 0 44px; display: flex; flex-direction: column; align-items: center; justify-content: center;
+  gap: 10px; padding: 24px; text-align: center;
+  background: radial-gradient(ellipse 60% 55% at 50% 45%, #ffffff0d, transparent 70%);
+}
+.vf-empty-title { font: 400 30px/1.15 var(--pixel); font-synthesis: none; color: #f2f2f0; }
+.vf-empty-hint { font-size: 12.5px; color: #ffffff8c; }
+.vf-choose {
+  margin-top: 10px; height: 38px; padding: 0 18px; border-radius: var(--r-control); border: 0; cursor: pointer;
+  background: #f2f2f0; color: #000; font: 600 13px var(--sans);
+}
+.vf-choose:hover { background: #fff; }
+
+.vf-video { position: absolute; inset: 0 0 44px; width: 100%; height: calc(100% - 44px); object-fit: contain; z-index: 1; }
+.vf-still { position: absolute; inset: 0 0 44px; display: grid; place-items: center; color: #ffffff59; }
+.vf-still svg { width: 56px; height: 56px; }
+
+/* the vertical frame Vedit will cut from a landscape video; outside it is dimmed */
+.vf-guide {
+  position: absolute; z-index: 2; top: 0; bottom: 44px; left: 50%; aspect-ratio: 9 / 16; transform: translateX(-50%);
+  outline: 2px solid #4ade80; box-shadow: 0 0 0 100vmax #000000b8; pointer-events: none;
+  animation: vf-guide-in .5s cubic-bezier(.2, .8, .2, 1) both;
+}
+.vf-guide-label {
+  position: absolute; top: 10px; left: 50%; transform: translateX(-50%); white-space: nowrap;
+  padding: 3px 9px; border-radius: 999px; background: #4ade80; color: #06210f; font: 600 11.5px var(--sans);
+}
+@keyframes vf-guide-in { from { opacity: 0; transform: translateX(-50%) scale(1.06); } }
+
+.vf-swap {
+  position: absolute; z-index: 4; top: 14px; right: 14px; height: 32px; padding: 0 12px; border-radius: var(--r-control);
+  border: 1px solid #ffffff38; background: #000000a6; color: #f2f2f0; font: 500 12.5px var(--sans); cursor: pointer;
+  backdrop-filter: blur(6px);
+}
+.vf-swap:hover { background: #000000d9; }
+
+/* the viewer's own status bar: running time on the left, the file on the right */
+.vf-bar {
+  position: absolute; z-index: 4; left: 0; right: 0; bottom: 0; height: 44px; display: flex; align-items: center;
+  justify-content: space-between; gap: 16px; padding: 0 16px; background: #0d0d0e; border-top: 1px solid #ffffff14;
+}
+.vf-tc { font: 400 17px var(--pixel); font-synthesis: none; color: #4ade80; letter-spacing: .02em; }
+.viewer:not(.has-file) .vf-tc { color: #ffffff4d; }
+.vf-file { display: flex; align-items: baseline; gap: 12px; min-width: 0; font-size: 12.5px; color: #f2f2f0; }
+.vf-file .file-name { color: #f2f2f0; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.vf-res { flex: none; color: #ffffff80; font-size: 11.5px; }
+.vf-file-empty { color: #ffffff59; }
+
+.viewer :is(.vf-choose, .vf-swap):focus-visible { outline: 2px solid #4ade80; outline-offset: 2px; }
+
+/* the waveform under the viewer is its timeline; the playhead sweeps it while a file is dragged over */
+.imp-monitor > .drop-wave { position: relative; display: block; height: 34px; margin: 0 6px; color: var(--line-2); pointer-events: none; }
+.viewer.has-file + .drop-wave { color: color-mix(in srgb, var(--ink) 30%, transparent); }
+.viewer.over + .drop-wave .drop-head i, .viewer.has-file + .drop-wave .drop-head i { opacity: 1; }
+/* while the video plays, the playhead follows it */
+.viewer.playing + .drop-wave .drop-head { transform: translateX(calc(var(--t, 0) * 100%)); transition: transform .3s linear; }
+@media (prefers-reduced-motion: no-preference) {
+  .viewer.over + .drop-wave .drop-head { animation: drop-sweep 1.8s cubic-bezier(.45, 0, .2, 1) infinite alternate; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .vf-marks i, .vf-guide { transition: none; animation: none; }
+}
+
+/* ---- beside the viewer ---- */
+.imp-slate { display: flex; flex-direction: column; gap: 26px; padding-top: 2px; }
+.imp-fields { display: flex; flex-direction: column; gap: 20px; }
+.imp-fields .seg { display: flex; width: 100%; }
+.imp-fields .seg-opt { flex: 1; text-align: center; }
+
+.imp-next-h { font: 500 12px var(--sans); color: var(--body); margin-bottom: 12px; }
+.imp-steps { list-style: none; padding: 0; margin: 0; counter-reset: step; display: flex; flex-direction: column; }
+.imp-steps li {
+  counter-increment: step; position: relative; padding: 0 0 16px 34px; font-size: 13px; line-height: 20px; color: var(--ink);
+}
+.imp-steps li:last-child { padding-bottom: 0; }
+.imp-steps li::before {
+  content: counter(step); position: absolute; left: 0; top: 0; width: 20px; height: 20px; display: grid; place-items: center;
+  border-radius: 50%; border: 1px solid var(--line-2); background: var(--panel); font: 500 11px var(--mono); color: var(--body);
+}
+/* the line joining the steps */
+.imp-steps li:not(:last-child)::after { content: ""; position: absolute; left: 10px; top: 22px; bottom: 2px; width: 1px; background: var(--line-2); }
+
+.imp-start { width: 100%; height: 44px; font-size: 14px; }
+.imp-start-note { margin-top: -16px; font-size: 12px; color: var(--muted); }
+
+@media (max-width: 960px) {
+  .imp-grid { grid-template-columns: 1fr; gap: 28px; }
+  .imp-slate { max-width: 520px; }
+}
+@media (max-width: 560px) {
+  .imp-title { font-size: 28px; margin-bottom: 16px; }
+  .vf-empty-title { font-size: 20px; }
+  .vf-empty-hint { display: none; }
+  .vf-marks { display: none; }
+  .vf-bar { height: 38px; padding: 0 10px; }
+  .viewer::before { padding-top: calc(56.25% + 38px); }
+  .vf-tc { font-size: 12.5px; white-space: nowrap; flex: none; }
+  .vf-res { display: none; }
+  /* on a phone the swap button takes the top corner, so the frame's label moves to the bottom of the frame */
+  .vf-swap { top: 8px; right: 8px; height: 28px; padding: 0 10px; font-size: 11.5px; }
+  .vf-guide-label { top: auto; bottom: 8px; }
+  .vf-empty, .vf-still { bottom: 38px; }
+  .vf-video { bottom: 38px; height: calc(100% - 38px); }
+  .vf-guide { bottom: 38px; }
+}
+
+/* ---- while Vedit listens: the video keeps playing, dimmed, under a scan line; the waveform fills in ---- */
+.viewer.working .vf-video { filter: saturate(.35) brightness(.55); }
+.vf-scan {
+  position: absolute; z-index: 2; top: 0; bottom: 44px; left: 0; width: 34%; pointer-events: none;
+  background: linear-gradient(90deg, transparent, #4ade8026 70%, #4ade8073 99%, #4ade80 100%);
+  animation: vf-scan 2.6s cubic-bezier(.45, 0, .55, 1) infinite;
+}
+@keyframes vf-scan { from { transform: translateX(-100%); } to { transform: translateX(300%); } }
+.vf-work {
+  position: absolute; z-index: 3; inset: 0 0 44px; display: flex; flex-direction: column; align-items: center;
+  justify-content: center; gap: 6px; text-align: center; padding: 20px;
+}
+.vf-work-pct { font: 400 64px/1 var(--pixel); font-synthesis: none; color: #f2f2f0; font-variant-numeric: tabular-nums; }
+.vf-work-stage::after { content: attr(data-stage); font-size: 13.5px; color: #ffffffb3; }
+.viewer.working .vf-tc { color: #4ade80; font: 500 12.5px var(--sans); letter-spacing: 0; }
+
+.drop-wave rect.heard { fill: var(--accent); }
+.imp-monitor.working > .drop-wave .drop-head { transform: translateX(calc(var(--p, 0) * 100%)); transition: transform .4s linear; }
+.imp-monitor.working > .drop-wave .drop-head i { opacity: 1; }
+/* the bar under the waveform is for screen readers and keyboard users; the waveform shows the same */
+.imp-meter { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); }
+.imp-monitor.working { position: relative; }
+.imp-wait { margin-top: -10px; }
+.imp-slate .stages { margin: 0; }
+
+@media (prefers-reduced-motion: reduce) {
+  .vf-scan { animation: none; display: none; }
+}
+@media (max-width: 560px) {
+  .vf-work-pct { font-size: 40px; }
+  .vf-scan, .vf-work { bottom: 38px; }
+}

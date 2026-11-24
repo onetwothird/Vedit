@@ -363,7 +363,7 @@ function ModelRow({ name, info, onChanged, onError }: {
   }
 
   return (
-    <li className="model-row">
+    <li className={`model-row${info.installed ? " installed" : ""}`}>
       <svg className="model-glyph" viewBox="0 0 20 20" aria-hidden="true">
         {[5, 9, 14, 7, 11, 4].map((h, i) => <rect key={i} x={1.5 + i * 3} y={10 - h / 2} width="1.8" height={h} rx=".9" />)}
       </svg>
@@ -669,17 +669,91 @@ function SectionIcon({ id }: { id: SectionId }) {
   );
 }
 
+/** The section list beside Settings: where you are, and a jump to the others. */
+function SectionNav() {
+  const [current, setCurrent] = useState<SectionId>("account");
+  // after a click the list keeps the chosen section while the page scrolls to it (the last ones can't reach the top)
+  const held = useRef(0);
+  useEffect(() => {
+    // The current section is the last one whose top has passed a line 30% down the window. At the end of the page the
+    // last section wins, since the short ones at the bottom can never reach that line.
+    let frame = 0;
+    const update = () => {
+      frame = 0;
+      if (Date.now() < held.current) return;
+      const first = document.getElementById(SECTIONS[0]);
+      let box = first?.parentElement ?? null;
+      while (box && !(box.scrollHeight > box.clientHeight + 1 && /(auto|scroll)/.test(getComputedStyle(box).overflowY))) box = box.parentElement;
+      const top = box ? box.getBoundingClientRect().top : 0;
+      const line = top + (window.innerHeight - top) * 0.3;
+      const tops = SECTIONS.map((id) => document.getElementById(id)?.getBoundingClientRect().top ?? Infinity);
+      let i = 0;
+      tops.forEach((t, k) => {
+        if (t <= line) i = k;
+      });
+      // a short section whose heading is still in full view at the top stays current, though the next one has passed the line
+      if (i > 0 && tops[i - 1] >= top - 4) i -= 1;
+      let next: SectionId = SECTIONS[i];
+      const last = document.getElementById(SECTIONS[SECTIONS.length - 1]);
+      if (last && last.getBoundingClientRect().bottom <= window.innerHeight + 2) next = SECTIONS[SECTIONS.length - 1];
+      setCurrent(next);
+    };
+    const onScroll = () => {
+      if (!frame) frame = requestAnimationFrame(update);
+    };
+    // the page scrolls inside the app's content area, so listen to every scroll on the way up
+    document.addEventListener("scroll", onScroll, true);
+    window.addEventListener("resize", onScroll);
+    update();
+    return () => {
+      document.removeEventListener("scroll", onScroll, true);
+      window.removeEventListener("resize", onScroll);
+      cancelAnimationFrame(frame);
+    };
+  }, []);
+
+  function go(id: SectionId) {
+    const el = document.getElementById(id);
+    if (!el) return;
+    const still = window.matchMedia?.("(prefers-reduced-motion: reduce)").matches;
+    el.scrollIntoView({ behavior: still ? "auto" : "smooth", block: "start" });
+    el.focus({ preventScroll: true });
+    held.current = Date.now() + 1200;
+    setCurrent(id);
+  }
+
+  return (
+    <nav className="set-nav" aria-label={t("settings.nav")}>
+      <ul>
+        {SECTIONS.map((id) => (
+          <li key={id}>
+            <button type="button" className={id === current ? "on" : undefined} aria-current={id === current ? "location" : undefined} onClick={() => go(id)}>
+              <SectionIcon id={id} />
+              <span>{t(`settings.${id}`)}</span>
+            </button>
+          </li>
+        ))}
+      </ul>
+    </nav>
+  );
+}
+
 export default function Settings() {
   return (
-    <Screen narrow>
-      <h1 className="title">{t("settings.title")}</h1>
-      <div className="settings">
-        <AccountSection />
-        <GeneralSection />
-        <AiSection />
-        <ModelsSection />
-        <BrandSection />
-        <UpdatesSection />
+    <Screen>
+      <div className="imp set-page">
+        <h1 className="title imp-title">{t("settings.title")}</h1>
+        <div className="set-layout">
+          <SectionNav />
+          <div className="settings">
+            <AccountSection />
+            <GeneralSection />
+            <AiSection />
+            <ModelsSection />
+            <BrandSection />
+            <UpdatesSection />
+          </div>
+        </div>
       </div>
     </Screen>
   );

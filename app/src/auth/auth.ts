@@ -1,6 +1,7 @@
 import { create } from "zustand";
 import { isMock } from "../engine/client";
 import { AuthError, checkCredentials, read, write, type Account, type AuthErrorCode, type AuthProvider } from "./core";
+import { desktopHandoff } from "./desktopLink";
 import { supabaseConfig, supabaseProvider } from "./supabase";
 
 export * from "./core";
@@ -99,7 +100,8 @@ export function createAuthStore(provider: AuthProvider) {
 function pickProvider(): AuthProvider {
   if (isMock()) return demoProvider();
   const config = supabaseConfig();
-  return config ? supabaseProvider(config) : unconfiguredProvider();
+  const desktop = typeof window !== "undefined" && "__TAURI_INTERNALS__" in window ? desktopHandoff() : undefined;
+  return config ? supabaseProvider({ ...config, desktop }) : unconfiguredProvider();
 }
 
 export const useAuth = createAuthStore(pickProvider());

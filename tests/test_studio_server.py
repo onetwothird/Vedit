@@ -529,7 +529,8 @@ def test_jobs_list_knows_every_active_export_of_a_project(client, auth, app, fak
 
 
 def test_thumb_frame_never_fails_and_clears_a_stale_jpg(tmp_path):
-    import subprocess, sys
+    import subprocess
+    import sys
     script = Path(__file__).resolve().parent.parent / "scripts" / "thumb_frame.py"
     stale = tmp_path / "a.jpg"
     stale.write_bytes(b"old")

@@ -128,3 +128,48 @@ for (const scheme of ["dark", "light"] as const) {
     expect(bad.map((v) => `${v.id}: ${v.nodes.map((n) => n.target.join(" ")).join(", ")}`)).toEqual([]);
   });
 }
+
+/** Scrolls the app's content area so the section's top sits `frac` of the way down it (or to the very end). */
+async function scrollSection(page: import("@playwright/test").Page, id: string, frac: number | "end") {
+  await page.evaluate(({ id, frac }) => {
+    const el = document.getElementById(id)!;
+    let box = el.parentElement;
+    while (box && !(box.scrollHeight > box.clientHeight + 1 && /(auto|scroll)/.test(getComputedStyle(box).overflowY))) box = box.parentElement;
+    const scroller = box ?? document.scrollingElement!;
+    const top = box ? box.getBoundingClientRect().top : 0;
+    scroller.scrollTop = frac === "end" ? scroller.scrollHeight : scroller.scrollTop + el.getBoundingClientRect().top - top - (innerHeight - top) * frac;
+  }, { id, frac });
+}
+
+test("the section list follows the scroll, all the way to Brand kit and Updates", async ({ page }) => {
+  await page.setViewportSize({ width: 1280, height: 800 });
+  await page.goto("/#/settings");
+  const nav = page.getByRole("navigation", { name: "Settings sections" });
+  const current = nav.locator('[aria-current="location"]');
+  await expect(current).toHaveText("Account");
+  // each section's heading at the top of the page marks it; Brand kit can't scroll that far, so it is a little lower
+  for (const [id, name, frac] of [["general", "General", 0], ["ai", "AI clip picking", 0], ["models", "Language models", 0], ["brand", "Brand kit", 0.2]] as const) {
+    await scrollSection(page, id, frac);
+    await expect(current).toHaveText(name);
+  }
+  await scrollSection(page, "updates", "end");
+  await expect(current).toHaveText("Updates");
+  await scrollSection(page, "account", 0);
+  await expect(current).toHaveText("Account");
+
+  // a click marks the chosen section even when the page can't scroll it to the top
+  await nav.getByRole("button", { name: "Brand kit" }).click();
+  await expect(current).toHaveText("Brand kit");
+  await expect(page.locator("#brand")).toBeInViewport();
+});
+
+test("the section list lines up with the title and the first heading", async ({ page }) => {
+  await page.setViewportSize({ width: 1280, height: 800 });
+  await page.goto("/#/settings");
+  const title = await page.getByRole("heading", { name: "Settings", level: 1 }).boundingBox();
+  const icon = await page.getByRole("navigation", { name: "Settings sections" }).locator("button svg").first().boundingBox();
+  const first = await page.getByRole("navigation", { name: "Settings sections" }).getByRole("button").first().boundingBox();
+  const heading = await page.getByRole("heading", { name: "Account", level: 2 }).boundingBox();
+  expect(Math.abs(icon!.x - title!.x)).toBeLessThanOrEqual(2);
+  expect(Math.abs((first!.y + first!.height / 2) - (heading!.y + heading!.height / 2))).toBeLessThanOrEqual(2);
+});

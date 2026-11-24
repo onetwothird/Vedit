@@ -25,7 +25,7 @@ Step = Union[tuple[str, list[str], float], tuple[str, list[str], float, dict[str
 class Job:
     id: str
     project_id: str
-    kind: Literal["analyze", "export", "model"]
+    kind: Literal["analyze", "export", "model", "story"]
     state: Literal["queued", "running", "done", "failed", "cancelled"] = "queued"
     stage: str = ""
     pct: float = 0.0

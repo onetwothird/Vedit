@@ -6,11 +6,13 @@ export interface ProgressStagesProps {
   pct: number;
   hasModel: boolean;
   finished?: boolean;
+  /** A vlog or Quick Reel project: no highlight search or framing stages. */
+  whole?: boolean;
 }
 
 /** The analyze stages in order: finished ones with a check, the current one with its own %, the rest waiting. */
-export default function ProgressStages({ stage, pct, hasModel, finished }: ProgressStagesProps) {
-  const rows = stageRows(stage, pct, hasModel, finished);
+export default function ProgressStages({ stage, pct, hasModel, finished, whole }: ProgressStagesProps) {
+  const rows = stageRows(stage, pct, hasModel, finished, whole);
   return (
     <ol className="stages">
       {rows.map((r) => (

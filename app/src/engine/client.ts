@@ -2,7 +2,7 @@
 // The token and any AI key are never logged and never put into an error message.
 
 import type {
-  AiTestBody, AiTestResult, AnalyzeBody, Brand, ClipOp, ClipView, Doctor, Engine, EngineInfo, ErrorBody, ExportBody, FilmstripInfo, Health, Job, ModelStatus,
+  AiTestBody, AiTestResult, AnalyzeBody, Batch, BatchBody, Brand, BuildStoryBody, Story, StoryBody, StoryVoice, ClipOp, ClipView, Doctor, Engine, EngineInfo, ErrorBody, ExportBody, FilmstripInfo, Health, Job, ModelStatus,
   NewProjectBody, Project, Transcript,
 } from "./types";
 import { mockEngine } from "./mock";
@@ -120,6 +120,14 @@ export function createClient(opts: ClientOptions): Engine {
     testAi: (body: AiTestBody) => request<AiTestResult>("POST", "/ai/test", body),
     brand: () => request<Brand>("GET", "/brand"),
     saveBrand: (brand: Brand) => request<Brand>("PUT", "/brand", brand),
+    stories: () => request<Story[]>("GET", "/stories"),
+    storyVoices: () => request<StoryVoice[]>("GET", "/stories/voices"),
+    createStory: (title = "") => request<Story>("POST", "/stories", { title }),
+    getStory: (sid) => request<Story>("GET", `/stories/${enc(sid)}`),
+    saveStory: (sid, body: StoryBody) => request<Story>("PUT", `/stories/${enc(sid)}`, body),
+    buildStory: (sid, body?: BuildStoryBody) => job(request<Job>("POST", `/stories/${enc(sid)}/build`, body ?? {})),
+    createBatch: (body: BatchBody) => request<Batch>("POST", "/batches", body),
+    getBatch: (bid) => request<Batch>("GET", `/batches/${enc(bid)}`),
   };
 }
 

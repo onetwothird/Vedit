@@ -1,31 +1,30 @@
-use std::path::PathBuf;
+use std::path::Path;
 
 fn main() {
-    ensure_engine_placeholder();
+    check_bundled_engine();
     tauri_build::build()
 }
 
-/// tauri-build requires every `externalBin` to exist as `bin/vedit-engine-<target-triple>[.exe]`.
-/// The real PyInstaller engine lands there in Task 22; until then (and on any machine without it) write an
-/// empty placeholder so `cargo build`/`cargo test`/`tauri dev` work. Dev runs use VEDIT_DEV_ENGINE=1 (system
-/// Python) instead. `bin/` is gitignored; a real binary is never overwritten. A release build refuses to go on
-/// without the real engine.
-fn ensure_engine_placeholder() {
-    let target = std::env::var("TARGET").expect("cargo sets TARGET");
-    let ext = if target.contains("windows") { ".exe" } else { "" };
-    let path = PathBuf::from("bin").join(format!("vedit-engine-{target}{ext}"));
-    println!("cargo:rerun-if-changed={}", path.display());
-    let is_placeholder = std::fs::metadata(&path).map_or(true, |m| m.len() == 0);
-    if is_placeholder && std::env::var("PROFILE").as_deref() == Ok("release") {
-        panic!(
-            "release build without the engine: {} is missing or the empty placeholder. \
-             Run the Task 22 engine build (PyInstaller vedit-engine) to put the real binary there first.",
-            path.display()
-        );
+/// A release build bundles engine/ (PyInstaller engine) and ffmpeg/ (FFmpeg) as resources, both written by
+/// `python packaging/build_engine.py`. Debug builds, `cargo test` and `tauri dev` don't need them: dev runs use
+/// VEDIT_DEV_ENGINE=1 (system Python on ../scripts). Both folders are git-ignored.
+fn check_bundled_engine() {
+    let exe = if std::env::var("TARGET").unwrap_or_default().contains("windows") { ".exe" } else { "" };
+    let engine = format!("engine/vedit-engine{exe}");
+    let ffmpeg = format!("ffmpeg/ffmpeg{exe}");
+    println!("cargo:rerun-if-changed={engine}");
+    println!("cargo:rerun-if-changed={ffmpeg}");
+    if std::env::var("PROFILE").as_deref() == Ok("release") {
+        for need in [&engine, &ffmpeg] {
+            if !Path::new(need).is_file() {
+                panic!("release build without {need}: run `python packaging/build_engine.py` from the repo first");
+            }
+        }
     }
-    if !path.exists() {
-        std::fs::create_dir_all("bin").expect("create bin/");
-        std::fs::write(&path, b"").expect("write engine placeholder");
-        println!("cargo:warning=wrote placeholder {}; the real engine arrives with the Task 22 build", path.display());
+    // tauri-build checks that every resource source exists, also in debug builds
+    for dir in ["engine", "ffmpeg"] {
+        if !Path::new(dir).exists() {
+            std::fs::create_dir_all(dir).expect("create resource folder");
+        }
     }
 }

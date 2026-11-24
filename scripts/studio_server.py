@@ -40,13 +40,18 @@ from edl import Timeline  # noqa: E402
 from edl_ops import clip_edl, cut_words, fix_word, kept_ranges, patch_section, restore_words, trim  # noqa: E402
 from highlights_llm import HID_RE  # noqa: E402
 from studio_jobs import Job, JobQueue  # noqa: E402
-from studio_projects import (LANG_MODEL, Project, ProjectClip, _atomic_write_json,  # noqa: E402
+import studio_stories as stories  # noqa: E402
+from studio_projects import (LANG_MODEL, Project, ProjectClip, _atomic_write_json, _home,  # noqa: E402
                              create_project, list_recent, load_project, output_dir, output_name, save_project)
 
 ALLOWED_ORIGINS = ("tauri://localhost", "http://tauri.localhost", "http://localhost:5173")
 FORMATS = ("9:16", "1:1", "4:5", "16:9")
 HIGH_CRF = "15"
 ANALYZE_STEPS = (("proxy", 0.1), ("analyze", 0.6), ("highlights", 0.15), ("framing", 0.15))
+# vlog / reel projects edit the whole video: no highlight search
+WHOLE_STEPS = (("proxy", 0.15), ("analyze", 0.85))
+WHOLE_ID = "h01"
+PRESET_FOR = {"vlog": "youtube"}  # clip and reel projects use their platform's preset
 TERMINAL = ("done", "failed", "cancelled")
 WS_QUEUE_MAX = 256
 OVERLAP_DROP = 0.5  # a new highlight overlapping a kept clip by more than this share of the shorter one is dropped
@@ -57,7 +62,8 @@ OVERLAP_DROP = 0.5  # a new highlight overlapping a kept clip by more than this 
 class NewProject(BaseModel):
     source: str
     language: Literal["en", "tl", "taglish"]
-    platform: Literal["reels", "shorts", "tiktok"]
+    platform: Literal["reels", "shorts", "tiktok", "youtube"]
+    type: Literal["clip", "vlog", "reel"] = "clip"
 
 
 class AIOptions(BaseModel):
@@ -88,6 +94,26 @@ class ExportBody(BaseModel):
     srt: bool = True  # also write the .srt subtitle file
     thumbnail: bool = False  # also save a .jpg frame beside each video
     first_number: int = Field(1, ge=1, le=999)  # the "NN" the first clip's file name starts at (a retry keeps its number)
+
+
+class BuildStoryBody(BaseModel):
+    out_dir: Optional[str] = None  # absolute folder for the video; default: the user's Videos/Vedit folder
+    quality: Literal["normal", "high"] = "normal"
+
+
+class BatchBody(BaseModel):
+    sources: list[str] = Field(min_length=1, max_length=50)
+    type: Literal["clip", "vlog", "reel"] = "clip"
+    language: Literal["en", "tl", "taglish"]
+    platform: Literal["reels", "shorts", "tiktok", "youtube"]
+    ai: Optional[AIOptions] = None
+    max_clips: Optional[int] = Field(default=None, ge=1, le=60)
+    export: bool = True  # export every kept clip as soon as its video is analysed
+    formats: list[str] = ["9:16"]
+    quality: Literal["normal", "high"] = "normal"
+    out_dir: Optional[str] = None
+    srt: bool = True
+    thumbnail: bool = False
 
 
 BRAND_KEYS = ("font", "caption_color", "highlight", "logo", "intro", "outro", "music")
@@ -337,6 +363,15 @@ class Engine:
                     save_project(p)
                 except OSError as e:
                     print(f"vedit: could not mark job interrupted in {p.source}: {e}", file=sys.stderr)
+        for doc in stories.list_stories(limit=sys.maxsize):
+            job = doc.get("last_job")
+            if isinstance(job, dict) and job.get("state") in ("running", "queued"):
+                doc["last_job"] = {**job, "state": "failed", "error": "interrupted"}
+                doc.pop("building", None)
+                try:
+                    stories.save_story_doc(doc)
+                except OSError as e:
+                    print(f"vedit: could not mark story {doc['id']} interrupted: {e}", file=sys.stderr)
 
     def lock_for(self, pid: str) -> threading.Lock:
         with self._locks_guard:
@@ -420,6 +455,8 @@ class Engine:
                         self._set_overlay(raw.id, result=self._finish_analyze(p))
                     elif raw.kind == "export":
                         self._set_overlay(raw.id, result=self._finish_export(raw))
+                    elif raw.kind == "story":
+                        self._set_overlay(raw.id, result=self._finish_story(raw))
                 except Exception as e:  # noqa: BLE001 - post-processing failure fails the job, not the server
                     self._set_overlay(raw.id, state="failed", error=f"post-processing failed: {e}")
             with self._meta_lock:
@@ -427,11 +464,54 @@ class Engine:
                 self._jobs[job.id] = job
             if p is not None:
                 p.last_job = _job_dict(job)
+                auto = p.settings.get("auto_export")
+                if raw.kind == "analyze" and job.state == "done" and isinstance(auto, dict) and not auto.get("job"):
+                    self._auto_export(p, auto)
                 save_project(p)
+            elif raw.kind == "story":
+                self._record_story_job(job)
         self._broadcast(_event(job))
+
+    def _auto_export(self, p: Project, auto: dict) -> None:
+        """A batch video: export its kept clips right after analysis. A failure is kept on the project."""
+        kept = [c.highlight["id"] for c in p.clips if c.kept]
+        if not kept:
+            auto["error"] = "no clips were found in this video"
+            return
+        body = ExportBody(clips=kept, formats=auto.get("formats") or ["9:16"], quality=auto.get("quality", "normal"),
+                          out_dir=auto.get("out_dir"), srt=auto.get("srt", True), thumbnail=auto.get("thumbnail", False))
+        try:
+            job = submit_export(self, p, body)
+        except (ValueError, NotFound, OSError) as e:
+            auto["error"] = str(e)
+            return
+        auto["job"] = job.id
+
+    def _finish_story(self, job: Job) -> dict:
+        try:
+            doc = stories.load_story_doc(job.project_id)
+        except KeyError:
+            return {"files": []}
+        out = doc.get("building") or doc.get("output")
+        files = [out] if job.state == "done" and out and Path(out).is_file() else []
+        return {"files": files}
+
+    def _record_story_job(self, job: Job) -> None:
+        try:
+            doc = stories.load_story_doc(job.project_id)
+        except KeyError:
+            return
+        doc["last_job"] = _job_dict(job)
+        if job.state == "done" and doc.get("building"):
+            doc["output"] = doc.pop("building")
+        elif job.state in TERMINAL:
+            doc.pop("building", None)
+        stories.save_story_doc(doc)
 
     def _finish_analyze(self, p: Project) -> dict:
         """Add clips for new highlights. Existing clips whose edit file exists are never touched."""
+        if p.type != "clip":
+            return self._finish_whole(p)
         wd = workdir_for(p.source)
         data = load_json(wd / "highlights.json")
         language = LANG_MODEL[p.language][0]
@@ -463,6 +543,11 @@ class Engine:
             used.add(hid)
             added.append(ProjectClip(highlight={**h, "id": hid}, kept=True, edl_file=name))
         p.clips = preserved + added
+        self._set_media(p, wd)
+        return {"clips": len(p.clips), "new": len(added), "reason": data.get("reason")}
+
+    @staticmethod
+    def _set_media(p: Project, wd: Path) -> None:
         proxy = wd / "proxy.mp4"
         try:
             has_proxy = proxy.is_file() and load_json(wd / "proxy.json").get("src") == str(Path(p.source).resolve())
@@ -470,7 +555,30 @@ class Engine:
             has_proxy = False
         p.settings.update(workdir=str(wd), proxy=str(proxy if has_proxy else Path(p.source)),
                           filmstrip=str(wd / "filmstrip.json"))
-        return {"clips": len(p.clips), "new": len(added), "reason": data.get("reason")}
+
+    def _finish_whole(self, p: Project) -> dict:
+        """A vlog or reel project: one edit of the whole video, with the preset's cuts. An edit that already
+        exists is kept, so analysing again never throws away someone's work."""
+        wd = workdir_for(p.source)
+        name = f"{p.type}-{WHOLE_ID}.edl.json"
+        existing = [c for c in p.clips if c.edl_file == name and (wd / name).is_file()]
+        if existing:
+            p.clips = existing
+            self._set_media(p, wd)
+            return {"clips": 1, "new": 0, "reason": None}
+        h = whole_highlight(wd, p.source)
+        language = LANG_MODEL[p.language][0]
+        try:
+            edl = clip_edl(wd, h, PRESET_FOR.get(p.type, p.platform), language, usable_brand_file())
+        except ValueError:
+            raise ValueError("no speech was found in this video, so there is nothing to edit") from None
+        if not edl["output"].get("aspect"):
+            # a vlog keeps the video's own shape; saying it outright lets the Edit screen show the same shape
+            edl["output"]["aspect"] = source_aspect(p.source)
+        _atomic_write_json(wd / name, edl)
+        p.clips = [ProjectClip(highlight=h, kept=True, edl_file=name)]
+        self._set_media(p, wd)
+        return {"clips": 1, "new": 1, "reason": None}
 
     def _finish_export(self, job: Job) -> dict:
         """Finished files (+ .srt) and, on failure, which render failed. Always removes the temp edits."""
@@ -523,6 +631,88 @@ class Engine:
                 loop.call_soon_threadsafe(_offer, q, msg)
             except RuntimeError:  # loop already closed
                 self.remove_client((loop, q))
+
+
+def source_aspect(source: str) -> str:
+    """16:9 for a landscape (or square-ish wide) video, 9:16 for a portrait one."""
+    try:
+        v = next(s for s in cached_probe(source).get("streams", []) if s.get("codec_type") == "video")
+        w, h = int(v["width"]), int(v["height"])
+        if abs(int(v.get("tags", {}).get("rotate", 0) or 0)) in (90, 270):
+            w, h = h, w
+    except (StopIteration, KeyError, ValueError, TypeError, OSError):
+        return "16:9"
+    return "9:16" if h > w else "16:9"
+
+
+def whole_highlight(wd: Path, source: str) -> dict:
+    """The whole video as one "highlight": every word, titled after the file."""
+    tp = Path(wd) / "transcript.main.json"
+    words = load_json(tp).get("words", []) if tp.is_file() else []
+    if words:
+        start, end = float(words[0]["start"]), float(words[-1]["end"])
+    else:
+        start, end = 0.0, float(cached_probe(source).get("format", {}).get("duration") or 0)
+    return {"id": WHOLE_ID, "start": round(start, 3), "end": round(end, 3), "w0": 0, "w1": max(len(words) - 1, 0),
+            "score": 100, "title": Path(source).stem[:60] or "Video", "features": {}}
+
+
+def submit_export(engine: "Engine", p: Project, body: ExportBody) -> Job:
+    """Plan and queue the renders of an export. The caller holds the project's lock."""
+    if not body.clips or not body.formats:
+        raise ValueError("export needs at least one clip and one format")
+    bad = [f for f in body.formats if f not in FORMATS]
+    if bad:
+        raise ValueError(f"unsupported formats: {bad}")
+    if len(set(body.clips)) != len(body.clips) or len(set(body.formats)) != len(body.formats):
+        raise ValueError("duplicate clips or formats in export")
+    wd = workdir_for(p.source)
+    out_dir = output_dir(Path(p.source))
+    if body.out_dir:
+        out_dir = _safe_out_dir(body.out_dir)
+    plan = []
+    for i, hid in enumerate(body.clips, body.first_number):
+        clip = _find_clip(p, hid)
+        if not _valid_hid(hid):
+            raise ValueError(f"unsafe clip id {hid!r}")
+        edl = load_json(_edl_path(wd, clip))
+        for aspect in body.formats:
+            e = json.loads(json.dumps(edl))
+            out = {k: v for k, v in (e.get("output") or {}).items() if k not in ("width", "height")}
+            path = out_dir / output_name(i, clip.highlight.get("title", ""), aspect)
+            out.update(aspect=aspect, path=str(path))
+            e["output"] = out
+            if not body.srt:
+                e["captions"] = {**(e.get("captions") or {}), "srt": False}
+            plan.append((hid, aspect, e, path))
+    n = len(plan)
+    crf = ["--crf", HIGH_CRF] if body.quality == "high" else []
+    steps, renders = [], []
+    tag = uuid.uuid4().hex[:8]  # queued exports never share (and overwrite) each other's edit files
+    for k, (hid, aspect, e, path) in enumerate(plan, 1):
+        tmp = wd / f"export-{tag}-{hid}-{aspect.replace(':', 'x')}.edl.json"
+        _atomic_write_json(tmp, e)
+        stage = f"render {k}/{n}"
+        share = 1.0 / n
+        steps.append((stage, py_cmd("render.py", str(tmp), *crf), share * (0.9 if body.thumbnail else 1.0)))
+        if body.thumbnail:
+            path.with_suffix(".jpg").unlink(missing_ok=True)  # an older thumbnail must not hide a new failure
+            # its own stage, and the script never fails the job
+            steps.append((f"thumb {k}/{n}", py_cmd("thumb_frame.py", str(path), str(path.with_suffix(".jpg"))), share * 0.1))
+        renders.append({"stage": stage, "hid": hid, "aspect": aspect, "path": str(path), "tmp": str(tmp),
+                        "thumb": body.thumbnail})
+    return engine.submit(p.id, "export", steps, renders=renders)
+
+
+def default_story_dir() -> Path:
+    """Videos/Vedit in the user's home (Windows keeps Videos there too)."""
+    return Path.home() / "Videos" / "Vedit"
+
+
+def _batch_path(bid: str) -> Path:
+    if not re.fullmatch(r"b[0-9a-f]{12}", bid or ""):
+        raise NotFound(f"batch {bid}")
+    return _home() / "batches" / f"{bid}.json"
 
 
 def _safe_out_dir(raw: str) -> Path:
@@ -730,7 +920,7 @@ def create_app(token: str, queue: JobQueue | None = None) -> FastAPI:
         src = Path(body.source)
         if not src.is_file():
             raise ValueError(f"source video not found: {body.source}")
-        return _project_dict(create_project(src, body.language, body.platform))
+        return _project_dict(create_project(src, body.language, body.platform, body.type))
 
     @app.get("/projects/{pid}")
     def get_project(pid: str):
@@ -752,8 +942,9 @@ def create_app(token: str, queue: JobQueue | None = None) -> FastAPI:
                 "analyze": py_cmd("analyze.py", src, "--model", model, "--language", lang),
                 "highlights": py_cmd("highlights.py", src, *hl_args),
                 "framing": py_cmd("highlights.py", src, "--framing")}
+        stages = ANALYZE_STEPS if p.type == "clip" else WHOLE_STEPS
         steps = [(stage, argv[stage], share) + ((step_env[stage],) if stage in step_env else ())
-                 for stage, share in ANALYZE_STEPS]
+                 for stage, share in stages]
         if not models.status()[model]["installed"]:  # fetch the speech model first, as 30% of the job
             steps = [("model", py_cmd("models.py", "download", model), 0.3)] +                     [(st, argv_, share * 0.7, *rest) for st, argv_, share, *rest in steps]
         return _job_dict(engine.submit(pid, "analyze", steps))
@@ -826,51 +1017,128 @@ def create_app(token: str, queue: JobQueue | None = None) -> FastAPI:
 
     @app.post("/projects/{pid}/export")
     def export(pid: str, body: ExportBody):
-        if not body.clips or not body.formats:
-            raise ValueError("export needs at least one clip and one format")
-        bad = [f for f in body.formats if f not in FORMATS]
-        if bad:
-            raise ValueError(f"unsupported formats: {bad}")
-        if len(set(body.clips)) != len(body.clips) or len(set(body.formats)) != len(body.formats):
-            raise ValueError("duplicate clips or formats in export")
         with engine.lock_for(pid):
-            p = _project(pid)
-            wd = workdir_for(p.source)
-            out_dir = output_dir(Path(p.source))
-            if body.out_dir:
-                out_dir = _safe_out_dir(body.out_dir)
-            plan = []
-            for i, hid in enumerate(body.clips, body.first_number):
-                clip = _find_clip(p, hid)
-                if not _valid_hid(hid):
-                    raise ValueError(f"unsafe clip id {hid!r}")
-                edl = load_json(_edl_path(wd, clip))
-                for aspect in body.formats:
-                    e = json.loads(json.dumps(edl))
-                    out = {k: v for k, v in (e.get("output") or {}).items() if k not in ("width", "height")}
-                    path = out_dir / output_name(i, clip.highlight.get("title", ""), aspect)
-                    out.update(aspect=aspect, path=str(path))
-                    e["output"] = out
-                    if not body.srt:
-                        e["captions"] = {**(e.get("captions") or {}), "srt": False}
-                    plan.append((hid, aspect, e, path))
-        n = len(plan)
-        crf = ["--crf", HIGH_CRF] if body.quality == "high" else []
-        steps, renders = [], []
-        tag = uuid.uuid4().hex[:8]  # queued exports never share (and overwrite) each other's edit files
-        for k, (hid, aspect, e, path) in enumerate(plan, 1):
-            tmp = wd / f"export-{tag}-{hid}-{aspect.replace(':', 'x')}.edl.json"
-            _atomic_write_json(tmp, e)
-            stage = f"render {k}/{n}"
-            share = 1.0 / n
-            steps.append((stage, py_cmd("render.py", str(tmp), *crf), share * (0.9 if body.thumbnail else 1.0)))
-            if body.thumbnail:
-                path.with_suffix(".jpg").unlink(missing_ok=True)  # an older thumbnail must not hide a new failure
-                # its own stage, and the script never fails the job
-                steps.append((f"thumb {k}/{n}", py_cmd("thumb_frame.py", str(path), str(path.with_suffix(".jpg"))), share * 0.1))
-            renders.append({"stage": stage, "hid": hid, "aspect": aspect, "path": str(path), "tmp": str(tmp),
-                            "thumb": body.thumbnail})
-        return _job_dict(engine.submit(pid, "export", steps, renders=renders))
+            return _job_dict(submit_export(engine, _project(pid), body))
+
+    # ---- stories: photos or clips + a script -> a narrated video
+    def _story(sid: str) -> dict:
+        try:
+            return stories.load_story_doc(sid)
+        except KeyError:
+            raise NotFound(f"story {sid}") from None
+
+    def _story_dict(doc: dict) -> dict:
+        return {k: v for k, v in doc.items() if k != "building"}
+
+    @app.get("/stories")
+    def list_stories():
+        return [_story_dict(d) for d in stories.list_stories()]
+
+    @app.get("/stories/voices")
+    def story_voices():
+        return [{"id": k, "name": v} for k, v in stories.VOICES.items()]
+
+    @app.post("/stories")
+    def new_story(body: dict = Body(default={})):
+        title = body.get("title", "") if isinstance(body, dict) else ""
+        if not isinstance(title, str) or len(title) > stories.MAX_TITLE:
+            raise ValueError(f"the title can be at most {stories.MAX_TITLE} characters")
+        return _story_dict(stories.create_story(title))
+
+    @app.get("/stories/{sid}")
+    def get_story(sid: str):
+        return _story_dict(_story(sid))
+
+    @app.put("/stories/{sid}")
+    def put_story(sid: str, body: dict = Body(...)):
+        with engine.lock_for(sid):
+            old = _story(sid)
+            doc = stories.clean_doc(sid, body, old)
+            stories.save_story_doc(doc)
+            return _story_dict(doc)
+
+    @app.get("/stories/{sid}/file")
+    def story_file(sid: str, path: str):
+        """A photo, clip or music file, only when this story uses it."""
+        doc = _story(sid)
+        if path not in stories.story_media(doc):
+            raise NotFound("file")
+        return _media_response(Path(path))
+
+    @app.post("/stories/{sid}/build")
+    def build_story(sid: str, body: Optional[BuildStoryBody] = None):
+        body = body or BuildStoryBody()
+        with engine.lock_for(sid):
+            doc = _story(sid)
+            stories.check_buildable(doc)
+            out_dir = _safe_out_dir(body.out_dir) if body.out_dir else default_story_dir()
+            out_dir.mkdir(parents=True, exist_ok=True)
+            out = stories.output_file(doc, out_dir)
+            path = stories.write_story_json(doc, out)
+            # voices first (needs the internet once; cached after), then the render (its own progress)
+            steps = [("voices", py_cmd("story.py", "voices", str(path)), 0.25),
+                     ("render", py_cmd("story.py", "build", str(path)), 0.75)]
+            job = engine.submit(sid, "story", steps)
+            doc["building"] = str(out)
+            doc["last_job"] = _job_dict(job)
+            stories.save_story_doc(doc)
+            return _job_dict(job)
+
+    # ---- batch: many videos, analysed (and exported) one after another
+    def _batch_view(bid: str) -> dict:
+        path = _batch_path(bid)
+        if not path.is_file():
+            raise NotFound(f"batch {bid}")
+        data = load_json(path)
+        items = []
+        for it in data.get("items", []):
+            try:
+                p = load_project(it["project"])
+            except (KeyError, ValueError, OSError):
+                items.append({**it, "project": None, "export": None, "error": "the project is gone"})
+                continue
+            auto = p.settings.get("auto_export") if isinstance(p.settings.get("auto_export"), dict) else {}
+            items.append({**it, "project": _project_dict(p), "export": auto.get("job"), "error": auto.get("error")})
+        return {**data, "items": items}
+
+    @app.post("/batches")
+    def new_batch(body: BatchBody):
+        if body.platform not in {"clip": ("reels", "shorts", "tiktok"), "reel": ("reels", "shorts", "tiktok"),
+                                 "vlog": ("youtube",)}[body.type]:
+            raise ValueError(f"unsupported platform for a {body.type} project: {body.platform}")
+        if len(set(body.sources)) != len(body.sources):
+            raise ValueError("the same video is in the batch twice")
+        bad = [f for f in body.formats if f not in FORMATS]
+        if body.export and (bad or not body.formats):
+            raise ValueError(f"unsupported formats: {bad}" if bad else "pick at least one format")
+        missing = [s for s in body.sources if not Path(s).is_file()]
+        if missing:
+            raise ValueError(f"video not found: {Path(missing[0]).name}")
+        if body.out_dir:
+            _safe_out_dir(body.out_dir)
+        analyze_body = AnalyzeBody(ai=body.ai, max_clips=body.max_clips)
+        items = []
+        for src in body.sources:
+            p = create_project(Path(src), body.language, body.platform, body.type)
+            with engine.lock_for(p.id):
+                p = _project(p.id)
+                if body.export:
+                    p.settings["auto_export"] = {"formats": body.formats, "quality": body.quality,
+                                                 "out_dir": body.out_dir, "srt": body.srt,
+                                                 "thumbnail": body.thumbnail}
+                else:
+                    p.settings.pop("auto_export", None)
+                save_project(p)
+            job = analyze(p.id, analyze_body)
+            items.append({"project": p.id, "source": p.source, "analyze": job["id"]})
+        bid = "b" + uuid.uuid4().hex[:12]
+        _atomic_write_json(_batch_path(bid), {"id": bid, "created": stories._now(), "type": body.type,
+                                              "export": body.export, "items": items})
+        return _batch_view(bid)
+
+    @app.get("/batches/{bid}")
+    def get_batch(bid: str):
+        return _batch_view(bid)
 
     @app.get("/jobs")
     def list_jobs(project: Optional[str] = None, kind: Optional[str] = None):

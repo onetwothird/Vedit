@@ -13,10 +13,23 @@ export interface SupabaseOptions extends SupabaseConfig {
   fetchImpl?: typeof fetch;
   /** Sends the window to the provider's sign-in page. */
   open?: (url: string) => void;
-  /** Inside the desktop window: Google refuses sign in from embedded web views, so social sign in waits for the
-      system-browser hand-off that ships with the installer. */
+  /** Inside the desktop window. Google refuses sign in from embedded web views, so there social sign in goes
+      through the system browser and comes back as a vedit://auth link (`desktop`). */
   embedded?: boolean;
+  desktop?: DesktopHandoff;
 }
+
+/** The desktop app's side of social sign in: open the provider in the browser, wait for the vedit:// link back. */
+export interface DesktopHandoff {
+  openExternal(url: string): Promise<void>;
+  /** The next vedit://auth link the app receives. */
+  nextAuthLink(): Promise<string>;
+}
+
+/** Where the browser sends the desktop app's sign in back to; it must be in Supabase's redirect allow list. */
+export const DESKTOP_REDIRECT = "vedit://auth";
+/** Someone who closes the browser tab never comes back; stop waiting after this long. */
+export const DESKTOP_WAIT_MS = 10 * 60_000;
 
 interface Session {
   access_token: string;
@@ -89,6 +102,16 @@ function base64url(bytes: Uint8Array): string {
   return btoa(s).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
 }
 
+/** Query and fragment of a vedit://auth link together (an error can come back in either). */
+export function linkParams(link: string): URLSearchParams {
+  const i = link.indexOf("?");
+  const j = link.indexOf("#");
+  const query = i < 0 ? "" : link.slice(i + 1, j > i ? j : undefined);
+  const params = new URLSearchParams(query);
+  if (j >= 0) new URLSearchParams(link.slice(j + 1)).forEach((v, k) => params.has(k) || params.set(k, v));
+  return params;
+}
+
 async function pkcePair(): Promise<{ verifier: string; challenge: string }> {
   const verifier = base64url(crypto.getRandomValues(new Uint8Array(32)));
   const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(verifier));
@@ -148,24 +171,30 @@ export function supabaseProvider(opts: SupabaseOptions): AuthProvider {
 
   const saved = () => read<Session | null>(SESSION, null);
 
+  /** The provider's answer (code or error), exchanged for a session with the PKCE verifier saved before leaving. */
+  async function finish(params: URLSearchParams, provider?: SocialProvider): Promise<Account> {
+    const failed = params.get("error");
+    if (failed) {
+      sessionStorage.removeItem(PKCE);
+      const why = `${failed} ${params.get("error_code") ?? ""}`;
+      throw new AuthError(/access_denied|user_cancel/.test(why) ? "social_cancelled" : "social_failed");
+    }
+    const code = params.get("code");
+    const verifier = sessionStorage.getItem(PKCE);
+    sessionStorage.removeItem(PKCE);
+    if (!code || !verifier) throw new AuthError("unknown");
+    return start(await call("/token?grant_type=pkce", { auth_code: code, code_verifier: verifier }), provider);
+  }
+
   return {
     restore: () => saved()?.account ?? null,
 
     async resume() {
       const here = new URL(window.location.href);
-      const code = here.searchParams.get("code");
-      const failed = here.searchParams.get("error");
-      if (code || failed) {
+      if (here.searchParams.get("code") || here.searchParams.get("error")) {
         // the provider's return trip: take the code out of the address before anything else
         window.history.replaceState(null, "", window.location.pathname + window.location.hash);
-        if (failed) {
-          const why = `${failed} ${here.searchParams.get("error_code") ?? ""}`;
-          throw new AuthError(/access_denied|user_cancel/.test(why) ? "social_cancelled" : "social_failed");
-        }
-        const verifier = sessionStorage.getItem(PKCE);
-        sessionStorage.removeItem(PKCE);
-        if (!verifier) throw new AuthError("unknown");
-        return start(await call("/token?grant_type=pkce", { auth_code: code, code_verifier: verifier }));
+        return finish(here.searchParams);
       }
       const s = saved();
       if (!s) return null;
@@ -180,7 +209,7 @@ export function supabaseProvider(opts: SupabaseOptions): AuthProvider {
     },
 
     async social(provider: SocialProvider) {
-      if (embedded) throw new AuthError("social_unavailable");
+      if (embedded && !opts.desktop) throw new AuthError("social_unavailable");
       const { verifier, challenge } = await pkcePair();
       try {
         sessionStorage.setItem(PKCE, verifier);
@@ -189,12 +218,33 @@ export function supabaseProvider(opts: SupabaseOptions): AuthProvider {
       }
       const q = new URLSearchParams({
         provider,
-        redirect_to: window.location.origin + window.location.pathname,
+        redirect_to: embedded ? DESKTOP_REDIRECT : window.location.origin + window.location.pathname,
         code_challenge: challenge,
         code_challenge_method: "s256",
       });
-      open(`${opts.url}/auth/v1/authorize?${q}`);
-      return new Promise<Account>(() => undefined); // the window is leaving for the provider's page
+      const page = `${opts.url}/auth/v1/authorize?${q}`;
+      if (!embedded || !opts.desktop) {
+        open(page);
+        return new Promise<Account>(() => undefined); // the window is leaving for the provider's page
+      }
+      const desktop = opts.desktop;
+      const back = desktop.nextAuthLink(); // listen before the browser can answer
+      try {
+        await desktop.openExternal(page);
+      } catch {
+        sessionStorage.removeItem(PKCE);
+        throw new AuthError("social_failed");
+      }
+      let timer: ReturnType<typeof setTimeout> | undefined;
+      const gaveUp = new Promise<never>((_, reject) => {
+        timer = setTimeout(() => reject(new AuthError("social_cancelled")), DESKTOP_WAIT_MS);
+      });
+      try {
+        return await finish(linkParams(await Promise.race([back, gaveUp])), provider);
+      } finally {
+        clearTimeout(timer);
+        sessionStorage.removeItem(PKCE);
+      }
     },
 
     async signIn(email, password) {

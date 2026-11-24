@@ -230,6 +230,21 @@ Claude analyzes the footage, drafts and refines the edit, renders a preview, che
 
 Vedit Studio is the same engine with a screen: drop in a long video, pick the best moments, edit each clip, export.
 
+Start from Home with one of five things to make:
+
+- **Clip a long video.** A podcast, stream or interview becomes many 20 to 90 second clips (the steps below).
+- **Edit a vlog.** The whole video, tidied: dead air, filler words and retakes cut, clean captions, its own shape
+  (16:9 for a landscape video). Import goes straight to Edit.
+- **Quick Reel / Short.** One phone video as a fast vertical cut with pop-up captions, for Reels, Shorts or TikTok.
+- **Photos + script → Reel.** Put photos and clips in order and write what the narrator says over each (one caption
+  per line). Pick the shape, caption style, voice and optional music, then **Make video**: Vedit records the narration
+  with a free neural voice (this needs the internet the first time), animates the photos, adds the captions and saves
+  the video to `Videos\Vedit` (or the folder chosen in Settings). A clip can keep its own sound instead; its words
+  become the captions. Stories are saved as you type and listed under Recent projects.
+- **Batch & automate.** Add many videos at once, choose clips, a vlog or a Quick Reel for each, and Vedit analyses them
+  one after another and exports the results as each one finishes (or leaves them for you to review). You can leave
+  the screen while it works; every video also appears under Recent projects.
+
 <img src="docs/images/home.png" alt="The Vedit Studio welcome screen: a podcast cut into three vertical clips, next to sign-in" width="800">
 
 1. **Import.** Choose a video. Vedit listens to it, finds the 20 to 90 second moments worth posting and frames
@@ -274,6 +289,27 @@ folder. Without it, a debug build looks for the bundled engine, which only exist
 
 `npm run dev:mock` (in `app/`) opens a **demo** in the browser with a built-in sample clip and a pretend engine. It
 never reads your files, so use it to try the screens, not to edit your videos.
+
+### Building the installer
+
+Vedit Studio ships as one Windows installer (NSIS) with the engine and FFmpeg inside, so the people who install it
+need nothing else. From the repo root, on Windows with Python 3.10+, Node 20+ and Rust:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File packaging\build_installer.ps1
+```
+
+It makes a clean virtual environment with only the engine's dependencies, packs the engine with PyInstaller,
+copies FFmpeg from your PATH (or pass `--ffmpeg-dir <folder>`), and builds
+`app\src-tauri\target\release\bundle\nsis\Vedit Studio_<version>_x64-setup.exe`. The installer needs no admin
+rights; it installs for the current user.
+
+Updates are signed. The private updater key lives outside the repo (`%USERPROFILE%\.tauri\vedit-updater.key`, made
+with `npx tauri signer generate`); only its public half is in `tauri.conf.json`. Keep a backup of the private key:
+without it, installed copies can't be updated. A release uploads the setup `.exe`, its `.sig` and a `latest.json` to
+GitHub Releases, where the app checks for updates.
+
+FFmpeg is a separate program under its own license, shipped beside the app with its license file.
 
 ## Presets
 

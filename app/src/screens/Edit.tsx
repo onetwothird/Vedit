@@ -14,6 +14,7 @@ import { useUndoKeys } from "../edit/useUndoKeys";
 import { engine } from "../engine/client";
 import type { Aspect, EditSection, Edl, Overlay, Project, Transcript } from "../engine/types";
 import { t } from "../i18n/t";
+import { isWhole } from "../lib/projectKind";
 import { keptCount, sortClips, type ClipSort } from "../lib/clips";
 import { coverWidth } from "../lib/filmstrip";
 import { baseName } from "../lib/native";
@@ -239,20 +240,22 @@ export default function Edit() {
   }
 
   const kc = keptCount(clips);
+  const whole = isWhole(project?.type);
   const bar = {
     fileName: project ? baseName(project.source) : undefined,
     saved: !!view && !saving,
     step: 3 as const,
     editHid: hid,
-    primary: id ? { label: t("edit.export"), count: kc, disabled: kc === 0, onClick: () => navigate(`/p/${id}/export`) } : undefined,
+    whole,
+    primary: id ? { label: t(whole ? "edit.export.whole" : "edit.export"), count: whole ? undefined : kc, disabled: kc === 0, onClick: () => navigate(`/p/${id}/export`) } : undefined,
   };
 
   if (missing || (project && !clip)) {
     return (
-      <Screen bar={{ fileName: bar.fileName, step: 3 }}>
+      <Screen bar={{ fileName: bar.fileName, step: 3, whole }}>
         <h1 className="title">{t("edit.title")}</h1>
         <p className="note-text" role="alert">{t("edit.missing")}</p>
-        <Link className="secondary inline" to={id ? `/p/${id}/pick` : "/"}>{t("edit.back")}</Link>
+        <Link className="secondary inline" to={id ? (whole ? `/p/${id}/import` : `/p/${id}/pick`) : "/"}>{t(whole ? "edit.back.import" : "edit.back")}</Link>
       </Screen>
     );
   }
@@ -263,7 +266,7 @@ export default function Edit() {
 
   return (
     <Screen bar={bar} wide>
-      <div className="edit">
+      <div className={`edit${whole ? " whole" : ""}`}>
         <section className="ed-player" aria-label={t("edit.player")}>
           <div className="pv-top">
             <h1 className="pv-title">
@@ -346,7 +349,7 @@ export default function Edit() {
           <aside className="ed-insp" aria-label={t("edit.tabs")} aria-busy="true" />
         )}
 
-        <section className="ed-clips" aria-label={t("edit.clips")}>
+        {!whole && <section className="ed-clips" aria-label={t("edit.clips")}>
           <header className="ed-head">
             <h2>{t("edit.clips")}</h2>
             <span className="meta">{t("edit.clips.kept", { k: kc, n: clips.length })}</span>
@@ -357,7 +360,7 @@ export default function Edit() {
             {id && <Link className="secondary" to={`/p/${id}/pick`}>{t("edit.clips.more")}</Link>}
             <span className="meta">{t("edit.clips.keys")}</span>
           </footer>
-        </section>
+        </section>}
 
         {ready && h && words.length > 0 ? (
           <Timeline

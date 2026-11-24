@@ -128,3 +128,20 @@ export async function showInFolder(path: string): Promise<void> {
   const { invoke } = await import("@tauri-apps/api/core");
   await invoke("show_in_folder", { path });
 }
+
+export const PHOTO_EXTENSIONS = ["jpg", "jpeg", "png", "webp", "bmp"];
+/** What a story scene can be: a photo or a clip. */
+export const STORY_ACCEPT = [...PHOTO_EXTENSIONS, ...VIDEO_EXTENSIONS].map((e) => `.${e}`).join(",");
+
+export function isStoryMediaName(name: string): boolean {
+  const dot = name.lastIndexOf(".");
+  const ext = dot >= 0 ? name.slice(dot + 1).toLowerCase() : "";
+  return PHOTO_EXTENSIONS.includes(ext) || VIDEO_EXTENSIONS.includes(ext);
+}
+
+/** The desktop file dialog with several files at once. Resolves [] when cancelled. Only call inside Tauri. */
+export async function pickManyNative(name: string, extensions: string[]): Promise<string[]> {
+  const { open } = await import("@tauri-apps/plugin-dialog");
+  const res = await open({ multiple: true, filters: [{ name, extensions }] });
+  return Array.isArray(res) ? res : typeof res === "string" ? [res] : [];
+}

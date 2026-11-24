@@ -4,7 +4,7 @@
 import {
   EngineError,
   type AnalyzeBody, type CaptionTrack, type ClipOp, type ClipView, type Doctor, type Edl, type EdlClip, type Engine,
-  type AiTestResult, type Brand, type ExportBody, type FilmstripInfo, type Health, type Highlight, type Job, type ModelStatus, type NewProjectBody, type Project,
+  type AiTestResult, type Batch, type BatchBody, type Brand, type ExportBody, type Story, type StoryBody, type StoryScene, type FilmstripInfo, type Health, type Highlight, type Job, type ModelStatus, type NewProjectBody, type Project, type ProjectType,
   type ProjectClip, type RenderPlanEntry, type Transcript, type TranscriptWord,
 } from "./types";
 import { spelledAs } from "../edit/spelling";
@@ -214,6 +214,24 @@ export function createMockEngine(opts: { tickMs?: number; persist?: Pick<Storage
   const models: ModelStatus = { small: { installed: true, size_mb: 484 }, "large-v3": { installed: false, size_mb: 3090 } };
   let brand: Brand = { font: "", caption_color: "", highlight: "", logo: "", intro: "", outro: "", music: "" };
   const failedOnce = new Set<string>(); // projects whose first analyze already failed on purpose
+  // stories outlive a reload too, as the real engine's story files do
+  const STORIES = "vedit.mock.stories";
+  const stories = new Map<string, Story>((() => {
+    try {
+      return Object.entries(JSON.parse(opts.persist?.getItem(STORIES) ?? "{}") as Record<string, Story>);
+    } catch {
+      return [];
+    }
+  })());
+  const keepStories = (): void => {
+    try {
+      opts.persist?.setItem(STORIES, JSON.stringify(Object.fromEntries(stories)));
+    } catch {
+      /* storage full or blocked */
+    }
+  };
+  const batches = new Map<string, { id: string; created: string; type: ProjectType; export: boolean; items: { project: string; source: string; analyze: string }[] }>();
+  const autoExport = new Map<string, { body: Omit<ExportBody, "clips">; job?: string; error?: string }>(); // batch projects
   let seq = 0;
 
   const notFound = (what: string) => new EngineError(404, "not_found", `not found: ${what}`);
@@ -241,10 +259,28 @@ export function createMockEngine(opts: { tickMs?: number; persist?: Pick<Storage
     });
   }
 
-  function newProject(source: string, language: Project["language"], platform: Project["platform"], withClips: boolean): Project {
+  /** A vlog or Quick Reel project: the whole sample as one clip, cut with the preset (16:9 or vertical). */
+  function wholeClip(pid: string, type: "vlog" | "reel", source: string): ProjectClip {
+    const w1 = transcript.words.length - 1;
+    const highlight: Highlight = {
+      id: "h01", start: transcript.words[0].start, end: transcript.words[w1].end, w0: 0, w1, score: 100,
+      title: (source.split(/[\\/]/).pop() ?? "").replace(/\.[^.]+$/, "") || "Video", features: {},
+    };
+    let edl: Edl = {
+      clips: [{ src: "main", words: [0, w1] }],
+      output: { aspect: type === "vlog" ? "16:9" : "9:16", fps: 30 },
+      captions: { style: type === "vlog" ? "clean" : "pop" },
+    };
+    for (let i = 0; i <= w1; i++) if (HARD_FILLERS.has(i % PASSAGE_LEN)) edl = applyOp(edl, { op: "cut", w0: i, w1: i });
+    edls.set(`${pid}/h01`, saved()[`${pid}/h01`] ?? edl);
+    return { highlight, kept: true, edl_file: `${type}-h01.edl.json` };
+  }
+
+  function newProject(source: string, language: Project["language"], platform: Project["platform"], withClips: boolean,
+                      type: ProjectType = "clip"): Project {
     const id = `mock-${++seq}`;
     const p: Project = {
-      id, type: "clip", source, language, platform, created: new Date().toISOString(), clips: [], settings: {}, last_job: null,
+      id, type, source, language, platform, created: new Date().toISOString(), clips: [], settings: {}, last_job: null,
     };
     projects.set(id, p);
     if (withClips) {
@@ -263,6 +299,11 @@ export function createMockEngine(opts: { tickMs?: number; persist?: Pick<Storage
     jobs.set(job.id, job);
     const p = projects.get(job.project_id);
     if (p) p.last_job = snapshot(job);
+    const st = stories.get(job.project_id);
+    if (st) {
+      st.last_job = snapshot(job);
+      keepStories();
+    }
     for (const l of [...listeners]) l(snapshot(job));
   }
 
@@ -302,7 +343,116 @@ export function createMockEngine(opts: { tickMs?: number; persist?: Pick<Storage
 
   const active = (): boolean => [...jobs.values()].some((j) => j.state === "queued" || j.state === "running");
 
-  return {
+  const VOICES = [
+    { id: "en-US-AndrewNeural", name: "Andrew (US English)" }, { id: "en-US-AvaNeural", name: "Ava (US English)" },
+    { id: "en-GB-RyanNeural", name: "Ryan (UK English)" }, { id: "en-GB-SoniaNeural", name: "Sonia (UK English)" },
+    { id: "fil-PH-AngeloNeural", name: "Angelo (Filipino)" }, { id: "fil-PH-BlessicaNeural", name: "Blessica (Filipino)" },
+  ];
+  const IMAGE = ["jpg", "jpeg", "png", "webp", "bmp"];
+  const VIDEO = ["mp4", "mov", "m4v", "mkv", "avi", "webm", "mts", "3gp"];
+  const ext = (path: string) => path.split(".").pop()?.toLowerCase() ?? "";
+  const fileName = (path: string) => path.split(/[\\/]/).pop() ?? path;
+  const bad = (detail: string) => new EngineError(400, "bad_request", detail);
+  const story = (sid: string): Story => stories.get(sid) ?? (() => { throw notFound(`story ${sid}`); })();
+
+  function cleanStory(old: Story, body: StoryBody): Story {
+    const next = { ...old, ...body, scenes: old.scenes } as Story;
+    if (next.title.length > 80) throw bad("the title can be at most 80 characters");
+    if (!["9:16", "16:9", "1:1"].includes(next.aspect)) throw bad(`unsupported shape: ${next.aspect}`);
+    if (!VOICES.some((v) => v.id === next.voice)) throw bad(`unsupported voice: ${next.voice}`);
+    if (!["pop", "box", "clean", "none"].includes(next.captions)) throw bad(`unsupported caption style: ${next.captions}`);
+    if (next.music !== null && !["mp3", "m4a", "aac", "wav", "flac", "ogg", "opus"].includes(ext(next.music))) throw bad("music must be an audio file");
+    if (body.scenes) {
+      next.scenes = body.scenes.map((sc, i): StoryScene => {
+        const kind = IMAGE.includes(ext(sc.media)) ? "image" : VIDEO.includes(ext(sc.media)) ? "video" : null;
+        if (!kind) throw bad(`scene ${i + 1}: ${fileName(sc.media)} is not a photo or a video`);
+        return { media: sc.media, kind, text: sc.text ?? "", motion: sc.motion ?? "auto", keep_audio: !!sc.keep_audio && kind === "video" };
+      });
+    }
+    return { ...next, updated: new Date().toISOString() };
+  }
+
+  // a batch video exports its kept clips once its analysis is done
+  listeners.add((job) => {
+    const auto = autoExport.get(job.project_id);
+    if (!auto || auto.job || auto.error || job.kind !== "analyze" || job.state !== "done") return;
+    const kept = project(job.project_id).clips.filter((c) => c.kept).map((c) => c.highlight.id);
+    if (!kept.length) {
+      auto.error = "no clips were found in this video";
+      return;
+    }
+    auto.job = "pending";
+    void api.exportClips(job.project_id, { ...auto.body, clips: kept }).then((j) => { auto.job = j.id; });
+  });
+
+  function batchView(bid: string): Batch {
+    const b = batches.get(bid);
+    if (!b) throw notFound(`batch ${bid}`);
+    return snapshot({
+      ...b, items: b.items.map((it) => {
+        const auto = autoExport.get(it.project);
+        const job = !auto?.job || auto.job === "pending" ? null : auto.job;
+        return { ...it, project: snapshot(project(it.project)), export: job, error: auto?.error ?? null };
+      }),
+    });
+  }
+
+  const api: MockEngine = {
+    async stories() { return [...stories.values()].sort((a, b) => b.updated.localeCompare(a.updated)).map(snapshot); },
+    async storyVoices() { return snapshot(VOICES); },
+    async createStory(title = "") {
+      const now = new Date().toISOString();
+      const st: Story = {
+        id: `s${String(Date.now() % 1e12).padStart(12, "0")}`, title: title.trim(), aspect: "9:16", voice: "en-US-AndrewNeural", captions: "pop",
+        music: null, music_volume: 0.15, scenes: [], created: now, updated: now, output: null, last_job: null,
+      };
+      stories.set(st.id, st);
+      keepStories();
+      return snapshot(st);
+    },
+    async getStory(sid) { return snapshot(story(sid)); },
+    async saveStory(sid, body) {
+      const next = cleanStory(story(sid), body);
+      stories.set(sid, next);
+      keepStories();
+      return snapshot(next);
+    },
+    async buildStory(sid, body) {
+      const st = story(sid);
+      if (!st.scenes.length) throw bad("add at least one photo or clip first");
+      // test trigger: a scene file name containing "missing" was moved or deleted
+      const gone = st.scenes.findIndex((sc) => /missing/i.test(sc.media));
+      if (gone >= 0) throw bad(`scene ${gone + 1}: ${fileName(st.scenes[gone].media)} was moved or deleted`);
+      const name = `${st.title.replace(/[<>:"/\\|?*]/g, "").trim() || "Story"}${st.aspect === "9:16" ? "" : ` (${st.aspect.replace(":", "x")})`}.mp4`;
+      const out = joinPath(body?.out_dir ?? "C:/Users/you/Videos/Vedit", name);
+      // test trigger: a title containing "offline" fails as a voice with no internet would
+      const failure = /offline/i.test(st.title)
+        ? { afterTicks: 3, error: "Couldn't reach the voice service. Check your internet connection and try again.", result: { files: [] } }
+        : undefined;
+      return run(newJob(sid, "story"), [["voices", 0.25], ["render", 0.75]], (j) => {
+        j.result = { files: [out] };
+        st.output = out;
+        keepStories();
+      }, failure);
+    },
+    async createBatch(body: BatchBody) {
+      if (!body.sources.length) throw new EngineError(422, "invalid_body", "pick at least one video");
+      if (new Set(body.sources).size !== body.sources.length) throw bad("the same video is in the batch twice");
+      if (body.export && !body.formats.length) throw bad("pick at least one format");
+      const bid = `b${String(++seq).padStart(12, "0")}`;
+      const items = [];
+      for (const source of body.sources) {
+        const p = await api.createProject({ source, language: body.language, platform: body.platform, type: body.type });
+        if (body.export) {
+          autoExport.set(p.id, { body: { formats: body.formats, quality: body.quality, out_dir: body.out_dir, srt: body.srt, thumbnail: body.thumbnail } });
+        }
+        const job = await api.analyze(p.id, { max_clips: body.max_clips });
+        items.push({ project: p.id, source, analyze: job.id });
+      }
+      batches.set(bid, { id: bid, created: new Date().toISOString(), type: body.type, export: body.export, items });
+      return batchView(bid);
+    },
+    async getBatch(bid) { return batchView(bid); },
     onJob(listener) {
       listeners.add(listener);
       for (const j of jobs.values()) if (j.state === "queued" || j.state === "running") listener(snapshot(j));
@@ -313,7 +463,14 @@ export function createMockEngine(opts: { tickMs?: number; persist?: Pick<Storage
     async recent() { return [...projects.values()].map(snapshot); },
     async createProject(body: NewProjectBody) {
       if (!body.source) throw new EngineError(400, "bad_request", `source video not found: ${body.source}`);
-      return snapshot(newProject(body.source, body.language, body.platform, false));
+      const type = body.type ?? "clip";
+      const allowed: Record<ProjectType, Project["platform"][]> = {
+        clip: ["reels", "shorts", "tiktok"], reel: ["reels", "shorts", "tiktok"], vlog: ["youtube"],
+      };
+      if (!allowed[type].includes(body.platform)) {
+        throw new EngineError(400, "bad_request", `unsupported platform for a ${type} project: ${body.platform}`);
+      }
+      return snapshot(newProject(body.source, body.language, body.platform, false, type));
     },
     async getProject(pid) { return snapshot(project(pid)); },
     async filmstrip(pid) {
@@ -323,7 +480,10 @@ export function createMockEngine(opts: { tickMs?: number; persist?: Pick<Storage
     },
     async analyze(pid, body?: AnalyzeBody) {
       const p = project(pid); // the AI key in the body is deliberately never read or stored
-      const stages: [string, number][] = [["proxy", 0.1], ["analyze", 0.6], ["highlights", 0.15], ["framing", 0.15]];
+      const whole = p.type !== "clip";
+      const stages: [string, number][] = whole
+        ? [["proxy", 0.15], ["analyze", 0.85]]
+        : [["proxy", 0.1], ["analyze", 0.6], ["highlights", 0.15], ["framing", 0.15]];
       // test trigger: a source file name containing "fail" makes the first analyze of that project fail halfway
       const failing = /fail/i.test(p.source) && !failedOnce.has(pid);
       if (failing) failedOnce.add(pid);
@@ -332,6 +492,12 @@ export function createMockEngine(opts: { tickMs?: number; persist?: Pick<Storage
         // test trigger: a source file name containing "silent" has no speech to find clips in
         if (!had && /silent/i.test(p.source)) {
           job.result = { clips: 0, new: 0, reason: "no_speech" };
+          return;
+        }
+        if (whole) {
+          if (!had) p.clips = [wholeClip(pid, p.type as "vlog" | "reel", p.source)];
+          p.settings = { workdir: "C:/mock/work", proxy: p.source, filmstrip: "C:/mock/work/filmstrip.json" };
+          job.result = { clips: 1, new: had ? 0 : 1, reason: null };
           return;
         }
         if (!had) {
@@ -444,6 +610,7 @@ export function createMockEngine(opts: { tickMs?: number; persist?: Pick<Storage
     async brand() { return { ...brand }; },
     async saveBrand(next) { brand = { ...next }; return { ...brand }; },
   };
+  return api;
 }
 
 const sessionStore = (): Storage | undefined => {

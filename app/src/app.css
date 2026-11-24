@@ -129,18 +129,35 @@ html.theme-fade, html.theme-fade * { transition: background-color .3s ease, bord
 .note-text { color: var(--body); font-size: 13px; margin-bottom: 8px; }
 
 /* Home */
-.recent { margin-top: 48px; }
-.recent h2 { font: 600 16px var(--sans); color: var(--ink); margin-bottom: 14px; }
-.recent-list { list-style: none; padding: 0; display: grid; grid-template-columns: repeat(auto-fill, 232px); gap: 24px 20px; }
+/* Recent projects: the same four columns and gaps as the tiles above, so the edges line up; pages of 12. */
+.recent { margin-top: 56px; padding-top: 28px; border-top: 1px solid var(--line); scroll-margin-top: 16px; }
+.recent-head { display: flex; align-items: center; justify-content: space-between; gap: 16px; flex-wrap: wrap; min-height: 34px; margin-bottom: 18px; }
+.recent h2 { display: flex; align-items: baseline; gap: 10px; font: 600 17px var(--sans); color: var(--ink); }
+.recent-count { font: 400 14px var(--pixel); font-synthesis: none; color: var(--muted); }
+.recent-list { list-style: none; padding: 0; display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 28px 20px; }
+.pager { display: flex; align-items: center; gap: 6px; }
+.pager-btn {
+  min-width: 32px; height: 32px; padding: 0 8px; display: grid; place-items: center; border-radius: var(--r-control);
+  border: 1px solid var(--line-2); background: transparent; color: var(--body); cursor: pointer;
+  font: 400 14px var(--pixel); font-synthesis: none; transition: color .15s, background-color .15s, border-color .15s;
+}
+.pager-btn svg { width: 16px; height: 16px; }
+.pager-btn:hover:not(:disabled) { color: var(--ink); border-color: color-mix(in srgb, var(--ink) 30%, var(--line-2)); }
+.pager-btn.on { background: var(--ink); border-color: var(--ink); color: var(--bg); cursor: default; }
+.pager-btn:disabled { opacity: .35; cursor: default; }
+.pager-btn:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+@media (max-width: 1180px) { .recent-list { grid-template-columns: repeat(3, minmax(0, 1fr)); } }
+@media (max-width: 760px) { .recent-list { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 20px 14px; } }
 .recent-item { display: flex; flex-direction: column; gap: 3px; min-width: 0; border-radius: 10px; }
 .r-thumb {
-  display: grid; place-items: center; width: 232px; height: 130px; margin-bottom: 8px; overflow: hidden;
+  display: grid; place-items: center; width: 100%; aspect-ratio: 16 / 9; margin-bottom: 8px; overflow: hidden;
   border-radius: var(--r-media); background: #000; outline: 1px solid var(--line); outline-offset: -1px;
 }
 .r-thumb .film-frame.none { width: 100% !important; height: 100% !important; background: var(--chip); }
 .recent-item:hover .r-thumb { outline-color: color-mix(in srgb, var(--accent) 60%, var(--line)); }
 .r-name { font-size: 13.5px; font-weight: 500; color: var(--ink); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.r-meta { display: flex; gap: 12px; font-size: 12px; color: var(--body); }
+.r-meta { display: flex; flex-wrap: wrap; gap: 0 12px; font-size: 12px; color: var(--body); }
+.r-meta > span { white-space: nowrap; }
 
 /* Import: the drop zone is a quiet stage with the app's waveform along its foot; the playhead runs while a file is
    dragged over. The options sit on one surface, and a short numbered line says what Start will do. */
@@ -391,6 +408,8 @@ html.theme-fade, html.theme-fade * { transition: background-color .3s ease, bord
   grid-template-columns: 268px minmax(0, 1fr) 380px; grid-template-rows: minmax(0, 1fr) auto; /* the timeline takes what its lanes need; the player gives way */
   grid-template-areas: "clips player insp" "clips tl tl";
 }
+/* a vlog or Quick Reel project is one clip: no clip list */
+.edit.whole { grid-template-columns: minmax(0, 1fr) 380px; grid-template-areas: "player insp" "tl tl"; }
 .ed-clips { grid-area: clips; border-right: 1px solid var(--line); display: flex; flex-direction: column; min-height: 0; min-width: 0; }
 .ed-player { grid-area: player; display: flex; flex-direction: column; gap: 8px; padding: 10px; min-width: 0; min-height: 0; }
 .ed-insp { grid-area: insp; border-left: 1px solid var(--line); display: flex; flex-direction: column; min-height: 0; min-width: 0; position: relative; }
@@ -552,6 +571,7 @@ html.theme-fade, html.theme-fade * { transition: background-color .3s ease, bord
     height: auto; grid-template-columns: minmax(0, 1fr); grid-template-rows: none;
     grid-template-areas: "player" "insp" "clips" "tl";
   }
+  .edit.whole { grid-template-columns: minmax(0, 1fr); grid-template-areas: "player" "insp" "tl"; }
   .ed-player .stage { flex: none; height: min(560px, 70vh); }
   .ed-insp { border-left: 0; border-top: 1px solid var(--line); }
   .ed-insp .ed-panel { flex: none; max-height: 440px; }
@@ -616,3 +636,6 @@ html.theme-fade, html.theme-fade * { transition: background-color .3s ease, bord
 
 /* the browser demo says so, so nobody mistakes its sample clip for their own video */
 .top .demo { flex: none; font-size: 11px; line-height: 1; padding: 4px 8px; border-radius: var(--r-chip); background: var(--chip-2); color: var(--ink); border: 1px solid var(--line-2); cursor: help; }
+.r-thumb.r-story { display: grid; place-items: center; background: var(--chip); }
+.r-thumb.r-story img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.r-thumb.r-story svg { width: 44px; height: 44px; color: var(--muted); }

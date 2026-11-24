@@ -12,10 +12,14 @@ export interface TopBarProps {
   step?: StepNumber;
   /** Where a completed Edit step leads (a highlight id). */
   editHid?: string;
+  /** A vlog or Quick Reel project (no Pick clips step). */
+  whole?: boolean;
   primary?: { label: string; count?: number; onClick(): void; disabled?: boolean };
+  /** False on screens outside the clip workflow (stories, batches): no Import → Export steps. */
+  steps?: boolean;
 }
 
-export default function TopBar({ fileName, saved, step, editHid, primary }: TopBarProps) {
+export default function TopBar({ fileName, saved, step, editHid, whole, primary, steps = true }: TopBarProps) {
   return (
     <header className="pane top">
       <div className="brand">
@@ -27,7 +31,7 @@ export default function TopBar({ fileName, saved, step, editHid, primary }: TopB
         {fileName && <span className="proj" title={fileName}>{fileName}</span>}
         {saved && <span className="saved">{t("topbar.saved")}</span>}
       </div>
-      <Steps current={step} editHid={editHid} />
+      {steps ? <Steps current={step} editHid={editHid} whole={whole} /> : <span className="steps-gap" aria-hidden="true" />}
       <div className="actions">
         <ThemeToggle />
         <AppMenu />

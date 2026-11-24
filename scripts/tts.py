@@ -34,7 +34,7 @@ import urllib.request
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent))
-from common import die, ffmpeg_bin, ffprobe, run  
+from common import die, ffmpeg_bin, ffprobe, run
 
 
 def _has(mod: str) -> bool:

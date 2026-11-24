@@ -3,7 +3,10 @@
 //! The bearer token goes only through env VEDIT_ENGINE_TOKEN (argv is readable by other processes). On Windows the
 //! engine is put in a Job Object with KILL_ON_JOB_CLOSE held for the app's lifetime, so even a crash or a forced kill
 //! of the app takes the engine and everything under it down. In debug builds, VEDIT_DEV_ENGINE=1 runs
-//! scripts/engine_entry.py from the repo with the system Python instead of the bundled sidecar.
+//! scripts/engine_entry.py from the repo with the system Python instead of the bundled engine.
+//!
+//! Release builds ship the engine as a folder (PyInstaller one-dir, packaging/build_engine.py) at
+//! `<resources>/engine/vedit-engine.exe`, and FFmpeg at `<resources>/bin/`.
 
 use std::collections::VecDeque;
 use std::path::{Path, PathBuf};
@@ -22,6 +25,8 @@ pub const START_FAILED: &str = "engine_start_failed";
 const READY_TIMEOUT: Duration = Duration::from_secs(30);
 const STDERR_TAIL_LINES: usize = 20;
 const ENGINE_SCRIPT: &str = "scripts/engine_entry.py";
+/// The bundled engine, relative to the app's resource folder.
+pub const ENGINE_EXE: &str = if cfg!(windows) { "engine/vedit-engine.exe" } else { "engine/vedit-engine" };
 
 #[derive(Clone, Serialize)]
 pub struct EngineInfo {
@@ -36,7 +41,7 @@ impl std::fmt::Debug for EngineInfo {
     }
 }
 
-/// Arguments after the executable (sidecar) or after the script path (dev). No secrets here.
+/// Arguments after the executable (bundled engine) or after the script path (dev). No secrets here.
 pub fn engine_args() -> Vec<String> {
     ["serve", "--port", "0"].map(String::from).to_vec()
 }
@@ -142,7 +147,8 @@ impl Engine {
 
     async fn start(&self, app: &AppHandle) -> Result<Started, ()> {
         let token = new_token().map_err(|e| eprintln!("[vedit] engine token: {e}"))?;
-        let ffmpeg_dir = app.path().resource_dir().ok().map(|d| d.join("bin")).filter(|d| d.is_dir());
+        let resources = app.path().resource_dir().ok();
+        let ffmpeg_dir = resources.as_ref().map(|d| d.join("bin")).filter(|d| d.is_dir());
 
         let command = if dev_engine_enabled() {
             let root = dev_repo_root().ok_or_else(|| eprintln!("[vedit] VEDIT_DEV_ENGINE=1 but {ENGINE_SCRIPT} not found"))?;
@@ -153,10 +159,12 @@ impl Engine {
                 .args(engine_args())
                 .current_dir(root)
         } else {
-            app.shell()
-                .sidecar("vedit-engine")
-                .map_err(|e| eprintln!("[vedit] engine sidecar: {e}"))?
-                .args(engine_args())
+            let exe = resources
+                .map(|d| d.join(ENGINE_EXE))
+                .filter(|p| p.is_file())
+                .ok_or_else(|| eprintln!("[vedit] bundled engine {ENGINE_EXE} not found in the app's folder"))?;
+            let dir = exe.parent().map(Path::to_path_buf).unwrap_or_default();
+            app.shell().command(exe).args(engine_args()).current_dir(dir)
         };
         let (rx, child) = command
             .envs(engine_env(&token, ffmpeg_dir))
