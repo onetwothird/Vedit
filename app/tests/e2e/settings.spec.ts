@@ -87,6 +87,19 @@ test("the brand kit saves and comes back", async ({ page }) => {
   await expect(page.getByText("Brand kit saved.")).toBeVisible();
 });
 
+test("the caption preview shows each caption style", async ({ page }) => {
+  await page.goto("/#/settings");
+  const preview = page.locator(".cap-preview");
+  await expect(preview).toHaveAttribute("data-style", "pop");
+  for (const name of ["Box", "Clean", "Karaoke", "Emoji"]) {
+    await preview.getByRole("radio", { name }).check();
+    await expect(preview).toHaveAttribute("data-style", name.toLowerCase());
+  }
+  await expect(preview.locator(".cap-emoji")).toHaveText(/🔥/);
+  await preview.getByRole("radio", { name: "Karaoke" }).check();
+  await expect(preview.locator(".cap-fill")).toHaveText("galing");
+});
+
 test("updates show the version and wait for the installed app", async ({ page }) => {
   await page.goto("/#/settings");
   await expect(page.getByText(/^Version \d+\.\d+\.\d+/)).toBeVisible();

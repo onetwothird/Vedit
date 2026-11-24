@@ -149,6 +149,8 @@ export interface CaptionWord {
   hl_start: number;
   hl_end: number;
   speaker: string | null;
+  /** Emoji caption style: the emoji drawn after this word (it is one of the engine's keywords). */
+  emoji?: string;
 }
 
 export interface CaptionEvent {

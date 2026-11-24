@@ -122,6 +122,11 @@ function applyOp(edl: Edl, op: ClipOp): Edl {
 
 const SAMPLE_SEC = 12; // public/mock/sample.mp4 is this long; every mock clip plays from its start
 
+/** A few of scripts/captions.py EMOJI keywords: enough for the mock passage and the tests. */
+const MOCK_EMOJI: Record<string, string> = {
+  hello: "👋", thanks: "🙏", salamat: "🙏", galing: "🔥", first: "1️⃣", nobody: "🙅", love: "❤️", money: "💰", watching: "👀",
+};
+
 /** The caption look and grouping the edl asks for, as scripts/captions.py _plan reads edl.captions. */
 function captionTrack(edl: Edl, spoken: { text: string; start: number; end: number; speaker: string | null }[]): CaptionTrack {
   const cfg: Record<string, unknown> = { style: "pop", hide_fillers: true, ...((edl.captions ?? {}) as Record<string, unknown>) };
@@ -139,9 +144,12 @@ function captionTrack(edl: Edl, spoken: { text: string; start: number; end: numb
     const end = g[g.length - 1].end + 0.15;
     events.push({
       start: g[0].start, end,
-      words: g.map((w, k) => ({
-        ...w, hl_start: k === 0 ? g[0].start : w.start, hl_end: k + 1 < g.length ? g[k + 1].start : end,
-      })),
+      words: g.map((w, k) => {
+        const emoji = style === "emoji" ? MOCK_EMOJI[w.text.toLowerCase().replace(/[^\p{L}\p{N}']/gu, "")] : undefined;
+        return {
+          ...w, hl_start: k === 0 ? g[0].start : w.start, hl_end: k + 1 < g.length ? g[k + 1].start : end, ...(emoji ? { emoji } : {}),
+        };
+      }),
     });
   }
   return {

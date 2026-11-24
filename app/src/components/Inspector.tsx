@@ -155,7 +155,7 @@ function Captions({ edl, onPatch }: Pick<InspectorProps, "edl" | "onPatch">) {
       <p className="hint">{t("edit.cap.hint")}</p>
       <Choice
         label={t("edit.cap.style")} name="cap-style" value={style}
-        options={["pop", "box", "clean"].map((s) => ({ value: s, label: t(`edit.cap.style.${s}`) }))}
+        options={["pop", "box", "clean", "karaoke", "emoji"].map((s) => ({ value: s, label: t(`edit.cap.style.${s}`) }))}
         onChange={(v) => patch({ style: v })}
       />
       <Choice

@@ -10,7 +10,8 @@ function rgba(hex: string, alpha: number): string {
 
 /**
  * The caption group on screen at track time `outT` (the caller has already added the intro's lead-in), drawn the way the
- * export burns it in: the active word in the highlight colour, scaled by active_scale; sizes are fractions of the
+ * export burns it in: the active word in the highlight colour, scaled by active_scale (karaoke: every word fills left to
+ * right with the highlight while it is spoken; emoji: pop with the word's emoji after it); sizes are fractions of the
  * frame height so it matches at any preview size.
  */
 export default function CaptionOverlay({ track, outT, frameHeight }: { track: CaptionTrack; outT: number; frameHeight: number }) {
@@ -20,6 +21,7 @@ export default function CaptionOverlay({ track, outT, frameHeight }: { track: Ca
   const H = frameHeight;
   const box = track.style === "box";
   const clean = track.style === "clean";
+  const karaoke = track.style === "karaoke";
   const outline = Math.round(track.outline_frac * H * 100) / 100;
   const shadow = Math.round(track.shadow * (H / 1080) * 100) / 100;
 
@@ -42,15 +44,26 @@ export default function CaptionOverlay({ track, outT, frameHeight }: { track: Ca
 
   const words = event.words.map((w, i) => {
     const active = !clean && i === activeWord;
-    const style: CSSProperties = { color: active ? track.speaker_colors[w.speaker ?? ""] ?? track.highlight : groupColor };
-    if (active) {
+    const hl = track.speaker_colors[w.speaker ?? ""] ?? track.highlight;
+    let style: CSSProperties = { color: active ? hl : groupColor };
+    let fill: number | undefined;
+    if (karaoke) {
+      // the export's \kf: the highlight sweeps across the word between its start and end
+      const span = Math.max(0.01, Math.min(w.end, event.end) - w.start);
+      fill = Math.round(Math.min(1, Math.max(0, (outT - w.start) / span)) * 1000) / 10;
+      style = {
+        color: "transparent", WebkitBackgroundClip: "text", backgroundClip: "text",
+        backgroundImage: `linear-gradient(90deg, ${hl} ${fill}%, ${track.color} ${fill}%)`,
+      };
+    } else if (active) {
       style.display = "inline-block";
       if (track.active_scale !== 100) style.transform = `scale(${track.active_scale / 100})`;
     }
     return (
       <span key={i}>
         {i > 0 && " "}
-        <span data-word="" data-active={active ? "true" : undefined} style={style}>{w.text}</span>
+        <span data-word="" data-active={active ? "true" : undefined} data-fill={fill} style={style}>{w.text}</span>
+        {w.emoji && <span data-emoji="" style={{ color: groupColor }}>{" "}{w.emoji}</span>}
       </span>
     );
   });

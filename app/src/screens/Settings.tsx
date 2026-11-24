@@ -492,20 +492,44 @@ function inkOn(hex: string): string {
   return 0.299 * r + 0.587 * g + 0.114 * b > 150 ? "#111" : "#fff";
 }
 
-/** What the brand kit does: a 9:16 frame with a sample caption in the chosen font and colours, one word highlighted. */
+const CAPTION_STYLES = ["pop", "box", "clean", "karaoke", "emoji"] as const;
+type CaptionStyle = (typeof CAPTION_STYLES)[number];
+
+/**
+ * What the brand kit does: a 9:16 frame with a sample caption in the chosen font and colours, drawn in each caption style
+ * the editor offers (the style itself is picked per clip, so this choice only changes the preview).
+ */
 function CaptionPreview({ brand }: { brand: Brand }) {
+  const [style, setStyle] = useState<CaptionStyle>("pop");
   const font = brand.font.replace(/["\\;{}]/g, "").trim();
   const color = brand.caption_color || "#ffffff";
   const hl = brand.highlight || "#ffffff";
+  const word = t("settings.brand.sample.word");
+  let spoken: ReactNode;
+  if (style === "clean") spoken = word;
+  else if (style === "karaoke") {
+    // "Ang" is said, "galing" is half way through filling, the rest waits
+    spoken = <span className="cap-fill" style={{ backgroundImage: `linear-gradient(90deg, ${hl} 55%, ${color} 55%)` }}>{word}</span>;
+  } else if (style === "box") spoken = <span style={{ color: hl }}>{word}</span>;
+  else spoken = <span className="cap-hl" style={{ background: hl, color: inkOn(hl) }}>{word}</span>;
   return (
-    <figure className="cap-preview">
+    <figure className="cap-preview" data-style={style}>
       <div className="cap-frame" aria-hidden="true">
         <img src={poster} alt="" loading="lazy" decoding="async" />
         <p className="cap-line" style={{ color, fontFamily: font ? `"${font}", var(--sans)` : undefined }}>
-          {t("settings.brand.sample.before")}{" "}
-          <span className="cap-hl" style={{ background: hl, color: inkOn(hl) }}>{t("settings.brand.sample.word")}</span>{" "}
-          {t("settings.brand.sample.after")}
+          <span className="cap-text">
+            {style === "karaoke" ? <span style={{ color: hl }}>{t("settings.brand.sample.before")}</span> : t("settings.brand.sample.before")}{" "}
+            {spoken}
+            {style === "emoji" && <span className="cap-emoji"> 🔥</span>}{" "}
+            {t("settings.brand.sample.after")}
+          </span>
         </p>
+      </div>
+      <div className="cap-styles">
+        <Seg<CaptionStyle>
+          legend={t("settings.brand.style")} name="cap-preview-style" value={style} onChange={setStyle}
+          options={CAPTION_STYLES.map((s) => ({ value: s, label: t(`edit.cap.style.${s}`) }))}
+        />
       </div>
       <figcaption>{t("settings.brand.preview")}</figcaption>
     </figure>

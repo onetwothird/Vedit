@@ -4,7 +4,7 @@ It's a STARTING POINT — Claude should then read the transcript and refine the 
 
   python autocut.py WORKDIR [--preset youtube|shorts|tiktok|reels|square|podcast|tutorial|clean] [--brand brand.json]
                     [--src main] [--max-gap 0.45] [--keep-fillers] [--keep-retakes]
-                    [--punchin 1.12] [--aspect 16:9|9:16|1:1|4:5] [--captions pop|box|clean|off]
+                    [--punchin 1.12] [--aspect 16:9|9:16|1:1|4:5] [--captions pop|box|clean|karaoke|emoji|off]
                     [--mode words|silence] [--out edl.json]
 
 --mode words   (default when a transcript exists) cut on word timing: tightest, best for talking.
@@ -130,7 +130,7 @@ def main():
     ap.add_argument("--min-clip", type=float, default=0.6)
     ap.add_argument("--punchin", type=float, help="alternate zoom on jump cuts, e.g. 1.12")
     ap.add_argument("--aspect", default=None, help="16:9 | 9:16 | 1:1 | 4:5 (default: same as source)")
-    ap.add_argument("--captions", default=None, help="pop | box | clean | off")
+    ap.add_argument("--captions", default=None, help="pop | box | clean | karaoke | emoji | off")
     ap.add_argument("--out", default=None)
     a = ap.parse_args()
 

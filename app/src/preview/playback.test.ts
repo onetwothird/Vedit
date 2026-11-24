@@ -156,6 +156,36 @@ describe("caption overlay", () => {
     expect(b.getAttribute("style")).toContain("rgba(0, 0, 0, 0.4392)");
   });
 
+  it("karaoke shows the whole group and fills each word with the highlight while it is spoken", () => {
+    const e = FIXTURE.events[0];
+    const track: CaptionTrack = { ...FIXTURE, style: "karaoke", events: [e] };
+    const [w0, w1] = e.words;
+    const at = (outT: number) => {
+      const html = renderToStaticMarkup(createElement(CaptionOverlay, { track, outT, frameHeight: 1000 }));
+      return [...new DOMParser().parseFromString(html, "text/html").querySelectorAll<HTMLElement>("[data-word]")];
+    };
+    const mid = at((w0.start + w0.end) / 2);
+    expect(mid.map((w) => w.textContent)).toEqual(e.words.map((w) => w.text));
+    expect(Number(mid[0].dataset.fill)).toBeGreaterThan(40);
+    expect(Number(mid[0].dataset.fill)).toBeLessThan(60);
+    expect(mid[0].getAttribute("style")).toContain("#FFD400 50%"); // FIXTURE highlight, half way
+    expect(mid[1].dataset.fill).toBe("0");
+    expect(mid[0].style.transform).toBe(""); // no pop
+    expect(at(w1.start + 0.001)[0].dataset.fill).toBe("100");
+  });
+
+  it("emoji draws the word's emoji after it, outside the highlight", () => {
+    const e = FIXTURE.events[0];
+    const words = e.words.map((w, i) => (i === 0 ? { ...w, emoji: "👋" } : w));
+    const el = renderOverlay({ ...FIXTURE, style: "emoji", events: [{ ...e, words }] }, 1000).el;
+    const emoji = el.querySelectorAll<HTMLElement>("[data-emoji]");
+    expect(emoji).toHaveLength(1);
+    expect(emoji[0].textContent).toBe(" 👋");
+    expect(emoji[0].previousElementSibling!.textContent).toBe(e.words[0].text);
+    expect(el.querySelector("[data-active=true]")!.textContent).toBe(e.words[0].text); // still pop
+    expect(renderOverlay(FIXTURE, 1000).el.querySelector("[data-emoji]")).toBeNull();
+  });
+
   it("draws nothing when no group is on screen", () => {
     const html = renderToStaticMarkup(createElement(CaptionOverlay, { track: FIXTURE, outT: -1, frameHeight: 500 }));
     expect(html).toBe("");
