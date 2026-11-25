@@ -163,6 +163,7 @@ def charge(engine, cloud, job_id: str, seconds: float) -> None:
         raise StarletteHTTPException(503, BUSY_COPY) from None
     with engine._meta_lock:
         engine.charged.add(job_id)
+        engine.charged_seconds[job_id] = float(seconds)  # written in the job's file at submit (restart refunds)
 
 
 def refund_charged(engine, cloud, job_id: str) -> None:
@@ -171,6 +172,7 @@ def refund_charged(engine, cloud, job_id: str) -> None:
         if job_id not in engine.charged:
             return
         engine.charged.discard(job_id)
+        engine.charged_seconds.pop(job_id, None)
     refund(cloud, job_id)
 
 

@@ -368,8 +368,9 @@ def start_batch(engine, cloud, body) -> str:
                     save_project(p)
                     pids.append(p.id)
                     items.append({"project": p.id, "source": pending["name"], "analyze": None})
+                # `running` (and nothing of the AI options) is written: a restart ends what it cannot continue
                 _atomic_write_json(h.batch_path(bid), {"id": bid, "created": stories._now(), "type": body.type,
-                                                       "export": body.export, "items": items})
+                                                       "export": body.export, "items": items, "running": True})
                 run = {"home": _home(), "bid": bid, "items": pids, "next": 0, "current": None,
                        "analyze": h.AnalyzeBody(ai=body.ai, max_clips=body.max_clips), "export": body.export}
                 with cp._runs_lock:
@@ -390,8 +391,7 @@ def start_batch(engine, cloud, body) -> str:
     try:
         _advance(engine, cloud, run)
     except BaseException:  # never leave a registered batch holding the user's slot
-        with cp._runs_lock:
-            engine.batch_runs.pop(bid, None)
+        _end_run(engine, run)
         raise
     return bid
 
@@ -430,8 +430,39 @@ def _advance(engine, cloud, run: dict) -> None:
             continue
         _record_item(run, pid, analyze=job_id)
         return
+    _end_run(engine, run)
+
+
+def _end_run(engine, run: dict) -> None:
+    """The batch no longer runs: its slot is free and its file says so (a restart then has nothing to end)."""
     with cp._runs_lock:
         engine.batch_runs.pop(run["bid"], None)
+    try:
+        _write_batch(Path(run["home"]) / "batches" / f"{run['bid']}.json", lambda d: d.update(running=False))
+    except (OSError, ValueError) as e:
+        print(f"vedit: could not update batch {run['bid']}: {e}", file=sys.stderr)
+
+
+INTERRUPTED_ITEMS = "Interrupted — start them again"
+
+
+def recover_batches(users_root: Path) -> None:
+    """After an API restart: a batch whose file says it was running has lost its runner (in memory, with the
+    visitor's AI key, which is never written down). It ends: the items it never started are marked interrupted and
+    were never charged; the item it was running finishes or fails as its own job."""
+    for path in sorted(Path(users_root).glob("*/batches/*.json")):
+        def end(data: dict) -> None:
+            if data.get("running") is not True:
+                return
+            data["running"] = False
+            for it in data.get("items", []):
+                if isinstance(it, dict) and not it.get("analyze") and not it.get("error"):
+                    it["error"] = INTERRUPTED_ITEMS
+        try:
+            if load_json(path).get("running") is True:
+                _write_batch(path, end)
+        except (OSError, ValueError, AttributeError) as e:
+            print(f"vedit: could not recover batch {path.name}: {e}", file=sys.stderr)
 
 
 def _start_item_export(engine, cloud, run: dict, pid: str) -> bool:
@@ -482,8 +513,7 @@ def after_job(engine, job) -> None:
         _advance(engine, cloud, run)
     except Exception as e:  # noqa: BLE001 - never leave a batch holding its slot
         print(f"vedit: batch {run['bid']} stopped: {e}", file=sys.stderr)
-        with cp._runs_lock:
-            engine.batch_runs.pop(run["bid"], None)
+        _end_run(engine, run)
 
 
 # ---- "Download all" zips ---------------------------------------------------------------------------------------

@@ -234,6 +234,16 @@ def _project_dict(p: Project) -> dict:
     return project_doc(p)
 
 
+DOCTOR_UID = "00000000-0000-0000-0000-000000000000"  # nobody: /doctor reads its minutes to reach the usage table
+
+
+def _check(fn) -> bool:
+    try:
+        return bool(fn())
+    except Exception:  # noqa: BLE001
+        return False
+
+
 def _job_dict(j: Job) -> dict:
     return dataclasses.asdict(j)
 
@@ -375,18 +385,44 @@ class Engine:
         # cloud only (see cloud_projects / cloud_outputs): job ids this process charged (only those are refunded),
         # the files a job published to R2, the batches running now, the server functions the cloud code calls
         self.charged: set[str] = set()
+        self.charged_seconds: dict[str, float] = {}  # charged, not yet submitted: then it goes in the job's file
         self.published: dict[str, list[dict]] = {}
         self.batch_runs: dict[str, dict] = {}
         self.cloud_hooks = None
         self._recover_interrupted()
         if job_queue is not None:
             self.queue = job_queue
-        elif cloud is not None and cloud.runner_factory is not None:
-            self.queue = JobQueue(self.on_event, max_parallel=CLOUD_PARALLEL_JOBS, runner=cloud.runner_factory())
+        elif cloud is not None and cloud.runner_factory is not None:  # cloud: jobs are also written to their files
+            self.queue = JobQueue(self.on_event, max_parallel=CLOUD_PARALLEL_JOBS, runner=cloud.runner_factory(),
+                                  persist=True)
+        elif cloud is not None:
+            self.queue = JobQueue(self.on_event, persist=True)
         else:
             self.queue = JobQueue(self.on_event)
         self._dispatcher = threading.Thread(target=self._dispatch, name="vedit-dispatch", daemon=True)
         self._dispatcher.start()
+        if cloud is not None:
+            self._recover_cloud()
+
+    def _recover_cloud(self) -> None:
+        """After an API restart: batches that were running end, and the jobs the last container left unfinished
+        are followed again or failed (refunded when they were charged; their charge is in their file)."""
+        import cloud_outputs
+
+        users = self.cloud.data_root / "users"
+        try:
+            cloud_outputs.recover_batches(users)
+        except Exception as e:  # noqa: BLE001 - a bad batch file must never stop the engine
+            print(f"vedit: could not recover batches: {e}", file=sys.stderr)
+        recover = getattr(self.queue, "recover", None)
+        if not callable(recover):
+            return
+        for row in recover(users):
+            seconds = row["meta"].get("charged_seconds")
+            if isinstance(seconds, (int, float)):
+                with self._meta_lock:
+                    self.charged.add(row["id"])
+        self.queue.start_recovered()
 
     # -- lifecycle --
     def close(self) -> None:
@@ -446,7 +482,9 @@ class Engine:
     def submit(self, project_id: str, kind: str, steps: list, renders: list[dict] | None = None,
                job_id: str | None = None) -> Job:
         with self._meta_lock:  # held so no event of this job is processed before its plan is registered
-            extra = {'job_id': job_id} if job_id else {}
+            extra: dict = {'job_id': job_id} if job_id else {}
+            if job_id in self.charged_seconds:  # cloud: written in the job's file with it
+                extra["meta"] = {"charged_seconds": self.charged_seconds.pop(job_id)}
             job = self.queue.submit(project_id, kind, steps, **extra)
             # visible to active_jobs() at once: the dispatcher only learns of the job later, and the cloud per-user
             # checks must not miss a job submitted a moment ago (the dispatcher's later snapshots replace this one)
@@ -555,6 +593,10 @@ class Engine:
                 save_project(p)
             elif raw.kind == "story":
                 self._record_story_job(job)
+            if finished_now and self.cloud is not None:  # last: its file answers with the result after a restart,
+                finalize = getattr(self.queue, "finalize", None)  # and a restart before this replays the end
+                if callable(finalize):
+                    finalize(job.id, _job_dict(job))
         self._broadcast(_event(job), job.id)
         if finished_now and self.cloud is not None:  # outside the project lock: it may submit a batch's next job
             import cloud_outputs
@@ -1041,6 +1083,10 @@ def create_app(token: str | None, queue: JobQueue | None = None, cloud=None) -> 
 
     @app.get("/doctor")
     def doctor():
+        if cloud is not None:  # each a cheap reachability check; any error is False
+            return {"cloud": True, "gpu_function": _check(lambda: getattr(engine.queue._runner, "ping")()),
+                    "storage": _check(lambda: [cloud.storage.size("health/doctor")]),  # None (absent) is fine
+                    "usage": _check(lambda: cloud.usage.remaining(DOCTOR_UID) is not None)}
         ffmpeg, libass = _ffmpeg_status()
         return {"ffmpeg": ffmpeg, "libass": libass, "models": models.status(), "gpu": accel.gpu_ready()}
 
