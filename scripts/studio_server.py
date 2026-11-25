@@ -43,7 +43,7 @@ from edl_ops import clip_edl, cut_words, fix_word, kept_ranges, patch_section, r
 from highlights_llm import HID_RE  # noqa: E402
 from studio_jobs import Job, JobQueue  # noqa: E402
 import studio_stories as stories  # noqa: E402
-from studio_projects import (LANG_MODEL, Project, ProjectClip, _atomic_write_json, _home,  # noqa: E402
+from studio_projects import (LANG_MODEL, use_home, Project, ProjectClip, _atomic_write_json, _home, USER_HOME,  # noqa: E402
                              create_project, list_recent, load_project, output_dir, output_name, save_project)
 
 ALLOWED_ORIGINS = ("tauri://localhost", "http://tauri.localhost", "http://localhost:5173")
@@ -140,6 +140,8 @@ class BrandBody(BaseModel):
 
 def brand_file() -> Path:
     """Where the app's brand kit lives: %LOCALAPPDATA%\vedit\brand.json, else ~/.vedit/brand.json (VEDIT_HOME wins)."""
+    if USER_HOME.get() is not None:
+        return _home() / "brand.json"
     home = os.environ.get("VEDIT_HOME")
     if home:
         return Path(home) / "brand.json"
@@ -327,8 +329,9 @@ class Engine:
     every snapshot, so GET /jobs, cancel, last_job and the WebSocket always agree.
     """
 
-    def __init__(self, token: str, job_queue=None):
+    def __init__(self, token: str, job_queue=None, scoped: bool = False):
         self.token = token
+        self.scoped = scoped  # cloud: jobs and their events belong to the user (home) that submitted them
         self._events: queue.Queue[Optional[Job]] = queue.Queue()
         self._locks: dict[str, threading.Lock] = {}
         self._locks_guard = threading.Lock()
@@ -337,7 +340,7 @@ class Engine:
         self._overlay: dict[str, dict] = {}
         self._finalized: set[str] = set()
         self._jobs: dict[str, Job] = {}
-        self._clients: set[tuple[asyncio.AbstractEventLoop, asyncio.Queue]] = set()
+        self._clients: dict[tuple[asyncio.AbstractEventLoop, asyncio.Queue], Path | None] = {}
         self._clients_lock = threading.Lock()
         self._closed = False
         self._recover_interrupted()
@@ -408,17 +411,24 @@ class Engine:
                 self._overlay[job.id] = {"result": {"renders": _public_renders(renders), "files": []}}
             return self._overlaid(job)
 
+    def _owner(self, job_id: str) -> Path | None:
+        return self.queue.owner(job_id)
+
     def job_snapshot(self, job_id: str) -> Job:
         try:
             job = self.queue.get(job_id)
+            if self.scoped and self._owner(job_id) != USER_HOME.get():
+                raise KeyError(job_id)
         except KeyError:
             raise NotFound(f"job {job_id}") from None
         with self._meta_lock:
             return self._overlaid(job)
 
     def active_jobs(self) -> list[Job]:
+        mine = USER_HOME.get()
         with self._meta_lock:
-            return [dataclasses.replace(j) for j in self._jobs.values() if j.state not in TERMINAL]
+            return [dataclasses.replace(j) for j in self._jobs.values()
+                    if j.state not in TERMINAL and (not self.scoped or self._owner(j.id) == mine)]
 
     def _dispatch(self) -> None:
         while True:
@@ -436,11 +446,16 @@ class Engine:
                         continue
                     try:
                         if last[j.id] == k:  # newest snapshot of this job: post-process + persist, then send
-                            self._handle(j)
+                            owner = self._owner(j.id) if self.scoped else None
+                            if owner is not None:  # the dispatcher thread works as the job's owner
+                                with use_home(owner):
+                                    self._handle(j)
+                            else:
+                                self._handle(j)
                         else:  # superseded within the burst: still sent, never written to disk
                             with self._meta_lock:
                                 j = self._overlaid(j)
-                            self._broadcast(_event(j))
+                            self._broadcast(_event(j), j.id)
                     except Exception as e:  # noqa: BLE001 - the dispatcher must survive anything
                         print(f"vedit: event handling failed for job {j.id}: {e}", file=sys.stderr)
             finally:
@@ -477,7 +492,7 @@ class Engine:
                 save_project(p)
             elif raw.kind == "story":
                 self._record_story_job(job)
-        self._broadcast(_event(job))
+        self._broadcast(_event(job), job.id)
 
     def _auto_export(self, p: Project, auto: dict) -> None:
         """A batch video: export its kept clips right after analysis. A failure is kept on the project."""
@@ -624,15 +639,17 @@ class Engine:
     # -- websocket fan-out --
     def add_client(self, client: tuple[asyncio.AbstractEventLoop, asyncio.Queue]) -> None:
         with self._clients_lock:
-            self._clients.add(client)
+            self._clients[client] = USER_HOME.get()
 
     def remove_client(self, client) -> None:
         with self._clients_lock:
-            self._clients.discard(client)
+            self._clients.pop(client, None)
 
-    def _broadcast(self, msg: dict) -> None:
+    def _broadcast(self, msg: dict, job_id: str | None = None) -> None:
+        """Send to every client; when scoped, a job's events go only to the clients of its owner."""
+        owner = self._owner(job_id) if self.scoped and job_id is not None else None
         with self._clients_lock:
-            clients = list(self._clients)
+            clients = [c for c, home in self._clients.items() if not self.scoped or job_id is None or home == owner]
         for loop, q in clients:
             try:
                 loop.call_soon_threadsafe(_offer, q, msg)
@@ -811,10 +828,18 @@ def _ffmpeg_status() -> tuple[bool, bool]:
 
 # ---- app ------------------------------------------------------------------------------------------------------
 
-def create_app(token: str, queue: JobQueue | None = None) -> FastAPI:
-    if not isinstance(token, str) or not token.strip():
+def create_app(token: str | None, queue: JobQueue | None = None, cloud=None) -> FastAPI:
+    """Desktop: one bearer token. Cloud (a cloud_config.CloudConfig): per-user Supabase JWTs, the token is ignored."""
+    if cloud is None and (not isinstance(token, str) or not token.strip()):
         raise ValueError("the engine needs a non-empty bearer token")
-    engine = Engine(token, queue)
+    token = token if isinstance(token, str) else ""
+    engine = Engine(token, queue, scoped=cloud is not None)
+    allowed_origins = tuple(cloud.origins) if cloud is not None else ALLOWED_ORIGINS
+
+    def user_home(jwt_token: str | None) -> Path:
+        import cloud_auth  # lazy: needs the cloud extra
+
+        return cloud.data_root / "users" / cloud_auth.user_id(jwt_token or "", cloud)
 
     @asynccontextmanager
     async def lifespan(_app: FastAPI):
@@ -825,7 +850,7 @@ def create_app(token: str, queue: JobQueue | None = None) -> FastAPI:
     app.state.engine = engine
 
     def origin_ok(origin: str | None) -> bool:
-        return origin is None or origin in ALLOWED_ORIGINS
+        return origin is None or origin in allowed_origins
 
     def token_ok(given: str | None) -> bool:
         return given is not None and hmac.compare_digest(given.encode("utf-8"), token.encode("utf-8"))
@@ -837,12 +862,22 @@ def create_app(token: str, queue: JobQueue | None = None) -> FastAPI:
         auth = request.headers.get("authorization") or ""
         if request.method in ("GET", "HEAD") and MEDIA_ROUTE.match(request.url.path) and not auth:
             auth = "Bearer " + (request.query_params.get("token") or "")
-        if not (auth.startswith("Bearer ") and token_ok(auth[len("Bearer "):])):
+        given = auth[len("Bearer "):] if auth.startswith("Bearer ") else None
+        if cloud is not None:
+            if request.url.path == "/health":
+                return await call_next(request)
+            try:
+                home = await asyncio.to_thread(user_home, given)
+            except PermissionError:
+                return _error(401, "unauthorized", "missing or wrong token")
+            with use_home(home):  # call_next's endpoint task copies this context
+                return await call_next(request)
+        if not token_ok(given):
             return _error(401, "unauthorized", "missing or wrong token")
         return await call_next(request)
 
     # added after guard, so it wraps it: preflights are answered here and errors still carry CORS headers
-    app.add_middleware(CORSMiddleware, allow_origins=list(ALLOWED_ORIGINS), allow_methods=["*"],
+    app.add_middleware(CORSMiddleware, allow_origins=list(allowed_origins), allow_methods=["*"],
                        allow_headers=["*"])
 
     @app.exception_handler(NotFound)
@@ -1179,16 +1214,32 @@ def create_app(token: str, queue: JobQueue | None = None) -> FastAPI:
     @app.post("/jobs/{job_id}/cancel")
     def cancel(job_id: str):
         try:
+            engine.job_snapshot(job_id)  # another user's job is not found either
             engine.queue.cancel(job_id)
-        except KeyError:
+        except (KeyError, NotFound):
             raise NotFound(f"job {job_id}") from None
         return _job_dict(engine.job_snapshot(job_id))
 
     @app.websocket("/events")
     async def events(ws: WebSocket):
-        if not origin_ok(ws.headers.get("origin")) or not token_ok(ws.query_params.get("token")):
+        if not origin_ok(ws.headers.get("origin")):
             await ws.close(code=1008)
             return
+        if cloud is not None:
+            try:
+                home = await asyncio.to_thread(user_home, ws.query_params.get("token"))
+            except PermissionError:
+                await ws.close(code=1008)
+                return
+            with use_home(home):
+                await _serve_events(ws)
+            return
+        if not token_ok(ws.query_params.get("token")):
+            await ws.close(code=1008)
+            return
+        await _serve_events(ws)
+
+    async def _serve_events(ws: WebSocket):
         await ws.accept()
         q: asyncio.Queue = asyncio.Queue(maxsize=WS_QUEUE_MAX)
         client = (asyncio.get_running_loop(), q)

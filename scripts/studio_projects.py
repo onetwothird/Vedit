@@ -1,6 +1,8 @@
 """Studio project store (save / open / list recent) and output file naming."""
 from __future__ import annotations
 
+import contextlib
+import contextvars
 import hashlib
 import json
 import os
@@ -61,7 +63,23 @@ def project_file(kind: str) -> str:
     return PROJECT_FILE if kind == "clip" else f"project-{kind}.json"
 
 
+USER_HOME: contextvars.ContextVar[Path | None] = contextvars.ContextVar("vedit_user_home", default=None)
+
+
+@contextlib.contextmanager
+def use_home(path: Path):
+    """Make `path` the app root (registry, stories, batches, brand kit) for this context, e.g. one web request."""
+    token = USER_HOME.set(Path(path))
+    try:
+        yield
+    finally:
+        USER_HOME.reset(token)
+
+
 def _home() -> Path:
+    override = USER_HOME.get()
+    if override is not None:
+        return override
     home = os.environ.get("VEDIT_HOME")
     if home:
         return Path(home)
