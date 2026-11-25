@@ -307,7 +307,15 @@ export function createMockEngine(opts: { tickMs?: number; persist?: Pick<Storage
   const timers = new Map<string, ReturnType<typeof setTimeout>>();
   const listeners = new Set<(job: Job) => void>();
   const models: ModelStatus = { small: { installed: true, size_mb: 484 }, "large-v3": { installed: false, size_mb: 3090 }, "large-v3-turbo": { installed: false, size_mb: 1620 } };
+  const BRAND = "vedit.mock.brand";
   let brand: Brand = { font: "", caption_color: "", highlight: "", logo: "", intro: "", outro: "", music: "" };
+  if (isWeb()) {
+    try {
+      brand = { ...brand, lut: "", fonts: {}, ...(JSON.parse(opts.persist?.getItem(BRAND) ?? "{}") as Partial<Brand>) };
+    } catch {
+      /* a broken saved kit starts empty */
+    }
+  }
   const failedOnce = new Set<string>(); // projects whose first analyze already failed on purpose
   // stories outlive a reload too, as the real engine's story files do
   const STORIES = "vedit.mock.stories";
@@ -331,7 +339,25 @@ export function createMockEngine(opts: { tickMs?: number; persist?: Pick<Storage
   // the website's side of the mock: files "uploaded" this session (the PUT itself goes to a URL on this origin),
   // the library they are committed to, and the download links of finished exports
   const uploads = new Map<string, { kind: Asset["kind"]; name: string; size: number }>();
-  const assets = new Map<string, Asset>();
+  // the library and the brand kit outlive a reload on the website, as the real engine keeps them
+  const ASSETS = "vedit.mock.assets";
+  const keepWeb = (key: string, value: unknown): void => {
+    if (!isWeb()) return;
+    try {
+      opts.persist?.setItem(key, JSON.stringify(value));
+    } catch {
+      /* storage full or blocked */
+    }
+  };
+  const assets = new Map<string, Asset>((() => {
+    try {
+      return isWeb() ? Object.entries(JSON.parse(opts.persist?.getItem(ASSETS) ?? "{}") as Record<string, Asset>) : [];
+    } catch {
+      return [];
+    }
+  })());
+  for (const id of assets.keys()) seq = Math.max(seq, Number(id.slice(1)) || 0); // new ids never reuse a kept one
+  const storyNames = new Map<string, string[]>(); // the website: each story's built videos, for fresh links
   const exportNames = new Map<string, string[]>();
   let linkSeq = 0;
   const origin = (): string => (typeof location === "undefined" ? "" : location.origin);
@@ -467,10 +493,20 @@ export function createMockEngine(opts: { tickMs?: number; persist?: Pick<Storage
     if (!["9:16", "16:9", "1:1"].includes(next.aspect)) throw bad(`unsupported shape: ${next.aspect}`);
     if (!VOICES.some((v) => v.id === next.voice)) throw bad(`unsupported voice: ${next.voice}`);
     if (!["pop", "box", "clean", "none"].includes(next.captions)) throw bad(`unsupported caption style: ${next.captions}`);
-    if (next.music !== null && !["mp3", "m4a", "aac", "wav", "flac", "ogg", "opus"].includes(ext(next.music))) throw bad("music must be an audio file");
+    // the website: every file is an `asset:` of the library, whose kind says what it is (the real engine reads the file)
+    const libraryKind = (ref: string): Asset["kind"] => {
+      const a = ref.startsWith("asset:") ? assets.get(ref.slice("asset:".length)) : undefined;
+      if (!a) throw bad("choose a file from your library");
+      return a.kind;
+    };
+    const audio = (ref: string) => (isWeb() ? libraryKind(ref) === "audio" : ["mp3", "m4a", "aac", "wav", "flac", "ogg", "opus"].includes(ext(ref)));
+    if (next.music !== null && !audio(next.music)) throw bad("music must be an audio file");
     if (body.scenes) {
       next.scenes = body.scenes.map((sc, i): StoryScene => {
-        const kind = IMAGE.includes(ext(sc.media)) ? "image" : VIDEO.includes(ext(sc.media)) ? "video" : null;
+        const own = isWeb() ? libraryKind(sc.media) : null;
+        const kind = isWeb()
+          ? (own === "image" || own === "video" ? own : null)
+          : IMAGE.includes(ext(sc.media)) ? "image" : VIDEO.includes(ext(sc.media)) ? "video" : null;
         if (!kind) throw bad(`scene ${i + 1}: ${fileName(sc.media)} is not a photo or a video`);
         return { media: sc.media, kind, text: sc.text ?? "", motion: sc.motion ?? "auto", keep_audio: !!sc.keep_audio && kind === "video" };
       });
@@ -530,6 +566,17 @@ export function createMockEngine(opts: { tickMs?: number; persist?: Pick<Storage
       const gone = st.scenes.findIndex((sc) => /missing/i.test(sc.media));
       if (gone >= 0) throw bad(`scene ${gone + 1}: ${fileName(st.scenes[gone].media)} was moved or deleted`);
       const name = `${st.title.replace(/[<>:"/\\|?*]/g, "").trim() || "Story"}${st.aspect === "9:16" ? "" : ` (${st.aspect.replace(":", "x")})`}.mp4`;
+      if (isWeb()) { // the engine's check first: narration at 150 words a minute, a silent photo 3 s (a clip: 10 s here)
+        const words = (text: string) => text.split(/\s+/).filter(Boolean).length;
+        const seconds = st.scenes.reduce((n, sc) => n + (words(sc.text) ? words(sc.text) / 2.5 : sc.kind === "image" ? 3 : 10), 0);
+        if (seconds > 180) throw bad("Stories can be up to 3 minutes");
+        return run(newJob(sid, "story"), [["voices", 0.25], ["render", 0.75]], (j) => {
+          storyNames.set(sid, [...new Set([...(storyNames.get(sid) ?? []), name])]);
+          j.result = { files: linksFor(sid, [name]) };
+          st.output = name;
+          keepStories();
+        });
+      }
       const out = joinPath(body?.out_dir ?? "C:/Users/you/Videos/Vedit", name);
       // test trigger: a title containing "offline" fails as a voice with no internet would
       const failure = /offline/i.test(st.title)
@@ -542,13 +589,25 @@ export function createMockEngine(opts: { tickMs?: number; persist?: Pick<Storage
       }, failure);
     },
     async createBatch(body: BatchBody) {
-      if (!body.sources.length) throw new EngineError(422, "invalid_body", "pick at least one video");
-      if (new Set(body.sources).size !== body.sources.length) throw bad("the same video is in the batch twice");
+      let made: { source?: string; upload_key?: string }[];
+      if (isWeb()) { // the website sends its uploads, never paths
+        if (body.sources !== undefined || body.out_dir !== undefined) throw bad("Upload the videos for a batch; paths and folders are not used on the web");
+        const keys = body.upload_keys ?? [];
+        if (!keys.length) throw bad("Upload at least one video");
+        if (keys.some((k) => uploads.get(k)?.kind !== "video")) throw notFound("upload");
+        made = keys.map((upload_key) => ({ upload_key }));
+      } else {
+        const sources = body.sources ?? [];
+        if (!sources.length) throw new EngineError(422, "invalid_body", "pick at least one video");
+        if (new Set(sources).size !== sources.length) throw bad("the same video is in the batch twice");
+        made = sources.map((source) => ({ source }));
+      }
       if (body.export && !body.formats.length) throw bad("pick at least one format");
       const bid = `b${String(++seq).padStart(12, "0")}`;
       const items = [];
-      for (const source of body.sources) {
-        const p = await api.createProject({ source, language: body.language, platform: body.platform, type: body.type });
+      for (const from of made) {
+        const p = await api.createProject({ ...from, language: body.language, platform: body.platform, type: body.type });
+        const source = from.source ?? p.source;
         if (body.export) {
           autoExport.set(p.id, { body: { formats: body.formats, quality: body.quality, out_dir: body.out_dir, srt: body.srt, thumbnail: body.thumbnail } });
         }
@@ -559,6 +618,19 @@ export function createMockEngine(opts: { tickMs?: number; persist?: Pick<Storage
       return batchView(bid);
     },
     async getBatch(bid) { return batchView(bid); },
+    async zipBatch(bid) {
+      if (!batches.has(bid)) throw notFound(`batch ${bid}`);
+      return run(newJob(bid, "zip"), [["zip", 1]], (j) => {
+        j.result = { files: [{ name: `Vedit batch ${bid}.zip`, url: `${origin()}/__mock-r2/zips/${encodeURIComponent(bid)}.zip?sig=${++linkSeq}` }] };
+      });
+    },
+    async listAssets(kind) {
+      return [...assets.values()].filter((a) => !kind || a.kind === kind).map((a) => ({ ...a }));
+    },
+    async storyExports(sid) {
+      const st = story(sid);
+      return linksFor(sid, storyNames.get(sid) ?? (st.output ? [st.output] : []));
+    },
     onJob(listener) {
       listeners.add(listener);
       for (const j of jobs.values()) if (j.state === "queued" || j.state === "running") listener(snapshot(j));
@@ -581,6 +653,7 @@ export function createMockEngine(opts: { tickMs?: number; persist?: Pick<Storage
       if (!up) throw notFound("upload");
       const asset: Asset = { asset_id: `a${String(++seq).padStart(12, "0")}`, kind: up.kind, name: up.name, size: up.size };
       assets.set(asset.asset_id, asset);
+      keepWeb(ASSETS, Object.fromEntries(assets));
       uploads.delete(uploadKey);
       return { ...asset };
     },
@@ -760,7 +833,7 @@ export function createMockEngine(opts: { tickMs?: number; persist?: Pick<Storage
       return body.api_key.startsWith("sk-") ? { ok: true } : { ok: false, error: "rejected" };
     },
     async brand() { return { ...brand }; },
-    async saveBrand(next) { brand = { ...next }; return { ...brand }; },
+    async saveBrand(next) { brand = { ...next }; keepWeb(BRAND, brand); return { ...brand }; },
   };
   return api;
 }

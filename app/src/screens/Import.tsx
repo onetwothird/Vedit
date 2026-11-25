@@ -9,7 +9,7 @@ import { useJob } from "../engine/events";
 import { EngineError, type Language, type NewProjectBody, type Platform, type ProjectType } from "../engine/types";
 import { t } from "../i18n/t";
 import {
-  VIDEO_ACCEPT, analyzeBody, baseName, isVideoName, listenNativeDrop, pickVideoNative, toPicked, type PickedFile,
+  VIDEO_ACCEPT, VIDEO_EXTENSIONS, acceptFor, analyzeBody, baseName, isVideoName, listenNativeDrop, pickVideoNative, toPicked, type PickedFile,
 } from "../lib/native";
 import { getLanguage, getPlatform } from "../lib/prefs";
 import { PLATFORMS_FOR, isWhole, newImport, parseType, platformFor, projectHome } from "../lib/projectKind";
@@ -460,7 +460,7 @@ export default function Import() {
               ) : (
                 <div className="vf-empty">
                   <span className="vf-empty-title">{t("import.drop.title")}</span>
-                  <span className="vf-empty-hint">{t("import.drop.formats")}</span>
+                  <span className="vf-empty-hint">{t(web ? "import.drop.formats.web" : "import.drop.formats")}</span>
                   <button type="button" className="vf-choose" onClick={choose}>{t("import.choose")}</button>
                 </div>
               )}
@@ -477,7 +477,7 @@ export default function Import() {
                   <span className="vf-file vf-file-empty">{t("import.viewer.empty")}</span>
                 )}
               </div>
-              <input ref={input} type="file" accept={VIDEO_ACCEPT} hidden onChange={onInput} />
+              <input ref={input} type="file" accept={web ? acceptFor(VIDEO_EXTENSIONS) : VIDEO_ACCEPT} hidden onChange={onInput} />
             </div>
             <DropWave />
           </div>

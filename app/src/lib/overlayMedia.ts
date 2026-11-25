@@ -1,4 +1,5 @@
 import { engineMediaUrl, isMock } from "../engine/client";
+import { assetKind, isAssetRef } from "./assetInfo";
 
 /* B-roll files for the preview. The engine streams a path once a clip uses it. A file picked in a browser has no
    path, so it is also kept as an object URL for this session, under the name it was saved with. */
@@ -33,6 +34,7 @@ export const BROLL_VIDEO = ["mp4", "mov", "m4v", "webm", "mkv"];
 
 /** image or video, from the file's extension. */
 export function brollType(path: string): "image" | "video" {
+  if (isAssetRef(path)) return assetKind(path) === "image" ? "image" : "video";
   const ext = path.split(".").pop()?.toLowerCase() ?? "";
   return BROLL_IMAGE.includes(ext) ? "image" : "video";
 }

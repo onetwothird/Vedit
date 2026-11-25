@@ -140,6 +140,9 @@ export function createClient(opts: ClientOptions): Engine {
     commitAsset: (uploadKey) => request<Asset>("POST", "/assets", { upload_key: uploadKey }),
     usage: () => request<Usage>("GET", "/usage"),
     projectExports: (pid) => request<ExportLink[]>("GET", `/projects/${enc(pid)}/exports`),
+    listAssets: (kind) => request<Asset[]>("GET", `/assets${kind ? `?kind=${enc(kind)}` : ""}`),
+    storyExports: (sid) => request<ExportLink[]>("GET", `/stories/${enc(sid)}/exports`),
+    zipBatch: (bid) => job(request<Job>("POST", `/batches/${enc(bid)}/zip`)),
   };
 }
 

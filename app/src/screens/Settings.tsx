@@ -3,14 +3,17 @@ import { Link, useNavigate } from "react-router-dom";
 import { useAuth } from "../auth/auth";
 import Avatar from "../components/Avatar";
 import Screen from "../components/Screen";
+import UploadList, { type UploadRow } from "../components/UploadList";
 import { engine, isTauri } from "../engine/client";
 import { isWeb } from "../engine/flavor";
 import { useJob } from "../engine/events";
-import type { Brand, CaptionTrack, Language, ModelStatus, Platform } from "../engine/types";
+import type { AssetKind, Brand, CaptionTrack, Language, ModelStatus, Platform } from "../engine/types";
 import { CAPTION_FONTS, DEFAULT_CAPTION_FONT } from "../edit/captionFonts";
 import CaptionOverlay from "../preview/CaptionOverlay";
 import { t } from "../i18n/t";
-import { baseName, loadAiKey, pickFileNative, pickFolderNative, removeAiKey, saveAiKey } from "../lib/native";
+import { acceptFor, baseName, loadAiKey, pickFileNative, pickFilesWeb, pickFolderNative, removeAiKey, saveAiKey } from "../lib/native";
+import { rememberAssetInfo, useAssetNames } from "../lib/assetInfo";
+import { UploadError, kindOfName, uploadAsset } from "../lib/upload";
 import {
   getAiProvider, getLanguage, getPlatform, getSettings, saveSettings, setAiProvider, setLanguage, setPlatform,
   type AiProvider, type Settings as SettingsState,
@@ -438,19 +441,57 @@ function ModelsSection() {
 // ---- brand kit ----------------------------------------------------------------------------------------------------
 
 const EMPTY_BRAND: Brand = { font: "", caption_color: "", highlight: "", logo: "", intro: "", outro: "", music: "" };
-type FileKey = "logo" | "intro" | "outro" | "music";
-const FILE_KINDS: Record<FileKey, { name: string; extensions: string[]; accept: string }> = {
-  logo: { name: "settings.dialog.image", extensions: ["png", "jpg", "jpeg", "webp", "svg"], accept: "image/*" },
-  intro: { name: "settings.dialog.video", extensions: ["mp4", "mov", "m4v", "mkv", "webm"], accept: "video/*" },
-  outro: { name: "settings.dialog.video", extensions: ["mp4", "mov", "m4v", "mkv", "webm"], accept: "video/*" },
-  music: { name: "settings.dialog.audio", extensions: ["mp3", "m4a", "aac", "wav", "flac", "ogg"], accept: "audio/*" },
+type FileKey = "logo" | "intro" | "outro" | "music" | "lut" | "font";
+const FILE_KINDS: Record<FileKey, { name: string; extensions: string[]; accept: string; asset: AssetKind }> = {
+  logo: { name: "settings.dialog.image", extensions: ["png", "jpg", "jpeg", "webp", "svg"], accept: "image/*", asset: "image" },
+  intro: { name: "settings.dialog.video", extensions: ["mp4", "mov", "m4v", "mkv", "webm"], accept: "video/*", asset: "video" },
+  outro: { name: "settings.dialog.video", extensions: ["mp4", "mov", "m4v", "mkv", "webm"], accept: "video/*", asset: "video" },
+  music: { name: "settings.dialog.audio", extensions: ["mp3", "m4a", "aac", "wav", "flac", "ogg"], accept: "audio/*", asset: "audio" },
+  // the website only: a colour look and the card fonts
+  lut: { name: "settings.brand.lut", extensions: ["cube"], accept: ".cube", asset: "lut" },
+  font: { name: "settings.brand.font", extensions: ["ttf", "otf"], accept: ".ttf,.otf", asset: "font" },
 };
+/** Card font files by weight (scripts/brand.py): titles in ExtraBold, subtitles in SemiBold. */
+const FONT_WEIGHTS = ["ExtraBold", "SemiBold", "Bold"] as const;
 
 function FileField({ id, label, value, kind, onChange }: { id: string; label: string; value: string; kind: FileKey; onChange(v: string): void }) {
   const input = useRef<HTMLInputElement>(null);
   const spec = FILE_KINDS[kind];
+  const web = isWeb();
+  // the website: the chosen file is uploaded to the library first; the kit keeps its `asset:` reference
+  const [row, setRow] = useState<UploadRow | null>(null);
+  const [sendError, setSendError] = useState<string | null>(null);
+  const sending = useRef<AbortController | null>(null);
+  useEffect(() => () => sending.current?.abort(), []);
+
+  async function upload() {
+    const [file] = await pickFilesWeb(acceptFor(spec.extensions), false);
+    if (!file) return;
+    setSendError(null);
+    if (kindOfName(file.name) !== spec.asset) {
+      setSendError(t("upload.unsupported", { name: file.name }));
+      return;
+    }
+    const ctl = new AbortController();
+    sending.current = ctl;
+    setRow({ id: file.name, name: file.name, pct: 0 });
+    try {
+      const { ref } = await uploadAsset(file, spec.asset, (pct) => setRow((r) => (r ? { ...r, pct } : r)), ctl.signal);
+      rememberAssetInfo(ref, file.name, spec.asset);
+      onChange(ref);
+    } catch (e) {
+      if (!ctl.signal.aborted) setSendError(e instanceof Error ? e.message : t("upload.failed"));
+    } finally {
+      setRow(null);
+      sending.current = null;
+    }
+  }
 
   async function choose() {
+    if (web) {
+      if (!row) await upload().catch((e) => setSendError(e instanceof UploadError ? e.message : t("upload.failed")));
+      return;
+    }
     if (isTauri()) {
       try {
         const path = await pickFileNative(t(spec.name), spec.extensions);
@@ -467,10 +508,10 @@ function FileField({ id, label, value, kind, onChange }: { id: string; label: st
     <div className="field">
       <span className="field-label" id={`${id}-l`}>{label}</span>
       <div className="set-file" role="group" aria-labelledby={`${id}-l`}>
-        <span className={`set-file-name${value ? "" : " none"}`} title={value}>{value ? baseName(value) : t("settings.brand.none")}</span>
-        <button type="button" className="secondary" onClick={choose}>{t("settings.brand.choose")}</button>
-        {value && <button type="button" className="secondary" onClick={() => onChange("")}>{t("settings.brand.clear")}</button>}
-        <input
+        <span className={`set-file-name${value ? "" : " none"}`} title={web ? undefined : value}>{value ? baseName(value) : t("settings.brand.none")}</span>
+        <button type="button" className="secondary" onClick={choose} disabled={!!row}>{t("settings.brand.choose")}</button>
+        {value && <button type="button" className="secondary" disabled={!!row} onClick={() => onChange("")}>{t("settings.brand.clear")}</button>}
+        {!web && <input
           ref={input}
           id={id}
           type="file"
@@ -482,8 +523,10 @@ function FileField({ id, label, value, kind, onChange }: { id: string; label: st
             e.target.value = "";
             if (f) onChange(f.name); // a browser has only the name; the desktop app has the full path
           }}
-        />
+        />}
       </div>
+      {row && <UploadList rows={[row]} onCancel={() => sending.current?.abort()} />}
+      {sendError && <p className="error" role="alert">{sendError}</p>}
     </div>
   );
 }
@@ -555,7 +598,9 @@ function CaptionPreview({ brand }: { brand: Brand }) {
 }
 
 function BrandSection() {
-  const [brand, setBrand] = useState<Brand>(EMPTY_BRAND);
+  const web = isWeb();
+  const [brand, setBrand] = useState<Brand>(web ? { ...EMPTY_BRAND, lut: "", fonts: {} } : EMPTY_BRAND);
+  useAssetNames([brand.logo, brand.intro, brand.outro, brand.music, brand.lut, ...Object.values(brand.fonts ?? {})]);
   const [loaded, setLoaded] = useState(false);
   const [status, setStatus] = useState<{ text: string; bad: boolean } | null>(null);
   const [busy, setBusy] = useState(false);
@@ -566,7 +611,7 @@ function BrandSection() {
     engine.brand().then(
       (b) => {
         if (!live) return;
-        setBrand({ ...EMPTY_BRAND, ...b });
+        setBrand(web ? { ...EMPTY_BRAND, lut: "", ...b, fonts: { ...(b.fonts ?? {}) } } : { ...EMPTY_BRAND, ...b });
         setLoaded(true);
       },
       () => live && setStatus({ text: t("settings.brand.loaderror"), bad: true }),
@@ -594,7 +639,7 @@ function BrandSection() {
   }
 
   return (
-    <Section id="brand" title={t("settings.brand")} note={t("settings.brand.note")}>
+    <Section id="brand" title={t("settings.brand")} note={web ? `${t("settings.brand.note")} ${t("settings.brand.web.note")}` : t("settings.brand.note")}>
       <div className="brand-kit">
       <div className="set-grid">
         <div className="field">
@@ -619,6 +664,21 @@ function BrandSection() {
         <FileField id={`${base}-intro`} label={t("settings.brand.intro")} kind="intro" value={brand.intro} onChange={(v) => set({ intro: v })} />
         <FileField id={`${base}-outro`} label={t("settings.brand.outro")} kind="outro" value={brand.outro} onChange={(v) => set({ outro: v })} />
         <FileField id={`${base}-music`} label={t("settings.brand.music")} kind="music" value={brand.music} onChange={(v) => set({ music: v })} />
+        {web && (
+          <>
+            <FileField id={`${base}-lut`} label={t("settings.brand.lut")} kind="lut" value={brand.lut ?? ""} onChange={(v) => set({ lut: v })} />
+            {FONT_WEIGHTS.map((w) => (
+              <FileField key={w} id={`${base}-font-${w}`} label={t(`settings.brand.fonts.${w}`)} kind="font" value={brand.fonts?.[w] ?? ""}
+                onChange={(v) => setBrand((b) => {
+                  const fonts = { ...(b.fonts ?? {}) };
+                  if (v) fonts[w] = v;
+                  else delete fonts[w];
+                  setStatus(null);
+                  return { ...b, fonts };
+                })} />
+            ))}
+          </>
+        )}
       </div>
       <CaptionPreview brand={brand} />
       </div>

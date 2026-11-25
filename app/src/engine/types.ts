@@ -56,7 +56,7 @@ export interface ProjectSettings {
   filmstrip?: string;
 }
 
-export type JobKind = "analyze" | "export" | "model" | "story";
+export type JobKind = "analyze" | "export" | "model" | "story" | "zip";
 export type JobState = "queued" | "running" | "done" | "failed" | "cancelled";
 
 export interface AnalyzeResult {
@@ -266,6 +266,9 @@ export interface Brand {
   intro: string;
   outro: string;
   music: string;
+  /** The website only: a .cube colour look, and card fonts by weight (ExtraBold, SemiBold, Bold). */
+  lut?: string;
+  fonts?: Record<string, string>;
 }
 
 /** POST /projects/{pid}/clips/{hid}/broll: suggest b-roll from the photos and videos in `folder` (scripts/broll.py). */
@@ -364,7 +367,8 @@ export interface StoryVoice {
 }
 
 export interface StoryResult {
-  files: string[];
+  /** The video's path (desktop), or its download link (website). */
+  files: (string | ExportLink)[];
 }
 
 export interface BuildStoryBody {
@@ -373,7 +377,10 @@ export interface BuildStoryBody {
 }
 
 export interface BatchBody extends AnalyzeBody {
-  sources: string[];
+  /** Paths on this computer (desktop). */
+  sources?: string[];
+  /** The website: the uploaded videos (each an upload not yet used). */
+  upload_keys?: string[];
   type: ProjectType;
   language: Language;
   platform: Platform;
@@ -389,7 +396,8 @@ export interface BatchItem {
   /** Null when the project was removed since. */
   project: Project | null;
   source: string;
-  analyze: string;
+  /** Null on the website until the batch reaches this video (it runs them one at a time). */
+  analyze: string | null;
   export: string | null;
   error: string | null;
 }
@@ -469,4 +477,10 @@ export interface Engine {
   usage(): Promise<Usage>;
   /** The project's exported files with fresh download links. */
   projectExports(pid: string): Promise<ExportLink[]>;
+  /** The files in the library (names of `asset:` references). */
+  listAssets(kind?: AssetKind): Promise<Asset[]>;
+  /** The story's built videos with fresh download links. */
+  storyExports(sid: string): Promise<ExportLink[]>;
+  /** Zips every exported file of the batch; the job's result carries the zip's 24 h link. */
+  zipBatch(bid: string): Promise<Job>;
 }

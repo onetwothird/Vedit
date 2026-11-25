@@ -4,6 +4,7 @@ import { isWeb } from "../engine/flavor";
 import type { BrollSuggestions, Overlay } from "../engine/types";
 import { duplicateLayer, newBroll, newText, withIds } from "../edit/overlays";
 import { t } from "../i18n/t";
+import { useAssetNames } from "../lib/assetInfo";
 import { baseName, pickFileNative } from "../lib/native";
 import { BROLL_IMAGE, BROLL_VIDEO, rememberPicked } from "../lib/overlayMedia";
 import { formatClock } from "../lib/time";
@@ -178,6 +179,7 @@ function TextField({ o, onChange }: { o: Extract<Overlay, { type: "text" }>; onC
 
 export function BrollTool(props: LayerToolProps) {
   const { mine, selected, add, change, duplicate, remove } = useLayers(props, "broll");
+  useAssetNames(mine.map((o) => (o.type === "text" ? null : o.path))); // names of uploaded files, after a reload too
   const { playhead, t0, t1, onLayer, onSeek, onOverlays, overlays, suggestBroll } = props;
   const file = useRef<HTMLInputElement>(null);
   const addPath = (path: string) => add(newBroll(path, playhead, t0, t1));

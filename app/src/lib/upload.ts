@@ -170,3 +170,30 @@ export function importProblem(video: { duration: number | null; size: number }, 
   const left = Math.max(0, Math.floor((usage.seconds_limit - usage.seconds_used) / 60));
   return minutes > left ? t("import.web.overlimit", { m: minutes, r: left }) : null;
 }
+
+/** What stops a batch before anything is uploaded: a video over 60 minutes or 3 GB (named), or all of them together
+    longer than the minutes left (the engine's words, with Import's rounding). Unknown lengths are left to the engine. */
+export function batchProblem(videos: { name: string; duration: number | null; size: number }[], usage: Usage): string | null {
+  for (const v of videos) {
+    if (v.duration !== null && v.duration > MAX_VIDEO_SECONDS) return `${v.name}: ${t("import.web.toolong")}`;
+    if (v.size > KIND_LIMITS.video) return `${v.name}: ${t("import.web.toobig")}`;
+  }
+  const total = videos.reduce((s, v) => s + (v.duration ?? 0), 0);
+  if (!total) return null;
+  const minutes = Math.ceil(total / 60);
+  const left = Math.max(0, Math.floor((usage.seconds_limit - usage.seconds_used) / 60));
+  return minutes > left ? t("batch.web.overlimit", { m: minutes, r: left }) : null;
+}
+
+/** Runs `task` over every item with at most `size` running at once, starting them in order. Resolves when all have
+    settled; a task's own failure is its business (wrap it), so one rejected task does not stop the rest. */
+export async function runPool<T>(items: T[], size: number, task: (item: T) => Promise<void>): Promise<void> {
+  let next = 0;
+  const worker = async () => {
+    while (next < items.length) {
+      const item = items[next++];
+      await task(item).catch(() => undefined);
+    }
+  };
+  await Promise.all(Array.from({ length: Math.min(size, items.length) }, worker));
+}

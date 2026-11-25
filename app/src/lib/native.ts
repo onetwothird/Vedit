@@ -4,6 +4,7 @@ import { isMock, isTauri } from "../engine/client";
 import { isWeb } from "../engine/flavor";
 import type { AnalyzeBody } from "../engine/types";
 import { t } from "../i18n/t";
+import { assetName, isAssetRef, rememberAssetInfo } from "./assetInfo";
 import { rememberAsset } from "./overlayMedia";
 import { getAiProvider, type AiProvider } from "./prefs";
 import { UploadError, acceptedExtensions, kindOfName, uploadAsset } from "./upload";
@@ -11,17 +12,21 @@ import { UploadError, acceptedExtensions, kindOfName, uploadAsset } from "./uplo
 export const VIDEO_EXTENSIONS = ["mp4", "mov", "m4v", "mkv", "avi", "webm", "mts", "3gp"];
 export const VIDEO_ACCEPT = VIDEO_EXTENSIONS.map((e) => `.${e}`).join(",");
 
+/** An <input accept> list: on the website only the extensions the engine takes (no .avi or .bmp, which it refuses). */
+export const acceptFor = (extensions: string[]): string =>
+  (isWeb() ? acceptedExtensions(extensions) : extensions).map((e) => `.${e}`).join(",");
+
 export interface PickedFile {
   /** Full path in the desktop app; just the file name in a browser (the mock engine accepts that). */
   path: string;
   name: string;
 }
 
-const assetNames = new Map<string, string>(); // `asset:<id>` -> the name the file was uploaded with
 
-/** The name to show for a path: the last part of it, or for an uploaded file (`asset:<id>`) the name it came with. */
+/** The name to show for a path: the last part of it, or for an uploaded file (`asset:<id>`) the name it came with
+    (components that show one call useAssetNames, which reads the library after a reload). */
 export const baseName = (path: string): string =>
-  path.startsWith("asset:") ? assetNames.get(path) ?? path : path.split(/[\\/]/).pop() ?? path;
+  isAssetRef(path) ? assetName(path) : path.split(/[\\/]/).pop() ?? path;
 
 export function isVideoName(name: string): boolean {
   const dot = name.lastIndexOf(".");
@@ -63,7 +68,7 @@ async function pickAssetsWeb(extensions: string[], multiple: boolean, onProgress
     const kind = kindOfName(file.name);
     if (!kind) throw new UploadError("failed", t("upload.unsupported", { name: file.name }));
     const { ref } = await uploadAsset(file, kind, (pct) => onProgress?.({ done: i, n: files.length, pct }));
-    assetNames.set(ref, file.name);
+    rememberAssetInfo(ref, file.name, kind);
     rememberAsset(ref, file); // the preview plays the local copy
     refs.push(ref);
   }
