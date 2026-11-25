@@ -5,6 +5,8 @@ import type {
   AiTestBody, AiTestResult, AnalyzeBody, Batch, BrollBody, BrollSuggestions, BatchBody, Brand, BuildStoryBody, Story, StoryBody, StoryVoice, ClipOp, ClipView, Doctor, Engine, EngineInfo, ErrorBody, ExportBody, FilmstripInfo, Health, Job, ModelStatus,
   NewProjectBody, Project, Transcript,
 } from "./types";
+import { getAccessToken } from "../auth/accessToken";
+import { isCloud, isTauri } from "./flavor";
 import { mockEngine } from "./mock";
 import { EngineError } from "./types";
 
@@ -16,6 +18,9 @@ export interface ClientOptions {
   /** Asks for the engine's current port and token. Called again after a network failure or a 401. */
   getInfo: InfoSource;
   fetchImpl?: typeof fetch;
+  /** Keep the first answer of getInfo until a failure or a 401. Default: yes on desktop, no in the cloud, where the
+      access token is refreshed hourly and every request must carry the latest one. */
+  cacheInfo?: boolean;
   /** Called with every Job a route returns, so live-job stores can pick it up before the first event. */
   onJob?: (job: Job) => void;
 }
@@ -32,7 +37,7 @@ export function createClient(opts: ClientOptions): Engine {
   let current: Promise<EngineInfo> | null = null;
 
   function info(): Promise<EngineInfo> {
-    if (!current) {
+    if (!current || !(opts.cacheInfo ?? !isCloud())) {
       const p = opts.getInfo();
       current = p;
       p.catch(() => {
@@ -48,12 +53,13 @@ export function createClient(opts: ClientOptions): Engine {
       let conn: EngineInfo;
       try {
         conn = await used;
-      } catch {
+      } catch (e) {
+        if (e instanceof EngineError && e.code === "signin") throw e; // cloud build, nobody signed in
         throw new EngineError(0, "engine_unavailable", "the engine is not running");
       }
       let res: Response;
       try {
-        res = await doFetch(`http://127.0.0.1:${conn.port}${path}`, {
+        res = await doFetch(`${conn.base ?? `http://127.0.0.1:${conn.port}`}${path}`, {
           method,
           headers: {
             Authorization: `Bearer ${conn.token}`,
@@ -134,7 +140,7 @@ export function createClient(opts: ClientOptions): Engine {
 
 // ---- which engine -------------------------------------------------------------------------------------------
 
-export const isTauri = (): boolean => typeof window !== "undefined" && "__TAURI_INTERNALS__" in window;
+export { isCloud, isTauri };
 
 export const isMock = (): boolean => !isTauri() && import.meta.env.VITE_ENGINE === "mock";
 
@@ -145,6 +151,13 @@ export async function fetchEngineInfo(): Promise<EngineInfo> {
   if (isTauri()) {
     const { invoke } = await import("@tauri-apps/api/core");
     return (lastInfo = await invoke<EngineInfo>("engine_info"));
+  }
+  if (isCloud()) {
+    const base = ((import.meta.env.VITE_ENGINE_URL as string | undefined) ?? "").trim().replace(/\/+$/, "");
+    if (!base) throw new Error("no engine: set VITE_ENGINE_URL to the cloud API address");
+    const token = await getAccessToken(); // fetched per request: it is refreshed while the app is open
+    if (!token) throw new EngineError(401, "signin", "sign in to use Vedit");
+    return (lastInfo = { base, token, port: 0 });
   }
   const url = import.meta.env.VITE_ENGINE_URL as string | undefined;
   const token = import.meta.env.VITE_ENGINE_TOKEN as string | undefined;
@@ -158,7 +171,7 @@ export async function fetchEngineInfo(): Promise<EngineInfo> {
     the query because media elements cannot send headers. Null until the app has reached the engine once. */
 export function engineMediaUrl(route: string, params: Record<string, string> = {}): string | null {
   if (!lastInfo) return null;
-  return `http://127.0.0.1:${lastInfo.port}${route}?${new URLSearchParams({ ...params, token: lastInfo.token })}`;
+  return `${lastInfo.base ?? `http://127.0.0.1:${lastInfo.port}`}${route}?${new URLSearchParams({ ...params, token: lastInfo.token })}`;
 }
 
 const jobListeners = new Set<(job: Job) => void>();

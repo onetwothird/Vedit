@@ -22,6 +22,8 @@ export class EngineError extends Error {
 export interface EngineInfo {
   port: number;
   token: string;
+  /** Full origin of a cloud engine (the web build); when set, `port` is 0 and unused. */
+  base?: string;
 }
 
 /** Every non-2xx body the server sends. */
