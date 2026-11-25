@@ -113,6 +113,7 @@ def start_export(engine, cloud, pid: str, body, *, in_batch: bool = False, job_i
         cp.check_paused(cloud)
         with engine.lock_for(pid):
             p = h.project(pid)
+            cp.check_not_expired(p)
             p.last_activity = cp.now_iso()  # retention counts from here
             save_project(p)
             out_dir = Path(p.source).parent / "exports"

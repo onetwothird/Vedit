@@ -90,6 +90,25 @@ def download_models() -> None:
     volume.commit()
 
 
+@app.function(image=image, volumes={DATA: volume}, secrets=secrets, timeout=3600,
+              schedule=modal.Cron("0 3 * * *"))
+def retention_sweep() -> dict:
+    """Daily 7-day retention: sources, previews and exports of idle projects, old zips and uncommitted uploads."""
+    from datetime import datetime, timezone
+
+    sys.path.insert(0, f"{REPO}/scripts")
+    import cloud_cleanup
+    from cloud_storage import R2Storage
+
+    storage = R2Storage(os.environ["R2_ACCOUNT_ID"], os.environ.get("R2_BUCKET", "vedit-media"),
+                        os.environ["R2_ACCESS_KEY_ID"], os.environ["R2_SECRET_ACCESS_KEY"])
+    volume.reload()  # see what the API and the steps committed since this container's snapshot
+    counts = cloud_cleanup.sweep(Path(DATA), storage, datetime.now(timezone.utc))
+    volume.commit()
+    print(f"vedit retention sweep: {counts}")
+    return counts
+
+
 def _cloud_config():
     sys.path.insert(0, f"{REPO}/scripts")
     import cloud_config

@@ -71,6 +71,15 @@ def check_duration(seconds: float, remaining: float) -> None:
                          "left this month")
 
 
+EXPIRED_COPY = "Video expired — upload it again to keep editing"
+
+
+def check_not_expired(p: Project) -> None:
+    """The retention sweep deleted this video: nothing can be analysed or exported until it is uploaded again."""
+    if p.settings.get("expired"):
+        raise StarletteHTTPException(400, EXPIRED_COPY)
+
+
 def touch(pid: str) -> None:
     """Stamp the project's last_activity (retention counts from it). The caller holds the project's lock."""
     p = load_project(pid)
@@ -194,6 +203,7 @@ def start_analyze(engine, cloud, p: Project, steps: list, probe: Callable[[Path]
     slip under the 2-job limit. The job id is made here so the charge can name it before the job exists. A batch
     item (`in_batch`) is already inside its batch's slot, so only the pause applies.
     """
+    check_not_expired(p)
     with user_lock():
         if not in_batch:
             check_cap(engine)

@@ -200,3 +200,39 @@ def test_presigned_put_has_no_checksum_params():
     q = parse_qs(urlparse(_r2().presign_put("k", "video/mp4", 10)).query)
     assert not [k for k in q if k.lower().startswith(("x-amz-checksum", "x-amz-sdk-checksum"))]
     assert "x-amz-sdk-checksum-algorithm" not in {k.lower() for k in q}
+
+
+def test_list_returns_key_size_and_last_modified_and_pages():
+    from datetime import datetime, timezone
+
+    t1, t2 = datetime(2026, 1, 1, tzinfo=timezone.utc), datetime(2026, 1, 2, tzinfo=timezone.utc)
+    r = _r2()
+    with Stubber(r._client) as st:
+        st.add_response("list_objects_v2", {"Contents": [{"Key": "u/b", "Size": 5, "LastModified": t1}],
+                                            "IsTruncated": True, "NextContinuationToken": "t"},
+                        {"Bucket": "bkt", "Prefix": "u/"})
+        st.add_response("list_objects_v2", {"Contents": [{"Key": "u/a", "Size": 3, "LastModified": t2}],
+                                            "IsTruncated": False},
+                        {"Bucket": "bkt", "Prefix": "u/", "ContinuationToken": "t"})
+        assert r.list("u/") == [("u/a", 3, t2), ("u/b", 5, t1)]
+    with pytest.raises(ValueError):
+        r.list("u")
+
+
+def test_memory_list_has_modified_times(tmp_path):
+    from datetime import datetime, timezone
+
+    m = cs.MemoryStorage()
+    src = tmp_path / "f"
+    src.write_bytes(b"abc")
+    m.upload(src, "zips/u1/b.zip", "application/zip")
+    key, size, when = m.list("zips/u1/")[0]
+    assert (key, size) == ("zips/u1/b.zip", 3) and (datetime.now(timezone.utc) - when).total_seconds() < 60
+    old = datetime(2020, 1, 1, tzinfo=timezone.utc)
+    m.objects["zips/u1/old.zip"] = b"x"
+    m.modified["zips/u1/old.zip"] = old
+    assert dict((k, w) for k, _s, w in m.list("zips/u1/"))["zips/u1/old.zip"] == old
+    m.delete("zips/u1/old.zip")
+    assert "zips/u1/old.zip" not in m.modified
+    with pytest.raises(ValueError):
+        m.list("zips/u1")

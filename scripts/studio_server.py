@@ -231,7 +231,10 @@ def _error(status: int, code: str, detail: str) -> JSONResponse:
 
 
 def _project_dict(p: Project) -> dict:
-    return project_doc(p)
+    doc = project_doc(p)
+    if p.settings.get("expired"):  # cloud retention swept the video: the app offers an upload instead of editing
+        doc["expired"] = True
+    return doc
 
 
 DOCTOR_UID = "00000000-0000-0000-0000-000000000000"  # nobody: /doctor reads its minutes to reach the usage table
