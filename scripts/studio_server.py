@@ -43,7 +43,7 @@ from edl_ops import clip_edl, cut_words, fix_word, kept_ranges, patch_section, r
 from highlights_llm import HID_RE  # noqa: E402
 from studio_jobs import Job, JobQueue  # noqa: E402
 import studio_stories as stories  # noqa: E402
-from studio_projects import (LANG_MODEL, Project, ProjectClip, _atomic_write_json, _home,  # noqa: E402
+from studio_projects import (LANG_MODEL, Project, ProjectClip, _atomic_write_json, _home, USER_HOME,  # noqa: E402
                              create_project, list_recent, load_project, output_dir, output_name, save_project)
 
 ALLOWED_ORIGINS = ("tauri://localhost", "http://tauri.localhost", "http://localhost:5173")
@@ -140,6 +140,8 @@ class BrandBody(BaseModel):
 
 def brand_file() -> Path:
     """Where the app's brand kit lives: %LOCALAPPDATA%\vedit\brand.json, else ~/.vedit/brand.json (VEDIT_HOME wins)."""
+    if USER_HOME.get() is not None:
+        return _home() / "brand.json"
     home = os.environ.get("VEDIT_HOME")
     if home:
         return Path(home) / "brand.json"
