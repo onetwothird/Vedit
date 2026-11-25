@@ -12,7 +12,10 @@ import time
 import uuid
 from collections import deque
 from dataclasses import dataclass
-from typing import Callable, Literal, Optional, Union
+from pathlib import Path
+from typing import Callable, Literal, Optional, Protocol, Union
+
+from studio_projects import USER_HOME, use_home
 
 PROGRESS_PREFIX = "@@progress "
 TAIL_LINES = 20
@@ -41,7 +44,7 @@ class _Entry:
     steps: list[Step]
     env: dict[str, str]
     cancelled: bool = False
-    tree: Optional[_Tree] = None
+    home: Optional[Path] = None  # the submitter's USER_HOME (cloud); worker threads don't inherit the context
 
 
 def _close_quietly(pipe) -> None:
@@ -155,9 +158,110 @@ class _Tree:
             self.job = None
 
 
+class StepRunner(Protocol):
+    """Runs one step of a job somewhere (a local subprocess, a remote container). Returns (exit code, last stderr lines)."""
+
+    def run(self, job_id: str, stage: str, argv: list[str], env: dict[str, str], on_line: Callable[[str], None],
+            cancelled: Callable[[], bool]) -> tuple[int, list[str]]: ...
+
+    def cancel(self, job_id: str) -> None: ...
+
+
+def _parse_progress(line: str) -> dict | None:
+    if not line.startswith(PROGRESS_PREFIX):
+        return None
+    try:
+        row = json.loads(line[len(PROGRESS_PREFIX):])
+    except ValueError:
+        return None
+    return row if isinstance(row, dict) else None
+
+
+class LocalRunner:
+    """Steps as child processes of this machine (the desktop app); kills the whole process tree on cancel."""
+
+    def __init__(self) -> None:
+        self._lock = threading.Lock()
+        self._trees: dict[str, _Tree] = {}
+
+    def cancel(self, job_id: str) -> None:
+        with self._lock:
+            tree = self._trees.get(job_id)
+            if tree is not None:
+                tree.kill()
+
+    def run(self, job_id: str, stage: str, argv: list[str], env: dict[str, str], on_line: Callable[[str], None],
+            cancelled: Callable[[], bool]) -> tuple[int, list[str]]:
+        env = {**os.environ, **env, "VEDIT_PROGRESS": "1", "PYTHONIOENCODING": "utf-8"}
+        kwargs: dict = {}
+        if os.name == "nt":
+            kwargs["creationflags"] = subprocess.CREATE_NEW_PROCESS_GROUP | subprocess.CREATE_NO_WINDOW
+        else:
+            kwargs["start_new_session"] = True
+        tail: deque[str] = deque(maxlen=TAIL_LINES)
+        with self._lock:
+            if cancelled():
+                return -1, []
+            try:
+                proc = subprocess.Popen(argv, env=env, stdin=subprocess.DEVNULL, stdout=subprocess.PIPE,
+                                        stderr=subprocess.PIPE, text=True, encoding="utf-8", errors="replace",
+                                        **kwargs)
+            except OSError as exc:
+                return -1, [f"could not start step '{stage}': {exc}"]
+            tree = self._trees[job_id] = _Tree(proc)
+
+        def drain_stdout():
+            try:
+                for _ in proc.stdout:
+                    pass
+            finally:
+                _close_quietly(proc.stdout)
+
+        def read_stderr():
+            try:
+                read_stderr_lines()
+            finally:
+                _close_quietly(proc.stderr)
+
+        def read_stderr_lines():
+            for raw in proc.stderr:
+                line = raw.rstrip("\r\n")
+                if _parse_progress(line) is None and line:
+                    tail.append(line)
+                on_line(line)
+
+        readers = [threading.Thread(target=drain_stdout, daemon=True),
+                   threading.Thread(target=read_stderr, daemon=True)]
+        for t in readers:
+            t.start()
+        try:
+            code = proc.wait()
+            tree.kill()  # reap leftover grandchildren (they hold the pipes open otherwise)
+            deadline = time.monotonic() + 1.5
+            for t in readers:
+                t.join(timeout=max(0.0, deadline - time.monotonic()))
+                if t.is_alive():
+                    # Closing the pipe here would block on the reader's buffer lock; the daemon reader closes
+                    # its own pipe when it reaches EOF.
+                    print(f"studio_jobs: step '{stage}' pipe still held after exit; abandoned", file=sys.stderr)
+        finally:
+            if proc.poll() is None:
+                tree.kill()
+            with self._lock:
+                self._trees.pop(job_id, None)
+                tree.close()
+        for _ in range(3):
+            try:
+                return code, list(tail)
+            except RuntimeError:  # deque mutated by an abandoned reader
+                pass
+        return code, []
+
+
 class JobQueue:
-    def __init__(self, on_event: Callable[[Job], None], max_parallel: int = 1):
+    def __init__(self, on_event: Callable[[Job], None], max_parallel: int = 1, runner: StepRunner | None = None):
         self._on_event = on_event
+        self._runner: StepRunner = runner if runner is not None else LocalRunner()
         self._lock = threading.Lock()
         self._entries: dict[str, _Entry] = {}
         self._queue: queue.Queue[Optional[str]] = queue.Queue()
@@ -174,7 +278,7 @@ class JobQueue:
             if self._closed:
                 raise RuntimeError("job queue is shut down")
             self._entries[job.id] = _Entry(job, [tuple(st[:3]) + ((dict(st[3]),) if len(st) > 3 else ())
-                                                 for st in steps], dict(env or {}))
+                                                 for st in steps], dict(env or {}), home=USER_HOME.get())
             snap = dataclasses.replace(job)
         self._emit(snap)
         self._queue.put(job.id)
@@ -184,8 +288,14 @@ class JobQueue:
         with self._lock:
             return dataclasses.replace(self._entries[job_id].job)
 
+    def owner(self, job_id: str) -> Optional[Path]:
+        """The USER_HOME the job was submitted under (None on the desktop). KeyError for unknown ids."""
+        with self._lock:
+            return self._entries[job_id].home
+
     def cancel(self, job_id: str) -> None:
         snap = None
+        kill = False
         with self._lock:
             entry = self._entries[job_id]  # KeyError for unknown ids
             job = entry.job
@@ -195,13 +305,15 @@ class JobQueue:
                 snap = dataclasses.replace(job)
             elif job.state == "running":
                 entry.cancelled = True
-                if entry.tree is not None:
-                    entry.tree.kill()
+                kill = True
+        if kill:
+            self._runner.cancel(job_id)
         if snap:
             self._emit(snap)
 
     def shutdown(self) -> None:
         snaps = []
+        running = []
         with self._lock:
             already = self._closed
             self._closed = True
@@ -213,8 +325,9 @@ class JobQueue:
                     snaps.append(dataclasses.replace(job))
                 elif job.state == "running":
                     entry.cancelled = True
-                    if entry.tree is not None:
-                        entry.tree.kill()
+                    running.append(job.id)
+        for job_id in running:
+            self._runner.cancel(job_id)
         for s in snaps:
             self._emit(s)
         if not already:
@@ -260,7 +373,11 @@ class JobQueue:
                 snap = dataclasses.replace(entry.job)
             self._emit(snap)
             try:
-                self._run_job(entry)
+                if entry.home is not None:
+                    with use_home(entry.home):
+                        self._run_job(entry)
+                else:
+                    self._run_job(entry)
             except Exception as exc:  # never let one job take the worker down
                 self._finish(entry, "failed", error=f"internal error: {exc}")
 
@@ -294,88 +411,23 @@ class JobQueue:
             self._update(entry, pct=done_share * 100)
         self._finish(entry, "done")
 
-    def _run_step(self, entry: _Entry, stage: str, argv: list[str], done_share: float, share: float,
-                  step_env: dict[str, str] | None = None):
-        env = {**os.environ, **entry.env, **(step_env or {}), "VEDIT_PROGRESS": "1", "PYTHONIOENCODING": "utf-8"}
-        kwargs: dict = {}
-        if os.name == "nt":
-            kwargs["creationflags"] = subprocess.CREATE_NEW_PROCESS_GROUP | subprocess.CREATE_NO_WINDOW
-        else:
-            kwargs["start_new_session"] = True
-        tail: deque[str] = deque(maxlen=TAIL_LINES)
-        with self._lock:
-            if entry.cancelled:
-                return -1, []
-            try:
-                proc = subprocess.Popen(argv, env=env, stdin=subprocess.DEVNULL, stdout=subprocess.PIPE,
-                                        stderr=subprocess.PIPE, text=True, encoding="utf-8", errors="replace",
-                                        **kwargs)
-            except OSError as exc:
-                return -1, [f"could not start step '{stage}': {exc}"]
-            tree = entry.tree = _Tree(proc)
-
-        def drain_stdout():
-            try:
-                for _ in proc.stdout:
-                    pass
-            finally:
-                _close_quietly(proc.stdout)
-
-        def read_stderr():
-            try:
-                read_stderr_lines()
-            finally:
-                _close_quietly(proc.stderr)
-
-        def read_stderr_lines():
-            for raw in proc.stderr:
-                line = raw.rstrip("\r\n")
-                row = self._parse_progress(line)
-                if row is None:
-                    if line:
-                        tail.append(line)
-                    continue
-                try:
-                    pct = float(row.get("pct", 0))
-                except (TypeError, ValueError):
-                    pct = 0.0
-                pct = max(0.0, min(100.0, pct))
-                self._update(entry, pct=(done_share + share * pct / 100.0) * 100.0,
-                             message=str(row.get("message", "")))
-
-        readers = [threading.Thread(target=drain_stdout, daemon=True),
-                   threading.Thread(target=read_stderr, daemon=True)]
-        for t in readers:
-            t.start()
-        try:
-            code = proc.wait()
-            tree.kill()  # reap leftover grandchildren (they hold the pipes open otherwise)
-            deadline = time.monotonic() + 1.5
-            for t in readers:
-                t.join(timeout=max(0.0, deadline - time.monotonic()))
-                if t.is_alive():
-                    # Closing the pipe here would block on the reader's buffer lock; the daemon reader closes
-                    # its own pipe when it reaches EOF.
-                    print(f"studio_jobs: step '{stage}' pipe still held after exit; abandoned", file=sys.stderr)
-        finally:
-            if proc.poll() is None:
-                tree.kill()
-            with self._lock:
-                entry.tree = None
-                tree.close()
-        for _ in range(3):
-            try:
-                return code, list(tail)
-            except RuntimeError:  # deque mutated by an abandoned reader
-                pass
-        return code, []
-
     @staticmethod
     def _parse_progress(line: str) -> dict | None:
-        if not line.startswith(PROGRESS_PREFIX):
-            return None
-        try:
-            row = json.loads(line[len(PROGRESS_PREFIX):])
-        except ValueError:
-            return None
-        return row if isinstance(row, dict) else None
+        return _parse_progress(line)
+
+    def _run_step(self, entry: _Entry, stage: str, argv: list[str], done_share: float, share: float,
+                  step_env: dict[str, str] | None = None):
+        def on_line(line: str) -> None:
+            row = _parse_progress(line)
+            if row is None:
+                return
+            try:
+                pct = float(row.get("pct", 0))
+            except (TypeError, ValueError):
+                pct = 0.0
+            pct = max(0.0, min(100.0, pct))
+            self._update(entry, pct=(done_share + share * pct / 100.0) * 100.0,
+                         message=str(row.get("message", "")))
+
+        return self._runner.run(entry.job.id, stage, argv, {**entry.env, **(step_env or {})}, on_line,
+                                lambda: entry.cancelled)

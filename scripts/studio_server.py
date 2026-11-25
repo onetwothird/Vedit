@@ -329,8 +329,9 @@ class Engine:
     every snapshot, so GET /jobs, cancel, last_job and the WebSocket always agree.
     """
 
-    def __init__(self, token: str, job_queue=None):
+    def __init__(self, token: str, job_queue=None, scoped: bool = False):
         self.token = token
+        self.scoped = scoped  # cloud: jobs and their events belong to the user (home) that submitted them
         self._events: queue.Queue[Optional[Job]] = queue.Queue()
         self._locks: dict[str, threading.Lock] = {}
         self._locks_guard = threading.Lock()
@@ -339,7 +340,7 @@ class Engine:
         self._overlay: dict[str, dict] = {}
         self._finalized: set[str] = set()
         self._jobs: dict[str, Job] = {}
-        self._clients: set[tuple[asyncio.AbstractEventLoop, asyncio.Queue]] = set()
+        self._clients: dict[tuple[asyncio.AbstractEventLoop, asyncio.Queue], Path | None] = {}
         self._clients_lock = threading.Lock()
         self._closed = False
         self._recover_interrupted()
@@ -410,17 +411,24 @@ class Engine:
                 self._overlay[job.id] = {"result": {"renders": _public_renders(renders), "files": []}}
             return self._overlaid(job)
 
+    def _owner(self, job_id: str) -> Path | None:
+        return self.queue.owner(job_id)
+
     def job_snapshot(self, job_id: str) -> Job:
         try:
             job = self.queue.get(job_id)
+            if self.scoped and self._owner(job_id) != USER_HOME.get():
+                raise KeyError(job_id)
         except KeyError:
             raise NotFound(f"job {job_id}") from None
         with self._meta_lock:
             return self._overlaid(job)
 
     def active_jobs(self) -> list[Job]:
+        mine = USER_HOME.get()
         with self._meta_lock:
-            return [dataclasses.replace(j) for j in self._jobs.values() if j.state not in TERMINAL]
+            return [dataclasses.replace(j) for j in self._jobs.values()
+                    if j.state not in TERMINAL and (not self.scoped or self._owner(j.id) == mine)]
 
     def _dispatch(self) -> None:
         while True:
@@ -438,11 +446,16 @@ class Engine:
                         continue
                     try:
                         if last[j.id] == k:  # newest snapshot of this job: post-process + persist, then send
-                            self._handle(j)
+                            owner = self._owner(j.id) if self.scoped else None
+                            if owner is not None:  # the dispatcher thread works as the job's owner
+                                with use_home(owner):
+                                    self._handle(j)
+                            else:
+                                self._handle(j)
                         else:  # superseded within the burst: still sent, never written to disk
                             with self._meta_lock:
                                 j = self._overlaid(j)
-                            self._broadcast(_event(j))
+                            self._broadcast(_event(j), j.id)
                     except Exception as e:  # noqa: BLE001 - the dispatcher must survive anything
                         print(f"vedit: event handling failed for job {j.id}: {e}", file=sys.stderr)
             finally:
@@ -479,7 +492,7 @@ class Engine:
                 save_project(p)
             elif raw.kind == "story":
                 self._record_story_job(job)
-        self._broadcast(_event(job))
+        self._broadcast(_event(job), job.id)
 
     def _auto_export(self, p: Project, auto: dict) -> None:
         """A batch video: export its kept clips right after analysis. A failure is kept on the project."""
@@ -626,15 +639,17 @@ class Engine:
     # -- websocket fan-out --
     def add_client(self, client: tuple[asyncio.AbstractEventLoop, asyncio.Queue]) -> None:
         with self._clients_lock:
-            self._clients.add(client)
+            self._clients[client] = USER_HOME.get()
 
     def remove_client(self, client) -> None:
         with self._clients_lock:
-            self._clients.discard(client)
+            self._clients.pop(client, None)
 
-    def _broadcast(self, msg: dict) -> None:
+    def _broadcast(self, msg: dict, job_id: str | None = None) -> None:
+        """Send to every client; when scoped, a job's events go only to the clients of its owner."""
+        owner = self._owner(job_id) if self.scoped and job_id is not None else None
         with self._clients_lock:
-            clients = list(self._clients)
+            clients = [c for c, home in self._clients.items() if not self.scoped or job_id is None or home == owner]
         for loop, q in clients:
             try:
                 loop.call_soon_threadsafe(_offer, q, msg)
@@ -818,7 +833,7 @@ def create_app(token: str | None, queue: JobQueue | None = None, cloud=None) -> 
     if cloud is None and (not isinstance(token, str) or not token.strip()):
         raise ValueError("the engine needs a non-empty bearer token")
     token = token if isinstance(token, str) else ""
-    engine = Engine(token, queue)
+    engine = Engine(token, queue, scoped=cloud is not None)
     allowed_origins = tuple(cloud.origins) if cloud is not None else ALLOWED_ORIGINS
 
     def user_home(jwt_token: str | None) -> Path:
@@ -1199,8 +1214,9 @@ def create_app(token: str | None, queue: JobQueue | None = None, cloud=None) -> 
     @app.post("/jobs/{job_id}/cancel")
     def cancel(job_id: str):
         try:
+            engine.job_snapshot(job_id)  # another user's job is not found either
             engine.queue.cancel(job_id)
-        except KeyError:
+        except (KeyError, NotFound):
             raise NotFound(f"job {job_id}") from None
         return _job_dict(engine.job_snapshot(job_id))
 
