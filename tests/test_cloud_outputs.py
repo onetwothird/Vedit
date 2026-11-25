@@ -358,6 +358,20 @@ def test_story_build_charges_publishes_and_never_stores_the_key(client, storage,
     assert "/" not in (doc["output"] or "") and "\\" not in (doc["output"] or "")
 
 
+def test_story_exports_reissue_links(client, storage):
+    pic = image(client, storage)
+    sid = new_story(client)
+    client.put(f"/stories/{sid}", headers=A, json={"scenes": [{"media": pic}]})
+    assert wait_state(client, client.post(f"/stories/{sid}/build", headers=A, json={}).json()["id"])["state"] == "done"
+    r = client.get(f"/stories/{sid}/exports", headers=A)
+    assert r.status_code == 200
+    (f,) = r.json()
+    assert f["name"] == "Trip.mp4" and DAY in f["url"]
+    assert f["url"].startswith("mem://get/" + cs.export_key(UID_A, sid, "Trip.mp4"))
+    assert client.get(f"/stories/{sid}/exports", headers=B).status_code == 404
+    assert client.get("/stories/s000000000000/exports", headers=A).status_code == 404
+
+
 def test_story_failure_refunds(client, storage, usage, runner):
     pic = image(client, storage)
     sid = new_story(client)
@@ -462,6 +476,29 @@ def test_batch_runs_items_in_turn_charges_each_and_exports(client, storage, usag
     import zipfile
     names = zipfile.ZipFile(io.BytesIO(storage.objects[cs.zip_key(UID_A, bid)])).namelist()
     assert len(names) == 6 and sum(n.endswith(".mp4") for n in names) == 3
+
+
+def test_batch_starts_and_frees_its_slot_when_removing_a_used_upload_fails(client, storage, cfg, runner,
+                                                                          monkeypatch):
+    real = storage.delete
+    calls = []
+
+    def flaky(key):
+        calls.append(key)
+        if len(calls) == 1:
+            raise OSError("r2 blip")
+        real(key)
+
+    monkeypatch.setattr(storage, "delete", flaky)
+    keys = [upload(client, storage) for _ in range(2)]
+    r = client.post("/batches", headers=A, json={"upload_keys": keys, "language": "en", "platform": "tiktok",
+                                                 "export": False})
+    assert r.status_code == 200, r.text
+    bid = r.json()["id"]
+    view = wait_batch(client, bid)
+    assert all(it["project"]["last_job"]["state"] == "done" for it in view["items"])
+    assert client.app.state.engine.batch_runs == {}  # the slot is free again
+    assert [c[1] for c in runner.calls].count("analyze") == 2
 
 
 def test_batch_counts_as_one_job(client, storage, cfg, runner):

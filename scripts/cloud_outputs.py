@@ -145,7 +145,20 @@ def list_exports(cloud, pid: str) -> list[dict]:
         load_project(pid)
     except (KeyError, ValueError):
         raise cloud_assets._not_found() from None
-    prefix = cs.exports_prefix(_uid(), pid)
+    return _fresh_links(cloud, pid)
+
+
+def list_story_exports(cloud, sid: str) -> list[dict]:
+    """A story's published videos (exports/<uid>/<sid>/), each with a fresh 24 h link. Another user's story: 404."""
+    try:
+        stories.load_story_doc(sid)
+    except KeyError:
+        raise cloud_assets._not_found() from None
+    return _fresh_links(cloud, sid)
+
+
+def _fresh_links(cloud, owner_id: str) -> list[dict]:
+    prefix = cs.exports_prefix(_uid(), owner_id)
     return [_link(cloud.storage, k, k[len(prefix):]) for k in cloud.storage.list_keys(prefix)]
 
 
@@ -366,10 +379,20 @@ def start_batch(engine, cloud, body) -> str:
             for f in folders:
                 shutil.rmtree(f, ignore_errors=True)
             raise
-        for k, (_id, _pending, pending_file) in zip(keys, claims):  # consumed: before the claims are released
-            storage.delete(k)
-            pending_file.unlink(missing_ok=True)
-    _advance(engine, cloud, run)
+        # consumed: before the claims are released. Best-effort: the batch is registered and holds a slot, so a
+        # failed delete must never stop it from starting (a leftover object is only storage, cleaned by retention)
+        for k, (_id, _pending, pending_file) in zip(keys, claims):
+            try:
+                storage.delete(k)
+                pending_file.unlink(missing_ok=True)
+            except Exception as e:  # noqa: BLE001
+                print(f"vedit: batch {bid}: could not remove the used upload {k}: {e}", file=sys.stderr)
+    try:
+        _advance(engine, cloud, run)
+    except BaseException:  # never leave a registered batch holding the user's slot
+        with cp._runs_lock:
+            engine.batch_runs.pop(bid, None)
+        raise
     return bid
 
 

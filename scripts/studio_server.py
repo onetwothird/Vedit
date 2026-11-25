@@ -1274,6 +1274,12 @@ def create_app(token: str | None, queue: JobQueue | None = None, cloud=None) -> 
             return _media_response(cloud_assets.resolve(path))
         return _media_response(Path(path))
 
+    if cloud is not None:
+        @app.get("/stories/{sid}/exports")
+        def list_story_exports(sid: str):
+            """This story's built videos with fresh 24 h download links."""
+            return cloud_outputs.list_story_exports(cloud, sid)
+
     @app.post("/stories/{sid}/build")
     def build_story(sid: str, body: Optional[BuildStoryBody] = None):
         body = body or BuildStoryBody()
