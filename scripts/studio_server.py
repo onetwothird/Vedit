@@ -852,7 +852,7 @@ def create_app(token: str | None, queue: JobQueue | None = None, cloud=None) -> 
             if request.url.path == "/health":
                 return await call_next(request)
             try:
-                home = user_home(given)
+                home = await asyncio.to_thread(user_home, given)
             except PermissionError:
                 return _error(401, "unauthorized", "missing or wrong token")
             with use_home(home):  # call_next's endpoint task copies this context
@@ -1211,7 +1211,7 @@ def create_app(token: str | None, queue: JobQueue | None = None, cloud=None) -> 
             return
         if cloud is not None:
             try:
-                home = user_home(ws.query_params.get("token"))
+                home = await asyncio.to_thread(user_home, ws.query_params.get("token"))
             except PermissionError:
                 await ws.close(code=1008)
                 return

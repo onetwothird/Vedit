@@ -109,3 +109,44 @@ def test_desktop_mode_unchanged_without_cloud(tmp_path):
     app = create_app("t")
     with TestClient(app) as c:
         assert c.get("/projects/recent", headers=auth(make_token())).status_code == 401
+
+
+class FakeJwks:
+    """Stands in for PyJWKClient: counts fetches, serves no key for the unknown kid."""
+
+    def __init__(self):
+        self.fetches = 0
+
+    def get_jwk_set(self, refresh=False):
+        if refresh:
+            self.fetches += 1
+
+        class _Set:
+            keys = []
+
+        return _Set()
+
+
+def test_unknown_kid_refetches_at_most_once_per_cooldown(monkeypatch):
+    import cloud_auth
+
+    fake = FakeJwks()
+    clock = [1000.0]
+    monkeypatch.setattr(cloud_auth, "_jwks_clients", {})
+    monkeypatch.setattr(cloud_auth, "_last_refresh", {})
+    monkeypatch.setattr(cloud_auth, "_new_jwks_client", lambda url: fake)
+    monkeypatch.setattr(cloud_auth.time, "monotonic", lambda: clock[0])
+    cfg = CloudConfig(data_root=None, origins=(), supabase_url="https://x.supabase.test", jwt_secret=None)
+
+    def tok(i):
+        return jwt.encode({"sub": UID_A, "aud": "authenticated"}, SECRET, algorithm="HS256", headers={"kid": f"k{i}"})
+
+    for i in range(5):
+        with pytest.raises(PermissionError):
+            cloud_auth.user_id(tok(i), cfg)
+    assert fake.fetches == 0  # first fetch just happened: no refetch inside the window
+    clock[0] += cloud_auth.JWKS_COOLDOWN + 1
+    for i in range(5):
+        with pytest.raises(PermissionError):
+            cloud_auth.user_id(tok(i), cfg)
+    assert fake.fetches == 1
