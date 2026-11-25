@@ -17,10 +17,29 @@ function dropLocalMedia(): Plugin {
   };
 }
 
+/** Dev and the mock web build only: storage stand-in for the mock engine's upload and download links
+    (`/__mock-r2/...`), so a PUT from the browser succeeds without any cloud. Playwright answers these itself. */
+function mockStorage(): Plugin {
+  return {
+    name: "mock-storage",
+    apply: "serve",
+    configureServer(server) {
+      server.middlewares.use("/__mock-r2", (req, res) => {
+        req.resume();
+        req.on("end", () => {
+          res.statusCode = 200;
+          if (req.method === "GET") res.setHeader("Content-Disposition", "attachment");
+          res.end();
+        });
+      });
+    },
+  };
+}
+
 export default defineConfig({
   base: "./",
   define: { __APP_VERSION__: JSON.stringify(version) },
-  plugins: [dropLocalMedia(), react()],
+  plugins: [dropLocalMedia(), mockStorage(), react()],
   // 5173: the engine allows this dev origin. src-tauri/target churns during tauri dev; Vite must not watch it.
   server: { port: 5173, strictPort: true, watch: { ignored: ["**/src-tauri/**"] } },
   clearScreen: false,

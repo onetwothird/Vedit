@@ -20,6 +20,7 @@ import { coverWidth } from "../lib/filmstrip";
 import { aiOptions, baseName } from "../lib/native";
 import { formatLength } from "../lib/time";
 import { useFilmstrip } from "../lib/useFilmstrip";
+import { useMediaUrl } from "../lib/useMediaUrl";
 import { previewSrc } from "../preview/media";
 import { nextKeptTime, outputLength, toOutputTime, toSourceTime, type Range } from "../preview/playback";
 import Player, { type PlayerHandle } from "../preview/Player";
@@ -53,6 +54,7 @@ export default function Edit() {
   const stage = useRef<HTMLDivElement>(null);
   const pendingKeep = useRef(0);
   const film = useFilmstrip(id);
+  const media = useMediaUrl(() => (project ? previewSrc(project) : null)); // a fresh link when the website's token changes
 
   const view = useClipStore((s) => (s.pid === id && s.hid === hid ? s.view : null));
   const saving = useClipStore((s) => s.saving);
@@ -178,10 +180,10 @@ export default function Edit() {
   const onRestore = useCallback((a: number, b: number) => apply({ op: "restore", w0: a, w1: b }), [apply]);
   const onFix = useCallback((wrong: string, right: string) => apply({ op: "fix_word", wrong, right }), [apply]);
   const onOverlays = useCallback((items: Overlay[]) => apply({ op: "patch", section: "overlays", patch: { items } }), [apply]);
-  const suggestBroll = useCallback(async (folder: string) => {
+  const suggestBroll = useCallback(async (folder: string, assets?: string[]) => {
     if (!id || !hid) throw new Error("no clip");
     const ai = await aiOptions();
-    return engine.suggestBroll(id, hid, { folder, ...(ai ? { ai } : {}) });
+    return engine.suggestBroll(id, hid, { folder, ...(assets?.length ? { assets } : {}), ...(ai ? { ai } : {}) });
   }, [id, hid]);
   const onPatch = useCallback((section: EditSection, patch: Record<string, unknown>) => apply({ op: "patch", section, patch }), [apply]);
   // selecting a layer on the timeline opens its tool, so its settings are always where you look for them
@@ -297,7 +299,8 @@ export default function Edit() {
                 key={hid}
                 ref={player}
                 view={view}
-                src={previewSrc(project)}
+                src={media.url ?? ""}
+                onMediaError={media.onError}
                 aspect={aspect}
                 fit={stageBox}
                 onTime={setOutT}

@@ -1,9 +1,11 @@
 import { useId, useState } from "react";
 import { isTauri } from "../engine/client";
+import { isWeb } from "../engine/flavor";
 import type { BrollSuggestion, BrollSuggestions, Overlay } from "../engine/types";
 import { brollAt } from "../edit/overlays";
 import { t } from "../i18n/t";
-import { pickFolderNative } from "../lib/native";
+import { pickFolderNative, pickManyNative } from "../lib/native";
+import { BROLL_IMAGE, BROLL_VIDEO } from "../lib/overlayMedia";
 import { formatClock } from "../lib/time";
 import "../broll.css";
 
@@ -30,7 +32,7 @@ function rememberFolder(folder: string): void {
 }
 
 export interface BrollSuggestProps {
-  suggest(folder: string): Promise<BrollSuggestions>;
+  suggest(folder: string, assets?: string[]): Promise<BrollSuggestions>;
   /** Adds the layers in one edit (one undo step). */
   onAdd(items: Overlay[]): void;
   t0: number;
@@ -45,19 +47,38 @@ type State =
 
 export function BrollSuggest({ suggest, onAdd, t0, t1 }: BrollSuggestProps) {
   const id = useId();
+  const web = isWeb();
   const [folder, setFolder] = useState(lastFolder);
   const [state, setState] = useState<State>({ kind: "idle" });
+  // the website has no folders: the user chooses files, which are uploaded and matched
+  const [assets, setAssets] = useState<string[]>([]);
+  const [sending, setSending] = useState<{ done: number; n: number } | null>(null);
+  const ready = web ? assets.length > 0 : !!folder.trim();
 
   async function run(from = folder) {
     const f = from.trim();
-    if (!f) return;
-    rememberFolder(f);
+    if (!web && !f) return;
+    if (web && !assets.length) return;
+    if (!web) rememberFolder(f);
     setState({ kind: "busy" });
     try {
-      const r = await suggest(f);
+      const r = web ? await suggest("", assets) : await suggest(f);
       setState({ kind: "done", files: r.files, aiFailed: r.ai === "ai_failed", items: r.suggestions, total: r.suggestions.length });
     } catch (e) {
       setState({ kind: "error", msg: e instanceof Error ? e.message : String(e) });
+    }
+  }
+
+  async function chooseFiles() {
+    if (sending) return;
+    setState({ kind: "idle" });
+    try {
+      const refs = await pickManyNative(t("edit.bs.files"), [...BROLL_IMAGE, ...BROLL_VIDEO], (p) => setSending({ done: p.done, n: p.n }));
+      if (refs.length) setAssets(refs);
+    } catch (e) {
+      setState({ kind: "error", msg: e instanceof Error ? e.message : String(e) });
+    } finally {
+      setSending(null);
     }
   }
 
@@ -75,7 +96,7 @@ export function BrollSuggest({ suggest, onAdd, t0, t1 }: BrollSuggestProps) {
   return (
     <section className="bs" aria-labelledby={`${id}-h`}>
       <h3 className="bs-title" id={`${id}-h`}>{t("edit.bs.title")}</h3>
-      <p className="hint">{t("edit.bs.hint")}</p>
+      <p className="hint">{t(web ? "edit.bs.hint.web" : "edit.bs.hint")}</p>
       <form
         className="bs-form"
         onSubmit={(e) => {
@@ -83,21 +104,41 @@ export function BrollSuggest({ suggest, onAdd, t0, t1 }: BrollSuggestProps) {
           void run();
         }}
       >
-        <label className="ed-label" htmlFor={`${id}-f`}>{t("edit.bs.folder")}</label>
-        <div className="bs-row">
-          <input
-            id={`${id}-f`}
-            className="bs-input mono"
-            value={folder}
-            placeholder={t("edit.bs.folder.ph")}
-            spellCheck={false}
-            onChange={(e) => setFolder(e.currentTarget.value)}
-          />
-          {isTauri() && (
-            <button type="button" className="secondary" onClick={choose}>{t("edit.bs.choose")}</button>
-          )}
-        </div>
-        <button type="submit" className="primary bs-go" disabled={!folder.trim() || state.kind === "busy"}>
+        {web ? (
+          <>
+            <span className="ed-label" id={`${id}-f`}>{t("edit.bs.files")}</span>
+            <div className="bs-row">
+              <button type="button" className="secondary" aria-describedby={`${id}-f`} disabled={!!sending} onClick={() => void chooseFiles()}>
+                {t("edit.bs.files.choose")}
+              </button>
+              <span className="meta" aria-live="polite">
+                {sending
+                  ? t("edit.bs.files.uploading", { done: Math.min(sending.done + 1, sending.n), n: sending.n })
+                  : assets.length
+                    ? t(`edit.bs.files.chosen.${assets.length === 1 ? "one" : "other"}`, { n: assets.length })
+                    : ""}
+              </span>
+            </div>
+          </>
+        ) : (
+          <>
+            <label className="ed-label" htmlFor={`${id}-f`}>{t("edit.bs.folder")}</label>
+            <div className="bs-row">
+              <input
+                id={`${id}-f`}
+                className="bs-input mono"
+                value={folder}
+                placeholder={t("edit.bs.folder.ph")}
+                spellCheck={false}
+                onChange={(e) => setFolder(e.currentTarget.value)}
+              />
+              {isTauri() && (
+                <button type="button" className="secondary" onClick={choose}>{t("edit.bs.choose")}</button>
+              )}
+            </div>
+          </>
+        )}
+        <button type="submit" className="primary bs-go" disabled={!ready || !!sending || state.kind === "busy"}>
           {state.kind === "busy" ? t("edit.bs.busy") : t("edit.bs.go")}
         </button>
       </form>

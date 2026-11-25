@@ -1,5 +1,6 @@
 import { useEffect, useId, useRef, useState, type KeyboardEvent, type ReactNode } from "react";
 import { isTauri } from "../engine/client";
+import { isWeb } from "../engine/flavor";
 import type { Aspect, Edl, EditSection } from "../engine/types";
 import { OUTPUT_ASPECTS, TRANSITION_DURATION, TRANSITIONS, type Transition } from "../edit/timeline";
 import { BrollTool, TextTool, type LayerToolProps } from "./LayerTools";
@@ -298,7 +299,24 @@ function Sound({ edl, onPatch }: Pick<InspectorProps, "edl" | "onPatch">) {
   const patch = (p: Rec) => onPatch("audio", p);
   const setMusic = (path: string) => patch({ music: { volume: DEFAULT_VOLUME, ...(music ?? {}), path, duck: true } });
 
+  const [uploading, setUploading] = useState(false); // the website uploads the music file before using it
+  const [uploadError, setUploadError] = useState<string | null>(null);
+
   async function pick() {
+    if (isWeb()) {
+      if (uploading) return;
+      setUploadError(null);
+      setUploading(true);
+      try {
+        const path = await pickAudioNative();
+        if (path) setMusic(path);
+      } catch (e) {
+        setUploadError(e instanceof Error ? e.message : t("upload.failed"));
+      } finally {
+        setUploading(false);
+      }
+      return;
+    }
     if (!isTauri()) return file.current?.click();
     const path = await pickAudioNative().catch(() => null);
     if (path) setMusic(path);
@@ -325,7 +343,7 @@ function Sound({ edl, onPatch }: Pick<InspectorProps, "edl" | "onPatch">) {
           {music && <span className="ed-file" title={String(music.path)}>{baseName(String(music.path))}</span>}
         </span>
         <span className="row">
-          <button type="button" className="secondary" onClick={pick}>
+          <button type="button" className="secondary" onClick={pick} disabled={uploading}>
             {music ? t("edit.sound.music.change") : t("edit.sound.music.add")}
           </button>
           {music && (
@@ -346,6 +364,7 @@ function Sound({ edl, onPatch }: Pick<InspectorProps, "edl" | "onPatch">) {
           }}
         />
       </div>
+      {uploadError && <p className="error" role="alert">{uploadError}</p>}
       {music && (
         <>
           <Slider

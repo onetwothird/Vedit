@@ -4,9 +4,10 @@
 import {
   EngineError,
   type AnalyzeBody, type CaptionTrack, type ClipOp, type ClipView, type Doctor, type Edl, type EdlClip, type Engine,
-  type AiTestResult, type Batch, type BatchBody, type Brand, type BrollBody, type BrollSuggestion, type BrollSuggestions, type ExportBody, type Story, type StoryBody, type StoryScene, type FilmstripInfo, type Health, type Highlight, type Job, type ModelStatus, type NewProjectBody, type Project, type ProjectType,
+  type AiTestResult, type Asset, type Batch, type BatchBody, type Brand, type BrollBody, type BrollSuggestion, type BrollSuggestions, type ExportBody, type ExportLink, type Story, type StoryBody, type StoryScene, type FilmstripInfo, type Health, type Highlight, type Job, type ModelStatus, type NewProjectBody, type Project, type ProjectType,
   type ProjectClip, type RenderPlanEntry, type Transcript, type TranscriptWord,
 } from "./types";
+import { isWeb } from "./flavor";
 import { CAPTION_FONTS, DEFAULT_CAPTION_FONT } from "../edit/captionFonts";
 import { spelledAs } from "../edit/spelling";
 import { fixWord, patchSection } from "../edit/timeline";
@@ -213,12 +214,20 @@ const normWord = (w: string): string => {
 const nameWords = (file: string): string[] =>
   [...new Set(file.replace(/\.[^.]+$/, "").split(/[^0-9A-Za-z]+/).map(normWord))].filter((w) => w.length >= 3 && !BROLL_STOP.has(w));
 
-function mockBroll(edl: Edl, tr: Transcript, body: BrollBody): BrollSuggestions {
+function mockBroll(edl: Edl, tr: Transcript, body: BrollBody, library?: Map<string, Asset>): BrollSuggestions {
+  // the website names the files it uploaded (asset references); the desktop names a folder
+  const refs = body.assets ?? [];
   const folder = body.folder.trim();
-  if (!/^([A-Za-z]:[\\/]|\/)/.test(folder)) throw new EngineError(400, "bad_request", "folder must be an existing absolute folder");
-  const files = /empty[\\/]?$/i.test(folder) ? [] : MOCK_BROLL;
+  if (!refs.length && !/^([A-Za-z]:[\\/]|\/)/.test(folder)) throw new EngineError(400, "bad_request", "folder must be an existing absolute folder");
+  const named = new Map<string, string>(); // file name -> the path the edit saves
+  for (const ref of refs) {
+    const a = library?.get(ref.replace(/^asset:/, ""));
+    if (!a) throw new EngineError(400, "bad_request", "unknown asset");
+    named.set(a.name, ref);
+  }
+  const files = refs.length ? [...named.keys()] : /empty[\\/]?$/i.test(folder) ? [] : MOCK_BROLL;
   const sep = folder.includes("\\") ? "\\" : "/";
-  const pathOf = (f: string) => `${folder.replace(/[\\/]+$/, "")}${sep}${f}`;
+  const pathOf = (f: string) => named.get(f) ?? `${folder.replace(/[\\/]+$/, "")}${sep}${f}`;
   // the words the clip plays, each with the end of its kept range
   const said: { i: number; end: number }[] = [];
   for (const [a, b] of wordRanges(edl)) {
@@ -319,6 +328,17 @@ export function createMockEngine(opts: { tickMs?: number; persist?: Pick<Storage
   const batches = new Map<string, { id: string; created: string; type: ProjectType; export: boolean; items: { project: string; source: string; analyze: string }[] }>();
   const autoExport = new Map<string, { body: Omit<ExportBody, "clips">; job?: string; error?: string }>(); // batch projects
   let seq = 0;
+  // the website's side of the mock: files "uploaded" this session (the PUT itself goes to a URL on this origin),
+  // the library they are committed to, and the download links of finished exports
+  const uploads = new Map<string, { kind: Asset["kind"]; name: string; size: number }>();
+  const assets = new Map<string, Asset>();
+  const exportNames = new Map<string, string[]>();
+  let linkSeq = 0;
+  const origin = (): string => (typeof location === "undefined" ? "" : location.origin);
+  const linksFor = (pid: string, names: string[]): ExportLink[] => {
+    const sig = ++linkSeq; // a new link each time, as the real engine signs a new URL
+    return names.map((name) => ({ name, url: `${origin()}/__mock-r2/exports/${encodeURIComponent(pid)}/${encodeURIComponent(name)}?sig=${sig}` }));
+  };
 
   const notFound = (what: string) => new EngineError(404, "not_found", `not found: ${what}`);
 
@@ -544,11 +564,46 @@ export function createMockEngine(opts: { tickMs?: number; persist?: Pick<Storage
       for (const j of jobs.values()) if (j.state === "queued" || j.state === "running") listener(snapshot(j));
       return () => void listeners.delete(listener);
     },
+    async createUpload(body) {
+      if (!body.size || body.size <= 0) throw bad("the file is empty");
+      const limit = { video: 3 * 1024 ** 3, image: 20 * 1024 ** 2, audio: 200 * 1024 ** 2, font: 10 * 1024 ** 2, lut: 10 * 1024 ** 2 }[body.kind];
+      if (!limit) throw bad(`unknown kind ${body.kind}`);
+      if (body.size > limit) throw bad(`a ${body.kind} file can be at most ${Math.round(limit / 1024 ** 2)} MB`);
+      if (!body.content_type.startsWith(`${body.kind}/`) && ["video", "image", "audio"].includes(body.kind)) {
+        throw bad(`content type ${body.content_type} does not match a ${body.kind} file`);
+      }
+      const key = `mock-upload-${++seq}`;
+      uploads.set(key, { kind: body.kind, name: fileName(body.name), size: body.size });
+      return { upload_key: key, url: `${origin()}/__mock-r2/uploads/${key}` };
+    },
+    async commitAsset(uploadKey) {
+      const up = uploads.get(uploadKey);
+      if (!up) throw notFound("upload");
+      const asset: Asset = { asset_id: `a${String(++seq).padStart(12, "0")}`, kind: up.kind, name: up.name, size: up.size };
+      assets.set(asset.asset_id, asset);
+      uploads.delete(uploadKey);
+      return { ...asset };
+    },
+    // test trigger: window.__veditMockUsedSeconds sets the minutes already used this month
+    async usage() {
+      const used = (globalThis as { __veditMockUsedSeconds?: number }).__veditMockUsedSeconds ?? 0;
+      return { seconds_used: used, seconds_limit: 3600, storage_bytes: 0, storage_limit: 10 * 1024 ** 3 };
+    },
+    async projectExports(pid) {
+      project(pid);
+      return linksFor(pid, exportNames.get(pid) ?? []);
+    },
     async health(): Promise<Health> { return { ok: true, version: "mock" }; },
     async doctor(): Promise<Doctor> { return { ffmpeg: true, libass: true, models: snapshot(models) }; },
     async recent() { return [...projects.values()].map(snapshot); },
     async createProject(body: NewProjectBody) {
-      if (!body.source) throw new EngineError(400, "bad_request", `source video not found: ${body.source}`);
+      let source = body.source;
+      if (body.upload_key !== undefined) { // the website: the video was uploaded first
+        const up = uploads.get(body.upload_key);
+        if (!up || up.kind !== "video") throw new EngineError(400, "bad_request", "Upload a video to start a project");
+        source = up.name;
+      }
+      if (!source) throw new EngineError(400, "bad_request", `source video not found: ${source}`);
       const type = body.type ?? "clip";
       const allowed: Record<ProjectType, Project["platform"][]> = {
         clip: ["reels", "shorts", "tiktok"], reel: ["reels", "shorts", "tiktok"], vlog: ["youtube"],
@@ -556,7 +611,7 @@ export function createMockEngine(opts: { tickMs?: number; persist?: Pick<Storage
       if (!allowed[type].includes(body.platform)) {
         throw new EngineError(400, "bad_request", `unsupported platform for a ${type} project: ${body.platform}`);
       }
-      return snapshot(newProject(body.source, body.language, body.platform, false, type));
+      return snapshot(newProject(source, body.language, body.platform, false, type));
     },
     async getProject(pid) { return snapshot(project(pid)); },
     async filmstrip(pid) {
@@ -624,7 +679,7 @@ export function createMockEngine(opts: { tickMs?: number; persist?: Pick<Storage
       project(pid);
       const edl = edls.get(`${pid}/${hid}`);
       if (!edl) throw notFound(`clip ${hid}`);
-      return mockBroll(edl, transcript, body);
+      return mockBroll(edl, transcript, body, assets);
     },
     async setKept(pid, hid, kept) {
       const p = project(pid);
@@ -661,7 +716,12 @@ export function createMockEngine(opts: { tickMs?: number; persist?: Pick<Storage
         ? { afterTicks: 2, error: "The render stopped: ffmpeg could not read this part of the video.", result: { renders, files: [], failed: { hid: bad, aspect: formats[0] } } }
         : undefined;
       return run(job, plan.map((e) => [e.stage, 1 / n] as [string, number]), (j) => {
-        j.result = { renders, files: withExtras(renders) };
+        const files = withExtras(renders);
+        if (isWeb()) {
+          const names = files.map(fileName);
+          exportNames.set(pid, [...new Set([...(exportNames.get(pid) ?? []), ...names])]);
+          j.result = { renders, files: linksFor(pid, names) };
+        } else j.result = { renders, files };
       }, failure);
     },
     async getJob(id) {

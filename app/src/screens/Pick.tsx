@@ -14,6 +14,7 @@ import { analyzeBody, baseName } from "../lib/native";
 import { formatClock, formatLength } from "../lib/time";
 import { whyPicked } from "../lib/why";
 import { useFilmstrip } from "../lib/useFilmstrip";
+import { useMediaUrl } from "../lib/useMediaUrl";
 import { coverWidth } from "../lib/filmstrip";
 import { previewSrc } from "../preview/media";
 import Player from "../preview/Player";
@@ -51,6 +52,7 @@ export default function Pick() {
   const pending = useRef(0); // setKept calls in flight
   const handled = useRef<string | undefined>(undefined);
   const film = useFilmstrip(id);
+  const media = useMediaUrl(() => (project ? previewSrc(project) : null)); // a fresh link when the website's token changes
 
   const job = useJob(jobId);
   const running = job?.state === "queued" || job?.state === "running";
@@ -255,7 +257,8 @@ export default function Pick() {
                 <Player
                   key={loaded.hid}
                   view={loaded.view}
-                  src={previewSrc(project)}
+                  src={media.url ?? ""}
+                  onMediaError={media.onError}
                   aspect={ASPECTS.find((a) => a === loaded.view.edl.output?.aspect) ?? "9:16"}
                   fit={fit}
                   poster={(f) => <FilmFrame film={film} t={current.highlight.start} width={coverWidth(film, f.width, f.height)} />}

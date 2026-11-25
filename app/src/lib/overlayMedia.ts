@@ -14,6 +14,13 @@ export function rememberPicked(file: File): string {
   return path;
 }
 
+/** Remember a file uploaded to the library (`asset:<id>`): the preview plays the local copy during this session. */
+export function rememberAsset(ref: string, file: File): void {
+  const old = picked.get(ref);
+  if (old) URL.revokeObjectURL(old);
+  picked.set(ref, URL.createObjectURL(file));
+}
+
 /** What the preview loads for a b-roll path, or null when this session cannot show it. */
 export function overlayUrl(path: string): string | null {
   const local = picked.get(path);

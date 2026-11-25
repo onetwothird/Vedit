@@ -72,8 +72,15 @@ export interface RenderPlanEntry {
   path: string;
 }
 
+/** A finished file on the website: a name and a link that works for 24 hours. */
+export interface ExportLink {
+  name: string;
+  url: string;
+}
+
 export interface ExportResult {
-  files: string[];
+  /** Paths on this computer (desktop), or download links (website). */
+  files: (string | ExportLink)[];
   failed?: { hid: string; aspect: string };
   /** The video finished but something extra did not (a thumbnail). */
   warnings?: { hid: string; aspect: string; kind: "thumbnail" }[];
@@ -206,7 +213,10 @@ export type ClipOp =
   | { op: "patch"; section: EditSection; patch: Record<string, unknown> };
 
 export interface NewProjectBody {
-  source: string;
+  /** A path on this computer (desktop). Not sent by the website, which sends `upload_key`. */
+  source?: string;
+  /** The website: the key of a video already uploaded with `uploadFile`. */
+  upload_key?: string;
   language: Language;
   platform: Platform;
   /** Defaults to "clip". */
@@ -260,7 +270,10 @@ export interface Brand {
 
 /** POST /projects/{pid}/clips/{hid}/broll: suggest b-roll from the photos and videos in `folder` (scripts/broll.py). */
 export interface BrollBody {
+  /** A folder on this computer (desktop). Empty on the website, which sends `assets`. */
   folder: string;
+  /** The website: `asset:<id>` references of the photos and videos the user uploaded. */
+  assets?: string[];
   ai?: AnalyzeBody["ai"];
 }
 
@@ -389,6 +402,35 @@ export interface Batch {
   items: BatchItem[];
 }
 
+export type AssetKind = "video" | "image" | "audio" | "font" | "lut";
+
+export interface Asset {
+  asset_id: string;
+  kind: AssetKind;
+  name: string;
+  size: number;
+}
+
+export interface UploadRequest {
+  kind: AssetKind;
+  name: string;
+  size: number;
+  content_type: string;
+}
+
+/** Where to PUT the bytes (a presigned URL), and the key that names the upload afterwards. */
+export interface UploadTicket {
+  upload_key: string;
+  url: string;
+}
+
+export interface Usage {
+  seconds_used: number;
+  seconds_limit: number;
+  storage_bytes: number;
+  storage_limit: number;
+}
+
 export interface Engine {
   health(): Promise<Health>;
   doctor(): Promise<Doctor>;
@@ -421,4 +463,10 @@ export interface Engine {
   buildStory(sid: string, body?: BuildStoryBody): Promise<Job>;
   createBatch(body: BatchBody): Promise<Batch>;
   getBatch(bid: string): Promise<Batch>;
+  // ---- the website: uploads, library, usage, download links (the desktop engine has none of these)
+  createUpload(body: UploadRequest): Promise<UploadTicket>;
+  commitAsset(uploadKey: string): Promise<Asset>;
+  usage(): Promise<Usage>;
+  /** The project's exported files with fresh download links. */
+  projectExports(pid: string): Promise<ExportLink[]>;
 }

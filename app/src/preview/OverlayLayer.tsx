@@ -1,6 +1,7 @@
 import { useEffect, useRef, type CSSProperties } from "react";
 import type { Overlay } from "../engine/types";
 import { overlayUrl } from "../lib/overlayMedia";
+import { useMediaUrl } from "../lib/useMediaUrl";
 import { toOutputTime, type Range } from "./playback";
 
 /** Where an overlay starts in output time, or null when its moment was cut (the export skips it too). */
@@ -52,7 +53,7 @@ export default function OverlayLayer({ overlays, ranges, out, frameWidth, frameH
 }
 
 function Broll({ o, since, playing }: { o: Extract<Overlay, { type: "image" | "video" }>; since: number; playing: boolean }) {
-  const url = overlayUrl(o.path);
+  const { url, onError } = useMediaUrl(() => overlayUrl(o.path)); // a fresh link when the website's token changes
   const video = useRef<HTMLVideoElement>(null);
   const cls = `pv-ov-media ${o.mode === "pip" ? `pip ${o.position ?? "top-right"}` : "full"}`;
   useEffect(() => {
@@ -66,8 +67,8 @@ function Broll({ o, since, playing }: { o: Extract<Overlay, { type: "image" | "v
   const style = { opacity: brollOpacity(since, o.duration) };
   if (!url) return <div className={`${cls} missing`} style={style}><span>{o.path.split(/[\\/]/).pop()}</span></div>;
   return o.type === "image" ? (
-    <img className={cls} src={url} alt="" style={style} />
+    <img className={cls} src={url} alt="" style={style} onError={onError} />
   ) : (
-    <video ref={video} className={cls} src={url} muted playsInline preload="auto" style={style} />
+    <video ref={video} className={cls} src={url} muted playsInline preload="auto" style={style} onError={onError} />
   );
 }
