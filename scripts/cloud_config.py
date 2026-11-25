@@ -4,7 +4,10 @@ from __future__ import annotations
 import os
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Callable
+from typing import TYPE_CHECKING, Any, Callable
+
+if TYPE_CHECKING:
+    from scripts.cloud_storage import Storage
 
 
 @dataclass
@@ -13,7 +16,7 @@ class CloudConfig:
     origins: tuple[str, ...]
     supabase_url: str
     jwt_secret: str | None
-    storage: Any = None  # Storage protocol: added in the storage task
+    storage: "Storage | None" = None  # R2 in production; wired in from_env by the deploy task
     usage: Any = None  # Usage protocol: added in the usage task
     runner_factory: Callable | None = None
     paused: bool = False
