@@ -6,7 +6,7 @@ import type { AnalyzeBody } from "../engine/types";
 import { t } from "../i18n/t";
 import { rememberAsset } from "./overlayMedia";
 import { getAiProvider, type AiProvider } from "./prefs";
-import { UploadError, kindOfName, uploadAsset } from "./upload";
+import { UploadError, acceptedExtensions, kindOfName, uploadAsset } from "./upload";
 
 export const VIDEO_EXTENSIONS = ["mp4", "mov", "m4v", "mkv", "avi", "webm", "mts", "3gp"];
 export const VIDEO_ACCEPT = VIDEO_EXTENSIONS.map((e) => `.${e}`).join(",");
@@ -57,7 +57,7 @@ export function pickFilesWeb(accept: string, multiple: boolean): Promise<File[]>
 /** Opens the file dialog on the website, uploads what was chosen into the library, and returns an `asset:<id>` for each.
     Rejects with the reason (too big, not a kind of file Vedit takes, storage full) so the caller can say it. */
 async function pickAssetsWeb(extensions: string[], multiple: boolean, onProgress?: PickProgress): Promise<string[]> {
-  const files = await pickFilesWeb(extensions.map((e) => `.${e}`).join(","), multiple);
+  const files = await pickFilesWeb(acceptedExtensions(extensions).map((e) => `.${e}`).join(","), multiple);
   const refs: string[] = [];
   for (const [i, file] of files.entries()) {
     const kind = kindOfName(file.name);

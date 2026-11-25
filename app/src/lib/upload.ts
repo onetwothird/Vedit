@@ -19,6 +19,10 @@ const KIND_TYPES: Record<string, string> = {
   ttf: "font/ttf", otf: "font/otf", cube: "text/plain",
 };
 
+/** Of these extensions, the ones the engine accepts: what a file dialog may offer (an .opus or .avi would only be
+    refused after the pick). */
+export const acceptedExtensions = (extensions: string[]): string[] => extensions.filter((e) => kindOfName(`x.${e}`) !== null);
+
 const extOf = (name: string): string => name.split(".").pop()?.toLowerCase() ?? "";
 
 /** The kind of asset a file name stands for, or null when Vedit takes no such file. */

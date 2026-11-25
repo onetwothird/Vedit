@@ -5,9 +5,11 @@ const api = vi.hoisted(() => ({
   createUpload: vi.fn(),
   commitAsset: vi.fn(),
 }));
-vi.mock("../engine/client", () => ({ engine: api }));
+vi.mock("../engine/client", () => ({ engine: api, isMock: () => false, isTauri: () => false }));
 
-import { commitAsset, importProblem, uploadFile, videoDuration } from "./upload";
+import { AUDIO_EXTENSIONS, PHOTO_EXTENSIONS, VIDEO_EXTENSIONS } from "./native";
+import { BROLL_IMAGE, BROLL_VIDEO } from "./overlayMedia";
+import { acceptedExtensions, commitAsset, importProblem, kindOfName, uploadFile, videoDuration } from "./upload";
 
 class FakeXHR {
   static last: FakeXHR | null = null;
@@ -203,5 +205,18 @@ describe("videoDuration", () => {
     const p = videoDuration(file("a.avi", "video/x-msvideo"));
     (v.onerror as () => void)();
     await expect(p).rejects.toBeInstanceOf(Error);
+  });
+});
+
+describe("file dialogs", () => {
+  it("offer only extensions the engine takes, each with a kind (no .opus, which it refuses)", () => {
+    const audio = acceptedExtensions(AUDIO_EXTENSIONS);
+    expect(audio).not.toContain("opus");
+    expect(audio).toEqual(["mp3", "m4a", "aac", "wav", "flac", "ogg"]);
+    for (const list of [AUDIO_EXTENSIONS, VIDEO_EXTENSIONS, PHOTO_EXTENSIONS, BROLL_IMAGE, BROLL_VIDEO]) {
+      for (const e of acceptedExtensions(list)) expect(kindOfName(`a.${e}`)).not.toBeNull();
+    }
+    expect(acceptedExtensions(BROLL_IMAGE)).toEqual(BROLL_IMAGE);
+    expect(acceptedExtensions(BROLL_VIDEO)).toEqual(BROLL_VIDEO);
   });
 });

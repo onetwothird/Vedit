@@ -118,6 +118,15 @@ export default function Import() {
   const [uploadPct, setUploadPct] = useState(0);
   const [uploadCancelled, setUploadCancelled] = useState(false);
   const upload = useRef<AbortController | null>(null);
+  const alive = useRef(true);
+  // leaving the screen stops an upload in flight; nothing after it (project, analysis, navigation) may run
+  useEffect(() => {
+    alive.current = true;
+    return () => {
+      alive.current = false;
+      upload.current?.abort();
+    };
+  }, []);
 
   const job = useJob(jobId);
   const running = job?.state === "queued" || job?.state === "running";
@@ -276,10 +285,12 @@ export default function Import() {
           setUploadPct(0);
           setPhase("uploading");
           const { upload_key } = await uploadFile(video, "video", setUploadPct, sending.signal);
+          if (!alive.current || sending.signal.aborted) throw new UploadError("aborted", t("upload.cancelled"));
           setPhase("creating");
           body = { upload_key, language, platform: platformFor(kind, platform), type: kind };
         }
         const p = await engine.createProject(body);
+        if (!alive.current) return; // left while the project was being made: no analysis, no minutes spent, no navigation
         project = p.id;
         ownedId.current = p.id;
         setPid(p.id);

@@ -80,6 +80,27 @@ test.describe("import", () => {
     await expect(page.getByRole("link", { name: /cancel-me/ })).toHaveCount(0);
   });
 
+  test("leaving Import mid-upload stops it: no project, no analysis, no pull back", async ({ page }) => {
+    let release!: () => void;
+    const held = new Promise<void>((r) => (release = r));
+    let put = false;
+    await page.route("**/__mock-r2/uploads/**", async (route) => {
+      put = true;
+      await held;
+      await route.fulfill({ status: 200, body: "" }).catch(() => undefined); // the page has already aborted it
+    });
+    await page.goto("/#/p/new/import");
+    await page.locator('input[type="file"]').setInputFiles(video("leave.webm"));
+    await page.getByRole("button", { name: "Start" }).click();
+    await expect.poll(() => put).toBe(true);
+    await page.getByRole("link", { name: "Vedit home" }).click();
+    await expect(page).toHaveURL(/#\/$/);
+    release();
+    await page.waitForTimeout(1500);
+    await expect(page).toHaveURL(/#\/$/); // not pulled back to a project
+    await expect(page.getByRole("link", { name: /leave/ })).toHaveCount(0);
+  });
+
   test("an upload the storage rejects is explained", async ({ page }) => {
     await page.route("**/__mock-r2/uploads/**", (route) => route.fulfill({ status: 403, body: "" }));
     await page.goto("/#/p/new/import");
