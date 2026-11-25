@@ -2,6 +2,7 @@ import { useEffect, useRef, useState, type DragEvent } from "react";
 import { Link, useNavigate, useParams, useSearchParams } from "react-router-dom";
 import ProgressStages from "../components/ProgressStages";
 import Screen from "../components/Screen";
+import UsageMeter from "../components/UsageMeter";
 import { useAuth } from "../auth/auth";
 import { engine, isTauri } from "../engine/client";
 import { isWeb } from "../engine/flavor";
@@ -268,6 +269,9 @@ export default function Import() {
     setUploadCancelled(false);
     const sending = new AbortController();
     upload.current = sending;
+    // the address this screen started on: it is gone once the address changes, even before React has torn it down
+    const here = window.location.hash;
+    const left = () => !alive.current || window.location.hash !== here;
     try {
       let project = pid;
       if (!project) {
@@ -285,12 +289,12 @@ export default function Import() {
           setUploadPct(0);
           setPhase("uploading");
           const { upload_key } = await uploadFile(video, "video", setUploadPct, sending.signal);
-          if (!alive.current || sending.signal.aborted) throw new UploadError("aborted", t("upload.cancelled"));
+          if (left() || sending.signal.aborted) throw new UploadError("aborted", t("upload.cancelled"));
           setPhase("creating");
           body = { upload_key, language, platform: platformFor(kind, platform), type: kind };
         }
         const p = await engine.createProject(body);
-        if (!alive.current) return; // left while the project was being made: no analysis, no minutes spent, no navigation
+        if (left()) return; // left while the project was being made: no analysis, no minutes spent, no navigation
         project = p.id;
         ownedId.current = p.id;
         setPid(p.id);
@@ -544,6 +548,7 @@ export default function Import() {
                 <p className="imp-start-note">{t(file ? (web ? "import.ready.web" : "import.ready") : "import.start.needs")}</p>
               </>
             )}
+            {web && !pid && <UsageMeter />}
           </aside>
         </div>
       </div>

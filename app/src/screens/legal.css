@@ -1,0 +1,18 @@
+.legal { min-height: 100vh; background: var(--bg); color: var(--ink); }
+.legal-top {
+  display: flex; align-items: center; justify-content: space-between; gap: 16px; padding: 14px 24px;
+  border-bottom: 1px solid var(--line-2);
+}
+.legal-brand { display: inline-flex; align-items: center; gap: 8px; font-weight: 600; color: var(--ink); text-decoration: none; }
+.legal-top nav { display: flex; gap: 16px; }
+.legal-top nav a { color: var(--body); }
+.legal-top nav a[aria-current="page"] { color: var(--ink); text-decoration: underline; }
+.legal-body { max-width: 720px; margin: 0 auto; padding: 32px 16px 64px; line-height: 1.6; }
+.legal-body h1 { font-size: 28px; margin: 16px 0 8px; }
+.legal-body h2 { font-size: 16px; margin: 28px 0 6px; }
+.legal-draft { padding: 10px 14px; border: 1px solid var(--line-2); border-radius: 8px; background: var(--panel); color: var(--body); font-size: 13px; }
+.legal-draft strong { color: var(--ink); }
+.legal-missing { font-family: var(--mono); font-size: 13px; color: var(--muted); }
+.legal-body a { color: var(--accent); }
+.legal-links { display: flex; gap: 16px; justify-content: center; padding: 24px 0 8px; font-size: 13px; }
+.legal-links a { color: var(--muted); }

@@ -657,10 +657,10 @@ export function createMockEngine(opts: { tickMs?: number; persist?: Pick<Storage
       uploads.delete(uploadKey);
       return { ...asset };
     },
-    // test trigger: window.__veditMockUsedSeconds sets the minutes already used this month
+    // test triggers: window.__veditMockUsedSeconds and __veditMockStorageBytes set what is already used
     async usage() {
-      const used = (globalThis as { __veditMockUsedSeconds?: number }).__veditMockUsedSeconds ?? 0;
-      return { seconds_used: used, seconds_limit: 3600, storage_bytes: 0, storage_limit: 10 * 1024 ** 3 };
+      const g = globalThis as { __veditMockUsedSeconds?: number; __veditMockStorageBytes?: number };
+      return { seconds_used: g.__veditMockUsedSeconds ?? 0, seconds_limit: 3600, storage_bytes: g.__veditMockStorageBytes ?? 0, storage_limit: 10 * 1024 ** 3 };
     },
     async projectExports(pid) {
       project(pid);

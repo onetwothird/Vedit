@@ -3,6 +3,7 @@ import { Link, useNavigate } from "react-router-dom";
 import { useAuth } from "../auth/auth";
 import Avatar from "../components/Avatar";
 import Screen from "../components/Screen";
+import UsageMeter from "../components/UsageMeter";
 import UploadList, { type UploadRow } from "../components/UploadList";
 import { engine, isTauri } from "../engine/client";
 import { isWeb } from "../engine/flavor";
@@ -49,14 +50,18 @@ function Seg<T extends string>(props: {
   );
 }
 
-const SECTIONS = ["account", "general", "ai", "models", "brand", "updates"] as const;
-type SectionId = (typeof SECTIONS)[number];
+const ALL_SECTIONS = ["account", "usage", "general", "ai", "models", "brand", "updates"] as const;
+type SectionId = (typeof ALL_SECTIONS)[number];
+/** The website has no speech models to manage (the server owns them); only it shows usage. */
+const WEB_SECTIONS: SectionId[] = ALL_SECTIONS.filter((id) => id !== "models");
+const DESKTOP_SECTIONS: SectionId[] = ALL_SECTIONS.filter((id) => id !== "usage");
 
 /* Section icons, in the app's stroke style (1.7, round caps). */
 const ICONS: Record<SectionId, ReactNode> = {
   account: <><circle cx="12" cy="8" r="3.6" /><path d="M5 20c.6-3.6 3.4-5.6 7-5.6s6.4 2 7 5.6" /></>,
   general: <><path d="M4 7h9M17 7h3M4 17h3M11 17h9" /><circle cx="15" cy="7" r="2" /><circle cx="9" cy="17" r="2" /></>,
   ai: <><path d="M10 4.5 11.6 9 16 10.5 11.6 12 10 16.5 8.4 12 4 10.5 8.4 9z" /><path d="M17.5 14.5v5M15 17h5" /></>,
+  usage: <><path d="M4 18V9M10 18V5M16 18v-6M22 18H2" /></>,
   models: <path d="M4 10.5v3M8 7v10M12 4v16M16 8v8M20 10.5v3" />,
   brand: <><path d="M12 3.5a8.5 8.5 0 1 0 0 17c1 0 1.6-.7 1.6-1.5 0-.9-.6-1.3-.6-2.1 0-.9.7-1.5 1.6-1.5h2.1a3.8 3.8 0 0 0 3.8-3.8c0-4.4-3.8-8.1-8.5-8.1z" /><circle cx="7.8" cy="11" r=".9" /><circle cx="10.5" cy="7.4" r=".9" /><circle cx="15" cy="7.8" r=".9" /></>,
   updates: <><path d="M19.5 12a7.5 7.5 0 1 1-2.2-5.3" /><path d="M19.5 4.5v4h-4" /></>,
@@ -110,6 +115,14 @@ function AccountSection() {
           <Link className="primary" to="/signin">{t("settings.account.signin")}</Link>
         </div>
       )}
+    </Section>
+  );
+}
+
+function UsageSection() {
+  return (
+    <Section id="usage" title={t("settings.usage")}>
+      <UsageMeter />
     </Section>
   );
 }
@@ -772,7 +785,7 @@ function SectionIcon({ id }: { id: SectionId }) {
 }
 
 /** The section list beside Settings: where you are, and a jump to the others. */
-function SectionNav() {
+function SectionNav({ sections: SECTIONS }: { sections: SectionId[] }) {
   const [current, setCurrent] = useState<SectionId>("account");
   // after a click the list keeps the chosen section while the page scrolls to it (the last ones can't reach the top)
   const held = useRef(0);
@@ -812,7 +825,7 @@ function SectionNav() {
       window.removeEventListener("resize", onScroll);
       cancelAnimationFrame(frame);
     };
-  }, []);
+  }, [SECTIONS]);
 
   function go(id: SectionId) {
     const el = document.getElementById(id);
@@ -841,17 +854,19 @@ function SectionNav() {
 }
 
 export default function Settings() {
+  const web = isWeb();
   return (
     <Screen>
       <div className="imp set-page">
         <h1 className="title imp-title">{t("settings.title")}</h1>
         <div className="set-layout">
-          <SectionNav />
+          <SectionNav sections={web ? WEB_SECTIONS : DESKTOP_SECTIONS} />
           <div className="settings">
             <AccountSection />
+            {web && <UsageSection />}
             <GeneralSection />
             <AiSection />
-            <ModelsSection />
+            {!web && <ModelsSection />}
             <BrandSection />
             <UpdatesSection />
           </div>

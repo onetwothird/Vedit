@@ -9,7 +9,8 @@ const PNG = Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR
 // a 2 second WebM: the test browser has no H.264, so it could not read the length of an MP4
 const SHORT = readFileSync("tests/e2e/fixtures/short.webm");
 const video = (name: string) => ({ name, mimeType: "video/webm", buffer: SHORT });
-const NAME_ONLY = { cookies: [], origins: [{ origin: "http://localhost:5198", localStorage: [{ name: "vedit.signin.skipped", value: "true" }] }] };
+// no account saved: the website treats this as a visitor (the skip flag does not matter on the web)
+const SIGNED_OUT = { cookies: [], origins: [] };
 
 /** Answers every upload; returns the list of PUT requests seen. */
 async function acceptUploads(page: Page, hold?: Promise<void>) {
@@ -108,18 +109,6 @@ test.describe("import", () => {
     await page.getByRole("button", { name: "Start" }).click();
     await expect(page.getByRole("alert")).toHaveText("The upload didn't finish. Check your connection and try again.");
     await expect(page.getByRole("button", { name: "Start" })).toBeEnabled();
-  });
-
-  test.describe("signed out", () => {
-    test.use({ storageState: NAME_ONLY });
-    test("Start sends you to the sign-in screen", async ({ page }) => {
-      const puts = await acceptUploads(page);
-      await page.goto("/#/p/new/import");
-      await page.locator('input[type="file"]').setInputFiles(video("episode-7.webm"));
-      await page.getByRole("button", { name: "Start" }).click();
-      await expect(page.getByRole("heading", { name: "Sign in to Vedit" })).toBeVisible();
-      expect(puts).toHaveLength(0);
-    });
   });
 });
 
@@ -409,5 +398,68 @@ test.describe("brand kit", () => {
 
     await again.getByRole("group", { name: "Logo" }).getByRole("button", { name: "Clear" }).click();
     await expect(again.getByRole("group", { name: "Logo" })).toContainText("Not set");
+  });
+});
+
+test.describe("sign-in gate", () => {
+  test.use({ storageState: SIGNED_OUT });
+
+  for (const route of ["/#/p/new/import", "/#/settings", "/#/batch", "/#/s/new", "/#/p/mock-1/export"]) {
+    test(`${route} sends a visitor to sign in`, async ({ page }) => {
+      await page.goto(route);
+      await expect(page).toHaveURL(/#\/signin$/);
+      await expect(page.getByRole("heading", { name: "Sign in to Vedit" })).toBeVisible();
+      await expect(page.getByRole("button", { name: "Skip for now" })).toHaveCount(0);
+    });
+  }
+
+  test("signing in returns to the page that was asked for", async ({ page }) => {
+    await page.goto("/#/p/new/import");
+    await page.getByRole("button", { name: "Continue with Google" }).click();
+    await expect(page).toHaveURL(/#\/p\/new\/import$/);
+    await expect(page.getByRole("button", { name: "Start" })).toBeVisible();
+  });
+
+  test("Home is open and asks the visitor to sign in", async ({ page }) => {
+    await page.goto("/#/");
+    await expect(page.getByRole("heading", { name: "Sign in to start cutting" })).toBeVisible();
+    await expect(page.getByRole("link", { name: "Sign in or create an account" })).toBeVisible();
+    await expect(page).toHaveURL(/#\/$/);
+  });
+
+  for (const [route, title] of [["/#/terms", "Terms of use"], ["/#/privacy", "Privacy policy"]] as const) {
+    test(`${route} is open, marked as a draft, and shows the contact placeholder`, async ({ page }) => {
+      await page.goto(route);
+      await expect(page.getByRole("heading", { name: title, level: 1 })).toBeVisible();
+      await expect(page.getByRole("note")).toContainText("Draft — review before launch");
+      await expect(page.getByText("contact email not set")).toBeVisible();
+      await expect(page).toHaveURL(new RegExp(`${route.slice(2)}$`));
+    });
+  }
+});
+
+test.describe("usage meter", () => {
+  test.beforeEach(async ({ page }) => {
+    await page.addInitScript(() => {
+      Object.assign(window, { __veditMockUsedSeconds: 23 * 60, __veditMockStorageBytes: 1.2 * 1024 ** 3 });
+    });
+  });
+
+  test("Import shows minutes and storage as named meters", async ({ page }) => {
+    await page.goto("/#/p/new/import");
+    await expect(page.getByText("23 of 60 minutes used this month")).toBeVisible();
+    await expect(page.getByText("1.2 of 10 GB of storage used")).toBeVisible();
+    await expect(page.getByRole("meter", { name: "Analysis time this month" })).toHaveAttribute("aria-valuenow", String(23 * 60));
+    await expect(page.getByRole("meter", { name: "Storage used" })).toBeVisible();
+  });
+
+  test("Settings shows the same meters, no speech-model section and no output folder", async ({ page }) => {
+    await page.goto("/#/settings");
+    await expect(page.getByRole("heading", { name: "Usage", level: 2 })).toBeVisible();
+    await expect(page.getByText("23 of 60 minutes used this month")).toBeVisible();
+    await expect(page.getByText("1.2 of 10 GB of storage used")).toBeVisible();
+    await expect(page.getByRole("heading", { name: "Language models" })).toHaveCount(0);
+    await expect(page.getByRole("button", { name: "Language models" })).toHaveCount(0);
+    await expect(page.getByText("Save finished clips")).toHaveCount(0);
   });
 });
