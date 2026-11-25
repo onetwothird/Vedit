@@ -227,11 +227,22 @@ def suggest_with_llm(words: list[dict], files: list[Path], ranges: list[tuple[fl
         return [], AI_FAILED
 
 
-def suggest(transcript: dict, ranges: list[tuple[float, float]], folder: str | Path, *, overlays=(),
-            ai: dict | None = None, http=None) -> dict:
+def suggest(transcript: dict, ranges: list[tuple[float, float]], folder: str | Path | None, *, overlays=(),
+            ai: dict | None = None, http=None, named: list[tuple[str, str]] | None = None) -> dict:
     """Suggestions for one clip: {"suggestions": [...], "files": n, "ai": None | "ok" | "ai_failed"}.
-    `ranges` are the clip's kept source ranges; existing b-roll `overlays` keep their moments and files."""
-    files = list_media(folder)
+    `ranges` are the clip's kept source ranges; existing b-roll `overlays` keep their moments and files.
+    `named` (cloud) replaces the folder: (reference, original file name) pairs, matched by name and suggested by
+    reference; anything that is not a photo or a video by its name is left out."""
+    refs: dict[str, str] = {}
+    if named is not None:
+        files = []
+        for n, (ref, name) in enumerate(named):
+            if media_type(name):
+                f = Path(str(n)) / Path(name).name  # unique per file; matching only reads the name
+                refs[str(f)] = ref
+                files.append(f)
+    else:
+        files = list_media(folder)
     words = clip_words(transcript, ranges)
     taken, used = [], []
     for o in overlays or []:
@@ -246,6 +257,8 @@ def suggest(transcript: dict, ranges: list[tuple[float, float]], folder: str | P
         candidates += found
         status = err or "ok"
     candidates += match_names(words, files, ranges)
+    for c in candidates:
+        c["path"] = refs.get(c["path"], c["path"])
     out = pick(candidates, taken, used)
     for s in out:
         s.pop("score", None)

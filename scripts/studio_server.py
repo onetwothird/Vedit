@@ -89,7 +89,8 @@ class AITestBody(BaseModel):
 
 
 class BrollBody(BaseModel):
-    folder: str  # absolute folder of photos and videos to suggest from
+    folder: str = ""  # absolute folder of photos and videos to suggest from (desktop)
+    assets: list[str] = Field(default_factory=list, max_length=500)  # cloud: `asset:` references of the caller
     ai: Optional[AIOptions] = None
 
 
@@ -1247,7 +1248,13 @@ def create_app(token: str | None, queue: JobQueue | None = None, cloud=None) -> 
 
     @app.get("/file")
     def broll_file(path: str):
-        """A b-roll photo or video, only when a recent project's clip already shows it."""
+        """A b-roll photo or video, only when a recent project's clip already shows it. Cloud: one of the caller's
+        own assets (`asset:<id>`); a plain path is never read, another user's id is not found."""
+        if cloud is not None:
+            try:
+                return _media_response(cloud_assets.resolve(path))
+            except ValueError:
+                raise NotFound("file") from None
         used = _used_broll(Path(path), list_recent(50))
         if used is None:
             raise NotFound("file")
@@ -1282,11 +1289,26 @@ def create_app(token: str | None, queue: JobQueue | None = None, cloud=None) -> 
     @app.post("/projects/{pid}/clips/{hid}/broll")
     def suggest_broll(pid: str, hid: str, body: BrollBody):
         """B-roll for the moments the clip names a thing or place, from the photos and videos in `folder`.
-        Suggests only: the app places the ones the user accepts through the overlays patch."""
-        folder = Path(body.folder.strip())
-        if not folder.is_absolute() or not folder.is_dir():
-            raise ValueError("folder must be an existing absolute folder")
-        p = _project(pid)
+        Suggests only: the app places the ones the user accepts through the overlays patch.
+        Cloud: from `assets`, the caller's uploaded files; a folder or a plain path is refused, nothing read."""
+        p = _project(pid)  # another user's project is not found, whatever the body says
+        named: list[tuple[str, str]] | None = None
+        folder: Path | None = None
+        if cloud is not None:
+            if body.folder.strip():
+                raise ValueError("Choose files from your library; folders are not used on the web")
+            if not body.assets:
+                raise ValueError("Choose at least one photo or video")
+            named = []
+            for ref in body.assets:
+                try:
+                    named.append((ref, cloud_assets.lookup(ref)[1]["name"]))
+                except ValueError:
+                    raise ValueError("Choose files from your library") from None
+        else:
+            folder = Path(body.folder.strip())
+            if not folder.is_absolute() or not folder.is_dir():
+                raise ValueError("folder must be an existing absolute folder")
         wd = workdir_for(p.source)
         edl = load_json(_edl_path(wd, _find_clip(p, hid)))
         tp = wd / "transcript.main.json"
@@ -1294,7 +1316,7 @@ def create_app(token: str | None, queue: JobQueue | None = None, cloud=None) -> 
             raise NotFound("transcript")
         tr = load_json(tp)
         ai = {"provider": body.ai.provider, "api_key": body.ai.api_key.strip(), "model": body.ai.model} if body.ai else None
-        return broll.suggest(tr, kept_ranges(edl, tr), folder, overlays=edl.get("overlays") or [], ai=ai)
+        return broll.suggest(tr, kept_ranges(edl, tr), folder, overlays=edl.get("overlays") or [], ai=ai, named=named)
 
     @app.put("/projects/{pid}/clips/{hid}/kept")
     def set_kept(pid: str, hid: str, body: KeptBody):

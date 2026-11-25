@@ -76,6 +76,11 @@ def _public(a: dict) -> dict:
 
 def resolve(ref: str) -> Path:
     """`asset:<id>` -> the file in this user's library. Plain paths and unknown ids are not references."""
+    return lookup(ref)[0]
+
+
+def lookup(ref: str) -> tuple[Path, dict]:
+    """`asset:<id>` -> (the file, its public entry: kind and the name it was uploaded with). ValueError otherwise."""
     if not isinstance(ref, str) or not ref.startswith("asset:"):
         raise ValueError("expected an asset: reference")
     aid = ref[len("asset:"):]
@@ -88,7 +93,7 @@ def resolve(ref: str) -> Path:
     path = _assets_dir() / f"{aid}{entry['ext']}"
     if not path.is_file():
         raise ValueError("unknown asset")
-    return path
+    return path, _public(entry)
 
 
 def _disk_bytes(root: Path) -> int:

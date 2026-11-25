@@ -1,11 +1,13 @@
 import { useEffect, useRef, useState, type FormEvent, type KeyboardEvent } from "react";
-import { useNavigate } from "react-router-dom";
+import { Link, useLocation, useNavigate } from "react-router-dom";
 import { MIN_PASSWORD, skipSignIn, useAuth, type SocialProvider } from "../auth/auth";
 import Logo from "../components/Logo";
+import { isWeb } from "../engine/flavor";
 import { t } from "../i18n/t";
 import { ClipArt, bars } from "./home/HomeArt";
 import "./home/home.css";
 import "./signin.css";
+import "./legal.css";
 
 type Mode = "signin" | "signup";
 
@@ -29,6 +31,8 @@ function WaveStrip() {
 /** Sign in or create an account (CapCut-style): the product on one side, the ways in on the other. */
 export default function SignIn() {
   const navigate = useNavigate();
+  const from = (useLocation().state as { from?: string } | null)?.from;
+  const web = isWeb();
   const { account, busy, error, run, clearError } = useAuth();
   const [mode, setMode] = useState<Mode>("signin");
   const [name, setName] = useState("");
@@ -36,8 +40,8 @@ export default function SignIn() {
   const [password, setPassword] = useState("");
 
   useEffect(() => {
-    if (account) navigate("/", { replace: true });
-  }, [account, navigate]);
+    if (account) navigate(from && from.startsWith("/") ? from : "/", { replace: true });
+  }, [account, navigate, from]);
 
   function switchMode(m: Mode) {
     setMode(m);
@@ -173,7 +177,14 @@ export default function SignIn() {
             </form>
           </div>
         </div>
-        <button type="button" className="signin-skip" onClick={skip}>{t("signin.skip")}</button>
+        {web ? (
+          <p className="legal-links">
+            <Link to="/terms">{t("legal.terms.link")}</Link>
+            <Link to="/privacy">{t("legal.privacy.link")}</Link>
+          </p>
+        ) : (
+          <button type="button" className="signin-skip" onClick={skip}>{t("signin.skip")}</button>
+        )}
       </main>
     </div>
   );

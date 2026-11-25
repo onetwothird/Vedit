@@ -1,19 +1,24 @@
 import { useCallback, useEffect, useRef, useState, type CSSProperties, type DragEvent } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import Screen from "../components/Screen";
+import UploadList, { type UploadRow } from "../components/UploadList";
 import { engine, engineMediaUrl, isMock, isTauri } from "../engine/client";
+import { isWeb } from "../engine/flavor";
 import { useJob } from "../engine/events";
 import {
-  EngineError, type Story as StoryDoc, type StoryAspect, type StoryBody, type StoryCaptions, type StoryMotion,
-  type StoryResult, type StoryScene, type StoryVoice,
+  EngineError, type ExportLink, type Story as StoryDoc, type StoryAspect, type StoryBody, type StoryCaptions,
+  type StoryMotion, type StoryResult, type StoryScene, type StoryVoice,
 } from "../engine/types";
 import { t } from "../i18n/t";
+import { assetKind, isAssetRef, rememberAssetInfo, useAssetNames } from "../lib/assetInfo";
 import {
-  AUDIO_ACCEPT, AUDIO_EXTENSIONS, PHOTO_EXTENSIONS, STORY_ACCEPT, VIDEO_EXTENSIONS, baseName, isStoryMediaName,
-  listenNativeDrop, pickAudioNative, pickManyNative, showInFolder,
+  AUDIO_ACCEPT, AUDIO_EXTENSIONS, PHOTO_EXTENSIONS, STORY_ACCEPT, VIDEO_EXTENSIONS, acceptFor, baseName,
+  isStoryMediaName, listenNativeDrop, pickAudioNative, pickManyNative, showInFolder,
 } from "../lib/native";
-import { pickedUrl, rememberPicked } from "../lib/overlayMedia";
+import { pickedUrl, rememberAsset, rememberPicked } from "../lib/overlayMedia";
 import { getSettings } from "../lib/prefs";
+import { STORY_MAX_SECONDS, clock, estimateStorySeconds } from "../lib/storyLength";
+import { UploadError, kindOfName, uploadAsset, videoDuration } from "../lib/upload";
 import "./import.css";
 import "./story.css";
 
@@ -27,7 +32,14 @@ const SAVE_DELAY_MS = 500;
 type SaveState = "idle" | "saving" | "saved" | "error";
 
 const kindOf = (path: string): StoryScene["kind"] =>
-  PHOTO_EXTENSIONS.includes(path.split(".").pop()?.toLowerCase() ?? "") ? "image" : "video";
+  isAssetRef(path)
+    ? (assetKind(path) === "image" ? "image" : "video")
+    : PHOTO_EXTENSIONS.includes(path.split(".").pop()?.toLowerCase() ?? "") ? "image" : "video";
+
+/** The website: the length of each clip uploaded this session, for the 3-minute estimate. */
+const clipSeconds = new Map<string, number>();
+/** A download link lasts 24 hours; one this old is replaced before it is followed. */
+const LINK_STALE_MS = 23 * 3600 * 1000;
 
 const bodyOf = (s: StoryDoc): StoryBody => ({
   title: s.title, aspect: s.aspect, voice: s.voice, captions: s.captions, music: s.music, music_volume: s.music_volume,
@@ -115,6 +127,23 @@ export default function Story() {
   const { sid } = useParams();
   const navigate = useNavigate();
   const desktop = isTauri();
+  const web = isWeb();
+  // the website: files on their way to the library, the finished video's download links
+  const [uploads, setUploads] = useState<UploadRow[]>([]);
+  const [musicRow, setMusicRow] = useState<UploadRow | null>(null);
+  const controllers = useRef(new Map<string, AbortController>());
+  const alive = useRef(true);
+  const [links, setLinks] = useState<ExportLink[] | null>(null);
+  const [linkError, setLinkError] = useState(false);
+  const issued = useRef(0);
+  useEffect(() => {
+    alive.current = true;
+    const live = controllers.current;
+    return () => {
+      alive.current = false; // leaving the screen stops every upload; nothing is added after it
+      live.forEach((c) => c.abort());
+    };
+  }, []);
   const [story, setStory] = useState<StoryDoc | null>(null);
   const [missing, setMissing] = useState(false);
   const [voices, setVoices] = useState<StoryVoice[]>([]);
@@ -137,8 +166,9 @@ export default function Story() {
   const running = job?.state === "queued" || job?.state === "running";
 
   useEffect(() => {
-    engine.storyVoices().then(setVoices, () => setVoices([]));
-  }, []);
+    // Piper voices run on this computer only: the website never offers them
+    engine.storyVoices().then((v) => setVoices(web ? v.filter((x) => !x.id.toLowerCase().startsWith("piper")) : v), () => setVoices([]));
+  }, [web]);
 
   useEffect(() => {
     if (!sid) return;
@@ -159,6 +189,13 @@ export default function Story() {
         if (!live) return;
         latest.current = s;
         setStory(s);
+        if (web && s.output) {
+          engine.storyExports(s.id).then((l) => {
+            if (!live) return;
+            issued.current = Date.now();
+            setLinks(l);
+          }, () => undefined);
+        }
         const last = s.last_job;
         if (last && (last.state === "queued" || last.state === "running")) {
           setJobId(last.id);
@@ -170,7 +207,7 @@ export default function Story() {
     return () => {
       live = false;
     };
-  }, [sid, navigate]);
+  }, [sid, navigate, web]);
 
   const save = useCallback((): Promise<boolean> => {
     if (timer.current) {
@@ -258,13 +295,87 @@ export default function Story() {
   function onMediaInput(e: React.ChangeEvent<HTMLInputElement>) {
     const files = [...(e.target.files ?? [])];
     e.target.value = "";
-    addMedia(files.map(rememberPicked));
+    if (web) void uploadMedia(files);
+    else addMedia(files.map(rememberPicked));
   }
 
   function onDrop(e: DragEvent) {
     e.preventDefault();
     setOver(false);
-    if (!desktop) addMedia([...e.dataTransfer.files].map(rememberPicked));
+    if (web) void uploadMedia([...e.dataTransfer.files]);
+    else if (!desktop) addMedia([...e.dataTransfer.files].map(rememberPicked));
+  }
+
+  /** The website: one file into the library with its own progress row; resolves its `asset:` or null when stopped. */
+  async function send(file: File, kind: "image" | "video" | "audio", row: UploadRow, onPct: (pct: number) => void): Promise<string | null> {
+    const ctl = new AbortController();
+    controllers.current.set(row.id, ctl);
+    try {
+      onPct(0);
+      const { ref } = await uploadAsset(file, kind, onPct, ctl.signal);
+      if (!alive.current || ctl.signal.aborted) return null;
+      rememberAssetInfo(ref, file.name, kind);
+      rememberAsset(ref, file); // the preview shows the local copy this session
+      if (kind === "video") {
+        const seconds = await videoDuration(file).catch(() => null);
+        if (seconds !== null) clipSeconds.set(ref, seconds);
+      }
+      return ref;
+    } catch (e) {
+      if (alive.current && !(e instanceof UploadError && e.code === "aborted")) {
+        setError(e instanceof EngineError || e instanceof UploadError ? e.message : t("upload.failed"));
+      }
+      return null;
+    } finally {
+      controllers.current.delete(row.id);
+    }
+  }
+
+  /** The website: photos and clips are uploaded one after another, each added as a scene once it is in. */
+  async function uploadMedia(files: File[]) {
+    const ok = files.filter((f) => kindOfName(f.name) === "image" || kindOfName(f.name) === "video");
+    const skipped = files.length - ok.length;
+    setNotice(skipped ? t(skipped === 1 ? "story.add.skipped.one" : "story.add.skipped.other", { n: skipped }) : null);
+    if (!ok.length) return;
+    setError(null);
+    const rows = ok.map((f, i): UploadRow => ({ id: `${Date.now()}-${i}-${f.name}`, name: f.name, pct: null }));
+    setUploads((cur) => [...cur, ...rows]);
+    const setPct = (id: string, pct: number) => setUploads((cur) => cur.map((r) => (r.id === id ? { ...r, pct } : r)));
+    for (const [i, file] of ok.entries()) {
+      if (!alive.current) return;
+      const row = rows[i];
+      if (cancelledRows.current.has(row.id)) continue; // stopped before its turn
+      const ref = await send(file, kindOfName(file.name) as "image" | "video", row, (pct) => setPct(row.id, pct));
+      if (!alive.current) return;
+      setUploads((cur) => cur.filter((r) => r.id !== row.id));
+      if (ref) addMedia([ref]);
+    }
+  }
+
+  const cancelledRows = useRef(new Set<string>());
+  function cancelUpload(id: string) {
+    cancelledRows.current.add(id);
+    controllers.current.get(id)?.abort();
+    setUploads((cur) => cur.filter((r) => r.id !== id));
+  }
+
+  async function follow(e: React.MouseEvent<HTMLAnchorElement>, link: ExportLink) {
+    setLinkError(false);
+    if (Date.now() - issued.current < LINK_STALE_MS) return; // still good: the browser follows it
+    e.preventDefault();
+    try {
+      const again = await engine.storyExports(story!.id);
+      const next = again.find((l) => l.name === link.name);
+      if (!next) throw new Error("gone");
+      issued.current = Date.now();
+      setLinks(again);
+      const a = document.createElement("a"); // follow the new link for the person
+      a.href = next.url;
+      a.download = next.name;
+      a.click();
+    } catch {
+      setLinkError(true);
+    }
   }
 
   async function chooseMusic() {
@@ -283,11 +394,22 @@ export default function Story() {
   function onMusicInput(e: React.ChangeEvent<HTMLInputElement>) {
     const f = e.target.files?.[0];
     e.target.value = "";
+    if (web && f && kindOfName(f.name) === "audio") {
+      const row: UploadRow = { id: `music-${Date.now()}`, name: f.name, pct: 0 };
+      setMusicRow(row);
+      setError(null);
+      void send(f, "audio", row, (pct) => setMusicRow((r) => (r ? { ...r, pct } : r))).then((ref) => {
+        if (!alive.current) return;
+        setMusicRow(null);
+        if (ref) change((s) => ({ ...s, music: ref }));
+      });
+      return;
+    }
     if (f && AUDIO_EXTENSIONS.includes(f.name.split(".").pop()?.toLowerCase() ?? "")) change((s) => ({ ...s, music: rememberPicked(f) }));
   }
 
   async function make() {
-    if (!story || starting || running) return;
+    if (!story || starting || running || tooLong) return;
     setStarting(true);
     setError(null);
     setShowError(false);
@@ -325,13 +447,28 @@ export default function Story() {
   // a finished video becomes the story's latest one
   useEffect(() => {
     if (job?.state !== "done" || !story) return;
-    const file = (job.result as StoryResult | null)?.files?.[0];
+    const first = (job.result as StoryResult | null)?.files?.[0];
+    const file = typeof first === "object" && first ? first.name : first;
     if (file && story.output !== file) {
       const next = { ...story, output: file };
       latest.current = next;
       setStory(next);
     }
   }, [job?.state, job?.result, story]);
+
+  // the website: the finished video's download links come with the job
+  useEffect(() => {
+    if (!web || job?.state !== "done") return;
+    const got = ((job.result as StoryResult | null)?.files ?? []).filter((f): f is ExportLink => typeof f === "object" && !!f);
+    if (got.length) {
+      issued.current = Date.now();
+      setLinks(got);
+    }
+  }, [web, job?.state, job?.result]);
+
+  useAssetNames([...(story?.scenes.map((sc) => sc.media) ?? []), story?.music]);
+  const estimate = web && story ? estimateStorySeconds(story.scenes, clipSeconds) : null;
+  const tooLong = !!estimate && estimate.seconds > STORY_MAX_SECONDS;
 
   if (missing) {
     return (
@@ -415,7 +552,7 @@ export default function Story() {
                     : <span className="vf-file-empty">{t("story.viewer.empty")}</span>}
                 </span>
               </div>
-              <input ref={mediaInput} type="file" accept={STORY_ACCEPT} multiple hidden onChange={onMediaInput} />
+              <input ref={mediaInput} type="file" accept={web ? acceptFor([...PHOTO_EXTENSIONS, ...VIDEO_EXTENSIONS]) : STORY_ACCEPT} multiple hidden onChange={onMediaInput} />
             </div>
 
             {n > 0 && (
@@ -488,6 +625,7 @@ export default function Story() {
                 </button>
               </section>
             )}
+            <UploadList rows={uploads} onCancel={cancelUpload} label={t("story.add.label")} />
             {notice && <p className="set-note" role="status">{notice}</p>}
           </div>
 
@@ -535,7 +673,8 @@ export default function Story() {
                 ) : (
                   <button type="button" className="secondary st-music-add" onClick={() => void chooseMusic()}>{t("story.music.add")}</button>
                 )}
-                <input ref={musicInput} type="file" accept={AUDIO_ACCEPT} hidden onChange={onMusicInput} />
+                {musicRow && <UploadList rows={[musicRow]} onCancel={(id) => controllers.current.get(id)?.abort()} />}
+                <input ref={musicInput} type="file" accept={web ? acceptFor(AUDIO_EXTENSIONS) : AUDIO_ACCEPT} hidden onChange={onMusicInput} />
               </div>
             </div>
 
@@ -557,11 +696,34 @@ export default function Story() {
                   {failed && <p className="error" role="alert">{job?.error || t("story.make.failed")}</p>}
                   {job?.state === "cancelled" && <p className="note-text" role="status">{t("story.cancelled")}</p>}
                   {error && <p className="error" role="alert">{error}</p>}
-                  <button type="button" className="primary imp-start" disabled={n === 0 || starting} onClick={() => void make()}>
+                  <button type="button" className="primary imp-start" disabled={n === 0 || starting || tooLong || uploads.length > 0} onClick={() => void make()}>
                     {starting ? t("story.make.starting") : t(output ? "story.make.again" : "story.make")}
                   </button>
                   {n === 0 && <p className="imp-start-note">{t("story.make.needs")}</p>}
-                  {output && (
+                  {estimate && (tooLong ? (
+                    <p className="error" role="alert">{t("story.cap.over", { t: clock(estimate.seconds) })}</p>
+                  ) : (
+                    <p className="imp-start-note">
+                      {n === 0 ? t("story.cap") : t(estimate.unknown ? "story.cap.unknown" : "story.cap.estimate", { t: clock(estimate.seconds) })}
+                    </p>
+                  ))}
+                  {output && web && (
+                    <div className={`st-out${job?.state === "done" ? " fresh" : ""}`} role="status">
+                      <span className="st-out-label">{t(job?.state === "done" ? "story.done" : "story.last")}</span>
+                      {(links ?? []).map((link) => (
+                        <span key={link.name} className="row">
+                          <span className="sc-name mono" title={link.name}>{link.name}</span>
+                          <a className="secondary inline" href={link.url} download={link.name} aria-label={t("export.download.label", { name: link.name })}
+                            onClick={(e) => void follow(e, link)}>
+                            {t("export.download")}
+                          </a>
+                        </span>
+                      ))}
+                      <span className="set-note">{t("story.download.note")}</span>
+                    </div>
+                  )}
+                  {linkError && <p className="error" role="alert">{t("export.download.error")}</p>}
+                  {output && !web && (
                     <div className={`st-out${job?.state === "done" ? " fresh" : ""}`} role="status">
                       <span className="st-out-label">{t(job?.state === "done" ? "story.done" : "story.last")}</span>
                       <span className="sc-name mono" title={output}>{baseName(output)}</span>

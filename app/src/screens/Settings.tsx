@@ -3,14 +3,18 @@ import { Link, useNavigate } from "react-router-dom";
 import { useAuth } from "../auth/auth";
 import Avatar from "../components/Avatar";
 import Screen from "../components/Screen";
+import UsageMeter from "../components/UsageMeter";
+import UploadList, { type UploadRow } from "../components/UploadList";
 import { engine, isTauri } from "../engine/client";
 import { isWeb } from "../engine/flavor";
 import { useJob } from "../engine/events";
-import type { Brand, CaptionTrack, Language, ModelStatus, Platform } from "../engine/types";
+import type { AssetKind, Brand, CaptionTrack, Language, ModelStatus, Platform } from "../engine/types";
 import { CAPTION_FONTS, DEFAULT_CAPTION_FONT } from "../edit/captionFonts";
 import CaptionOverlay from "../preview/CaptionOverlay";
 import { t } from "../i18n/t";
-import { baseName, loadAiKey, pickFileNative, pickFolderNative, removeAiKey, saveAiKey } from "../lib/native";
+import { acceptFor, baseName, loadAiKey, pickFileNative, pickFilesWeb, pickFolderNative, removeAiKey, saveAiKey } from "../lib/native";
+import { rememberAssetInfo, useAssetNames } from "../lib/assetInfo";
+import { UploadError, kindOfName, uploadAsset } from "../lib/upload";
 import {
   getAiProvider, getLanguage, getPlatform, getSettings, saveSettings, setAiProvider, setLanguage, setPlatform,
   type AiProvider, type Settings as SettingsState,
@@ -46,14 +50,18 @@ function Seg<T extends string>(props: {
   );
 }
 
-const SECTIONS = ["account", "general", "ai", "models", "brand", "updates"] as const;
-type SectionId = (typeof SECTIONS)[number];
+const ALL_SECTIONS = ["account", "usage", "general", "ai", "models", "brand", "updates"] as const;
+type SectionId = (typeof ALL_SECTIONS)[number];
+/** The website has no speech models to manage (the server owns them); only it shows usage. */
+const WEB_SECTIONS: SectionId[] = ALL_SECTIONS.filter((id) => id !== "models");
+const DESKTOP_SECTIONS: SectionId[] = ALL_SECTIONS.filter((id) => id !== "usage");
 
 /* Section icons, in the app's stroke style (1.7, round caps). */
 const ICONS: Record<SectionId, ReactNode> = {
   account: <><circle cx="12" cy="8" r="3.6" /><path d="M5 20c.6-3.6 3.4-5.6 7-5.6s6.4 2 7 5.6" /></>,
   general: <><path d="M4 7h9M17 7h3M4 17h3M11 17h9" /><circle cx="15" cy="7" r="2" /><circle cx="9" cy="17" r="2" /></>,
   ai: <><path d="M10 4.5 11.6 9 16 10.5 11.6 12 10 16.5 8.4 12 4 10.5 8.4 9z" /><path d="M17.5 14.5v5M15 17h5" /></>,
+  usage: <><path d="M4 18V9M10 18V5M16 18v-6M22 18H2" /></>,
   models: <path d="M4 10.5v3M8 7v10M12 4v16M16 8v8M20 10.5v3" />,
   brand: <><path d="M12 3.5a8.5 8.5 0 1 0 0 17c1 0 1.6-.7 1.6-1.5 0-.9-.6-1.3-.6-2.1 0-.9.7-1.5 1.6-1.5h2.1a3.8 3.8 0 0 0 3.8-3.8c0-4.4-3.8-8.1-8.5-8.1z" /><circle cx="7.8" cy="11" r=".9" /><circle cx="10.5" cy="7.4" r=".9" /><circle cx="15" cy="7.8" r=".9" /></>,
   updates: <><path d="M19.5 12a7.5 7.5 0 1 1-2.2-5.3" /><path d="M19.5 4.5v4h-4" /></>,
@@ -107,6 +115,14 @@ function AccountSection() {
           <Link className="primary" to="/signin">{t("settings.account.signin")}</Link>
         </div>
       )}
+    </Section>
+  );
+}
+
+function UsageSection() {
+  return (
+    <Section id="usage" title={t("settings.usage")}>
+      <UsageMeter />
     </Section>
   );
 }
@@ -438,19 +454,57 @@ function ModelsSection() {
 // ---- brand kit ----------------------------------------------------------------------------------------------------
 
 const EMPTY_BRAND: Brand = { font: "", caption_color: "", highlight: "", logo: "", intro: "", outro: "", music: "" };
-type FileKey = "logo" | "intro" | "outro" | "music";
-const FILE_KINDS: Record<FileKey, { name: string; extensions: string[]; accept: string }> = {
-  logo: { name: "settings.dialog.image", extensions: ["png", "jpg", "jpeg", "webp", "svg"], accept: "image/*" },
-  intro: { name: "settings.dialog.video", extensions: ["mp4", "mov", "m4v", "mkv", "webm"], accept: "video/*" },
-  outro: { name: "settings.dialog.video", extensions: ["mp4", "mov", "m4v", "mkv", "webm"], accept: "video/*" },
-  music: { name: "settings.dialog.audio", extensions: ["mp3", "m4a", "aac", "wav", "flac", "ogg"], accept: "audio/*" },
+type FileKey = "logo" | "intro" | "outro" | "music" | "lut" | "font";
+const FILE_KINDS: Record<FileKey, { name: string; extensions: string[]; accept: string; asset: AssetKind }> = {
+  logo: { name: "settings.dialog.image", extensions: ["png", "jpg", "jpeg", "webp", "svg"], accept: "image/*", asset: "image" },
+  intro: { name: "settings.dialog.video", extensions: ["mp4", "mov", "m4v", "mkv", "webm"], accept: "video/*", asset: "video" },
+  outro: { name: "settings.dialog.video", extensions: ["mp4", "mov", "m4v", "mkv", "webm"], accept: "video/*", asset: "video" },
+  music: { name: "settings.dialog.audio", extensions: ["mp3", "m4a", "aac", "wav", "flac", "ogg"], accept: "audio/*", asset: "audio" },
+  // the website only: a colour look and the card fonts
+  lut: { name: "settings.brand.lut", extensions: ["cube"], accept: ".cube", asset: "lut" },
+  font: { name: "settings.brand.font", extensions: ["ttf", "otf"], accept: ".ttf,.otf", asset: "font" },
 };
+/** Card font files by weight (scripts/brand.py): titles in ExtraBold, subtitles in SemiBold. */
+const FONT_WEIGHTS = ["ExtraBold", "SemiBold", "Bold"] as const;
 
 function FileField({ id, label, value, kind, onChange }: { id: string; label: string; value: string; kind: FileKey; onChange(v: string): void }) {
   const input = useRef<HTMLInputElement>(null);
   const spec = FILE_KINDS[kind];
+  const web = isWeb();
+  // the website: the chosen file is uploaded to the library first; the kit keeps its `asset:` reference
+  const [row, setRow] = useState<UploadRow | null>(null);
+  const [sendError, setSendError] = useState<string | null>(null);
+  const sending = useRef<AbortController | null>(null);
+  useEffect(() => () => sending.current?.abort(), []);
+
+  async function upload() {
+    const [file] = await pickFilesWeb(acceptFor(spec.extensions), false);
+    if (!file) return;
+    setSendError(null);
+    if (kindOfName(file.name) !== spec.asset) {
+      setSendError(t("upload.unsupported", { name: file.name }));
+      return;
+    }
+    const ctl = new AbortController();
+    sending.current = ctl;
+    setRow({ id: file.name, name: file.name, pct: 0 });
+    try {
+      const { ref } = await uploadAsset(file, spec.asset, (pct) => setRow((r) => (r ? { ...r, pct } : r)), ctl.signal);
+      rememberAssetInfo(ref, file.name, spec.asset);
+      onChange(ref);
+    } catch (e) {
+      if (!ctl.signal.aborted) setSendError(e instanceof Error ? e.message : t("upload.failed"));
+    } finally {
+      setRow(null);
+      sending.current = null;
+    }
+  }
 
   async function choose() {
+    if (web) {
+      if (!row) await upload().catch((e) => setSendError(e instanceof UploadError ? e.message : t("upload.failed")));
+      return;
+    }
     if (isTauri()) {
       try {
         const path = await pickFileNative(t(spec.name), spec.extensions);
@@ -467,10 +521,10 @@ function FileField({ id, label, value, kind, onChange }: { id: string; label: st
     <div className="field">
       <span className="field-label" id={`${id}-l`}>{label}</span>
       <div className="set-file" role="group" aria-labelledby={`${id}-l`}>
-        <span className={`set-file-name${value ? "" : " none"}`} title={value}>{value ? baseName(value) : t("settings.brand.none")}</span>
-        <button type="button" className="secondary" onClick={choose}>{t("settings.brand.choose")}</button>
-        {value && <button type="button" className="secondary" onClick={() => onChange("")}>{t("settings.brand.clear")}</button>}
-        <input
+        <span className={`set-file-name${value ? "" : " none"}`} title={web ? undefined : value}>{value ? baseName(value) : t("settings.brand.none")}</span>
+        <button type="button" className="secondary" onClick={choose} disabled={!!row}>{t("settings.brand.choose")}</button>
+        {value && <button type="button" className="secondary" disabled={!!row} onClick={() => onChange("")}>{t("settings.brand.clear")}</button>}
+        {!web && <input
           ref={input}
           id={id}
           type="file"
@@ -482,8 +536,10 @@ function FileField({ id, label, value, kind, onChange }: { id: string; label: st
             e.target.value = "";
             if (f) onChange(f.name); // a browser has only the name; the desktop app has the full path
           }}
-        />
+        />}
       </div>
+      {row && <UploadList rows={[row]} onCancel={() => sending.current?.abort()} />}
+      {sendError && <p className="error" role="alert">{sendError}</p>}
     </div>
   );
 }
@@ -555,7 +611,9 @@ function CaptionPreview({ brand }: { brand: Brand }) {
 }
 
 function BrandSection() {
-  const [brand, setBrand] = useState<Brand>(EMPTY_BRAND);
+  const web = isWeb();
+  const [brand, setBrand] = useState<Brand>(web ? { ...EMPTY_BRAND, lut: "", fonts: {} } : EMPTY_BRAND);
+  useAssetNames([brand.logo, brand.intro, brand.outro, brand.music, brand.lut, ...Object.values(brand.fonts ?? {})]);
   const [loaded, setLoaded] = useState(false);
   const [status, setStatus] = useState<{ text: string; bad: boolean } | null>(null);
   const [busy, setBusy] = useState(false);
@@ -566,7 +624,7 @@ function BrandSection() {
     engine.brand().then(
       (b) => {
         if (!live) return;
-        setBrand({ ...EMPTY_BRAND, ...b });
+        setBrand(web ? { ...EMPTY_BRAND, lut: "", ...b, fonts: { ...(b.fonts ?? {}) } } : { ...EMPTY_BRAND, ...b });
         setLoaded(true);
       },
       () => live && setStatus({ text: t("settings.brand.loaderror"), bad: true }),
@@ -594,7 +652,7 @@ function BrandSection() {
   }
 
   return (
-    <Section id="brand" title={t("settings.brand")} note={t("settings.brand.note")}>
+    <Section id="brand" title={t("settings.brand")} note={web ? `${t("settings.brand.note")} ${t("settings.brand.web.note")}` : t("settings.brand.note")}>
       <div className="brand-kit">
       <div className="set-grid">
         <div className="field">
@@ -619,6 +677,21 @@ function BrandSection() {
         <FileField id={`${base}-intro`} label={t("settings.brand.intro")} kind="intro" value={brand.intro} onChange={(v) => set({ intro: v })} />
         <FileField id={`${base}-outro`} label={t("settings.brand.outro")} kind="outro" value={brand.outro} onChange={(v) => set({ outro: v })} />
         <FileField id={`${base}-music`} label={t("settings.brand.music")} kind="music" value={brand.music} onChange={(v) => set({ music: v })} />
+        {web && (
+          <>
+            <FileField id={`${base}-lut`} label={t("settings.brand.lut")} kind="lut" value={brand.lut ?? ""} onChange={(v) => set({ lut: v })} />
+            {FONT_WEIGHTS.map((w) => (
+              <FileField key={w} id={`${base}-font-${w}`} label={t(`settings.brand.fonts.${w}`)} kind="font" value={brand.fonts?.[w] ?? ""}
+                onChange={(v) => setBrand((b) => {
+                  const fonts = { ...(b.fonts ?? {}) };
+                  if (v) fonts[w] = v;
+                  else delete fonts[w];
+                  setStatus(null);
+                  return { ...b, fonts };
+                })} />
+            ))}
+          </>
+        )}
       </div>
       <CaptionPreview brand={brand} />
       </div>
@@ -712,7 +785,7 @@ function SectionIcon({ id }: { id: SectionId }) {
 }
 
 /** The section list beside Settings: where you are, and a jump to the others. */
-function SectionNav() {
+function SectionNav({ sections: SECTIONS }: { sections: SectionId[] }) {
   const [current, setCurrent] = useState<SectionId>("account");
   // after a click the list keeps the chosen section while the page scrolls to it (the last ones can't reach the top)
   const held = useRef(0);
@@ -752,7 +825,7 @@ function SectionNav() {
       window.removeEventListener("resize", onScroll);
       cancelAnimationFrame(frame);
     };
-  }, []);
+  }, [SECTIONS]);
 
   function go(id: SectionId) {
     const el = document.getElementById(id);
@@ -781,17 +854,19 @@ function SectionNav() {
 }
 
 export default function Settings() {
+  const web = isWeb();
   return (
     <Screen>
       <div className="imp set-page">
         <h1 className="title imp-title">{t("settings.title")}</h1>
         <div className="set-layout">
-          <SectionNav />
+          <SectionNav sections={web ? WEB_SECTIONS : DESKTOP_SECTIONS} />
           <div className="settings">
             <AccountSection />
+            {web && <UsageSection />}
             <GeneralSection />
             <AiSection />
-            <ModelsSection />
+            {!web && <ModelsSection />}
             <BrandSection />
             <UpdatesSection />
           </div>

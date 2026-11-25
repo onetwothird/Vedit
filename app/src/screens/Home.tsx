@@ -4,6 +4,7 @@ import { shouldOfferSignIn, useAuth } from "../auth/auth";
 import FilmFrame from "../components/FilmFrame";
 import Screen from "../components/Screen";
 import { engine, engineMediaUrl, isMock } from "../engine/client";
+import { isWeb } from "../engine/flavor";
 import type { Project, Story } from "../engine/types";
 import { t } from "../i18n/t";
 import { baseName } from "../lib/native";
@@ -11,6 +12,7 @@ import { isWhole, newImport, projectHome } from "../lib/projectKind";
 import { useFilmstrip } from "../lib/useFilmstrip";
 import { BatchArt, ClipArt, PhotosArt, ReelArt, VlogArt } from "./home/HomeArt";
 import "./home/home.css";
+import "./legal.css";
 
 const TILES = [
   { key: "vlog", Art: VlogArt, to: newImport("vlog") },
@@ -92,8 +94,12 @@ export default function Home() {
   const [recent, setRecent] = useState<Recent>({ status: "loading" });
   const [page, setPage] = useState(0);
   const head = useRef<HTMLElement>(null);
+  // the website's front page is open to everyone, but there is nothing to list until someone signs in
+  const web = isWeb();
+  const visitor = web && !account;
 
   useEffect(() => {
+    if (visitor) return;
     let live = true;
     Promise.all([engine.recent(), engine.stories().catch(() => [] as Story[])]).then(
       ([projects, stories]) => live && setRecent({ status: "ready", projects, stories }),
@@ -102,7 +108,7 @@ export default function Home() {
     return () => {
       live = false;
     };
-  }, []);
+  }, [visitor]);
 
   const all = recent.status === "ready" ? entries(recent.projects, recent.stories) : [];
   const pages = Math.max(1, Math.ceil(all.length / PAGE_SIZE));
@@ -114,7 +120,7 @@ export default function Home() {
     if (el && el.getBoundingClientRect().top < 0) el.scrollIntoView({ block: "start" });
   }
 
-  if (shouldOfferSignIn(account)) return <Navigate to="/signin" replace />;
+  if (!web && shouldOfferSignIn(account)) return <Navigate to="/signin" replace />;
   return (
     <Screen>
       <h1 className="title">{t("home.title")}</h1>
@@ -146,6 +152,13 @@ export default function Home() {
         </li>
       </ul>
 
+      {visitor ? (
+        <section className="recent" aria-labelledby="visitor-h">
+          <div className="recent-head"><h2 id="visitor-h">{t("home.signedout.title")}</h2></div>
+          <p className="note-text">{t("home.signedout.note")}</p>
+          <Link className="primary inline" to="/signin">{t("home.signedout.signin")}</Link>
+        </section>
+      ) : (
       <section className="recent" aria-labelledby="recent-h" ref={head}>
         <div className="recent-head">
           <h2 id="recent-h">
@@ -164,6 +177,13 @@ export default function Home() {
           </ul>
         )}
       </section>
+      )}
+      {web && (
+        <p className="legal-links">
+          <Link to="/terms">{t("legal.terms.link")}</Link>
+          <Link to="/privacy">{t("legal.privacy.link")}</Link>
+        </p>
+      )}
     </Screen>
   );
 }

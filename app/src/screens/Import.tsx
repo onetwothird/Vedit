@@ -2,6 +2,7 @@ import { useEffect, useRef, useState, type DragEvent } from "react";
 import { Link, useNavigate, useParams, useSearchParams } from "react-router-dom";
 import ProgressStages from "../components/ProgressStages";
 import Screen from "../components/Screen";
+import UsageMeter from "../components/UsageMeter";
 import { useAuth } from "../auth/auth";
 import { engine, isTauri } from "../engine/client";
 import { isWeb } from "../engine/flavor";
@@ -9,7 +10,7 @@ import { useJob } from "../engine/events";
 import { EngineError, type Language, type NewProjectBody, type Platform, type ProjectType } from "../engine/types";
 import { t } from "../i18n/t";
 import {
-  VIDEO_ACCEPT, analyzeBody, baseName, isVideoName, listenNativeDrop, pickVideoNative, toPicked, type PickedFile,
+  VIDEO_ACCEPT, VIDEO_EXTENSIONS, acceptFor, analyzeBody, baseName, isVideoName, listenNativeDrop, pickVideoNative, toPicked, type PickedFile,
 } from "../lib/native";
 import { getLanguage, getPlatform } from "../lib/prefs";
 import { PLATFORMS_FOR, isWhole, newImport, parseType, platformFor, projectHome } from "../lib/projectKind";
@@ -118,6 +119,15 @@ export default function Import() {
   const [uploadPct, setUploadPct] = useState(0);
   const [uploadCancelled, setUploadCancelled] = useState(false);
   const upload = useRef<AbortController | null>(null);
+  const alive = useRef(true);
+  // leaving the screen stops an upload in flight; nothing after it (project, analysis, navigation) may run
+  useEffect(() => {
+    alive.current = true;
+    return () => {
+      alive.current = false;
+      upload.current?.abort();
+    };
+  }, []);
 
   const job = useJob(jobId);
   const running = job?.state === "queued" || job?.state === "running";
@@ -259,6 +269,9 @@ export default function Import() {
     setUploadCancelled(false);
     const sending = new AbortController();
     upload.current = sending;
+    // the address this screen started on: it is gone once the address changes, even before React has torn it down
+    const here = window.location.hash;
+    const left = () => !alive.current || window.location.hash !== here;
     try {
       let project = pid;
       if (!project) {
@@ -276,10 +289,12 @@ export default function Import() {
           setUploadPct(0);
           setPhase("uploading");
           const { upload_key } = await uploadFile(video, "video", setUploadPct, sending.signal);
+          if (left() || sending.signal.aborted) throw new UploadError("aborted", t("upload.cancelled"));
           setPhase("creating");
           body = { upload_key, language, platform: platformFor(kind, platform), type: kind };
         }
         const p = await engine.createProject(body);
+        if (left()) return; // left while the project was being made: no analysis, no minutes spent, no navigation
         project = p.id;
         ownedId.current = p.id;
         setPid(p.id);
@@ -449,7 +464,7 @@ export default function Import() {
               ) : (
                 <div className="vf-empty">
                   <span className="vf-empty-title">{t("import.drop.title")}</span>
-                  <span className="vf-empty-hint">{t("import.drop.formats")}</span>
+                  <span className="vf-empty-hint">{t(web ? "import.drop.formats.web" : "import.drop.formats")}</span>
                   <button type="button" className="vf-choose" onClick={choose}>{t("import.choose")}</button>
                 </div>
               )}
@@ -466,7 +481,7 @@ export default function Import() {
                   <span className="vf-file vf-file-empty">{t("import.viewer.empty")}</span>
                 )}
               </div>
-              <input ref={input} type="file" accept={VIDEO_ACCEPT} hidden onChange={onInput} />
+              <input ref={input} type="file" accept={web ? acceptFor(VIDEO_EXTENSIONS) : VIDEO_ACCEPT} hidden onChange={onInput} />
             </div>
             <DropWave />
           </div>
@@ -533,6 +548,7 @@ export default function Import() {
                 <p className="imp-start-note">{t(file ? (web ? "import.ready.web" : "import.ready") : "import.start.needs")}</p>
               </>
             )}
+            {web && !pid && <UsageMeter />}
           </aside>
         </div>
       </div>

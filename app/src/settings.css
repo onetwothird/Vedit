@@ -133,3 +133,7 @@
   .set-head h2 { font-size: 20px; }
   .set-key { flex-wrap: wrap; }
 }
+
+.usage-meter { display: flex; flex-direction: column; gap: 14px; max-width: 420px; }
+.usage-row { display: flex; flex-direction: column; gap: 6px; }
+.usage-text { font-size: 13px; color: var(--body); }
