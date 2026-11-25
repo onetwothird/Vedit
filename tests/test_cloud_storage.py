@@ -1,10 +1,13 @@
 from urllib.parse import parse_qs, urlparse
 
 import pytest
-from botocore.exceptions import ClientError
-from botocore.stub import Stubber
 
-from scripts import cloud_storage as cs
+pytest.importorskip("boto3")
+pytest.importorskip("botocore")
+from botocore.exceptions import ClientError  # noqa: E402
+from botocore.stub import Stubber  # noqa: E402
+
+from scripts import cloud_storage as cs  # noqa: E402
 
 
 def _r2():
@@ -135,3 +138,50 @@ def test_upload_and_download_call_client(tmp_path):
     assert calls[0] == ("up", (str(tmp_path / "f"), "bkt", "k"), {"ExtraArgs": {"ContentType": "video/mp4"}})
     assert calls[1][1] == ("bkt", "k", str(tmp_path / "d" / "f"))
     assert (tmp_path / "d").is_dir()
+
+
+def test_prefix_helpers():
+    assert cs.uploads_prefix("u") == "uploads/u/"
+    assert cs.exports_prefix("u") == "exports/u/"
+    assert cs.exports_prefix("u", "p") == "exports/u/p/"
+    assert cs.zips_prefix("u") == "zips/u/"
+    with pytest.raises(ValueError):
+        cs.uploads_prefix("a/b")
+
+
+@pytest.mark.parametrize("bad", ["", "uploads/abc"])
+def test_prefix_ops_reject_unsafe_prefix(bad):
+    for store in (cs.MemoryStorage(), _r2()):
+        with pytest.raises(ValueError):
+            store.delete_prefix(bad)
+        with pytest.raises(ValueError):
+            store.usage_bytes(bad)
+
+
+def test_memory_prefix_does_not_cross_users(tmp_path):
+    m = cs.MemoryStorage()
+    f = tmp_path / "f"
+    f.write_bytes(b"xx")
+    m.upload(f, "uploads/abc/1", "video/mp4")
+    m.upload(f, "uploads/abcd/1", "video/mp4")
+    assert m.usage_bytes(cs.uploads_prefix("abc")) == 2
+    assert m.delete_prefix(cs.uploads_prefix("abc")) == 1
+    assert m.size("uploads/abcd/1") == 2
+
+
+def test_delete_prefix_raises_on_per_key_errors():
+    r = _r2()
+    with Stubber(r._client) as st:
+        st.add_response("list_objects_v2", {"Contents": [{"Key": "p/a", "Size": 1}, {"Key": "p/b", "Size": 1}],
+                                            "IsTruncated": False}, {"Bucket": "bkt", "Prefix": "p/"})
+        st.add_response("delete_objects",
+                        {"Errors": [{"Key": "p/b", "Code": "AccessDenied", "Message": "no"}]},
+                        {"Bucket": "bkt", "Delete": {"Objects": [{"Key": "p/a"}, {"Key": "p/b"}], "Quiet": True}})
+        with pytest.raises(RuntimeError, match="p/b"):
+            r.delete_prefix("p/")
+
+
+def test_presigned_put_has_no_checksum_params():
+    q = parse_qs(urlparse(_r2().presign_put("k", "video/mp4", 10)).query)
+    assert not [k for k in q if k.lower().startswith(("x-amz-checksum", "x-amz-sdk-checksum"))]
+    assert "x-amz-sdk-checksum-algorithm" not in {k.lower() for k in q}

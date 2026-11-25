@@ -26,6 +26,26 @@ def zip_key(uid: str, bid: str) -> str:
     return f"zips/{_part(uid)}/{_part(bid)}.zip"
 
 
+def uploads_prefix(uid: str) -> str:
+    return f"uploads/{_part(uid)}/"
+
+
+def exports_prefix(uid: str, pid: str | None = None) -> str:
+    if pid is None:
+        return f"exports/{_part(uid)}/"
+    return f"exports/{_part(uid)}/{_part(pid)}/"
+
+
+def zips_prefix(uid: str) -> str:
+    return f"zips/{_part(uid)}/"
+
+
+def _check_prefix(prefix: str) -> str:
+    if not prefix or not prefix.endswith("/"):
+        raise ValueError(f"prefix must be non-empty and end with '/': {prefix!r}")
+    return prefix
+
+
 class Storage(Protocol):
     def presign_put(self, key: str, content_type: str, size: int) -> str: ...
     def presign_get(self, key: str, filename: str, seconds: int = 86400) -> str: ...
@@ -54,7 +74,12 @@ class R2Storage:
             aws_access_key_id=access_key,
             aws_secret_access_key=secret_key,
             region_name="auto",
-            config=Config(signature_version="s3v4", s3={"addressing_style": "path"}),
+            config=Config(
+                signature_version="s3v4",
+                s3={"addressing_style": "path"},
+                request_checksum_calculation="when_required",
+                response_checksum_validation="when_required",
+            ),
         )
 
     def presign_put(self, key: str, content_type: str, size: int) -> str:
@@ -106,15 +131,21 @@ class R2Storage:
             token = resp["NextContinuationToken"]
 
     def delete_prefix(self, prefix: str) -> int:
+        _check_prefix(prefix)
         n = 0
         for objs in self._pages(prefix):
             for i in range(0, len(objs), 1000):
                 batch = [{"Key": o["Key"]} for o in objs[i:i + 1000]]
-                self._client.delete_objects(Bucket=self.bucket, Delete={"Objects": batch, "Quiet": True})
+                resp = self._client.delete_objects(Bucket=self.bucket, Delete={"Objects": batch, "Quiet": True})
+                errors = resp.get("Errors") or []
+                if errors:
+                    failed = [e.get("Key") for e in errors]
+                    raise RuntimeError(f"failed to delete {len(failed)} object(s): {failed}")
                 n += len(batch)
         return n
 
     def usage_bytes(self, prefix: str) -> int:
+        _check_prefix(prefix)
         return sum(o["Size"] for objs in self._pages(prefix) for o in objs)
 
 
@@ -149,10 +180,12 @@ class MemoryStorage:
         self.content_types.pop(key, None)
 
     def delete_prefix(self, prefix: str) -> int:
+        _check_prefix(prefix)
         keys = [k for k in self.objects if k.startswith(prefix)]
         for k in keys:
             self.delete(k)
         return len(keys)
 
     def usage_bytes(self, prefix: str) -> int:
+        _check_prefix(prefix)
         return sum(len(v) for k, v in self.objects.items() if k.startswith(prefix))
