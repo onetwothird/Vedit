@@ -43,7 +43,7 @@ from edl_ops import clip_edl, cut_words, fix_word, kept_ranges, patch_section, r
 from highlights_llm import HID_RE  # noqa: E402
 from studio_jobs import Job, JobQueue  # noqa: E402
 import studio_stories as stories  # noqa: E402
-from studio_projects import (LANG_MODEL, Project, ProjectClip, _atomic_write_json, _home, USER_HOME,  # noqa: E402
+from studio_projects import (LANG_MODEL, use_home, Project, ProjectClip, _atomic_write_json, _home, USER_HOME,  # noqa: E402
                              create_project, list_recent, load_project, output_dir, output_name, save_project)
 
 ALLOWED_ORIGINS = ("tauri://localhost", "http://tauri.localhost", "http://localhost:5173")
@@ -813,10 +813,18 @@ def _ffmpeg_status() -> tuple[bool, bool]:
 
 # ---- app ------------------------------------------------------------------------------------------------------
 
-def create_app(token: str, queue: JobQueue | None = None) -> FastAPI:
-    if not isinstance(token, str) or not token.strip():
+def create_app(token: str | None, queue: JobQueue | None = None, cloud=None) -> FastAPI:
+    """Desktop: one bearer token. Cloud (a cloud_config.CloudConfig): per-user Supabase JWTs, the token is ignored."""
+    if cloud is None and (not isinstance(token, str) or not token.strip()):
         raise ValueError("the engine needs a non-empty bearer token")
+    token = token if isinstance(token, str) else ""
     engine = Engine(token, queue)
+    allowed_origins = tuple(cloud.origins) if cloud is not None else ALLOWED_ORIGINS
+
+    def user_home(jwt_token: str | None) -> Path:
+        import cloud_auth  # lazy: needs the cloud extra
+
+        return cloud.data_root / "users" / cloud_auth.user_id(jwt_token or "", cloud)
 
     @asynccontextmanager
     async def lifespan(_app: FastAPI):
@@ -827,7 +835,7 @@ def create_app(token: str, queue: JobQueue | None = None) -> FastAPI:
     app.state.engine = engine
 
     def origin_ok(origin: str | None) -> bool:
-        return origin is None or origin in ALLOWED_ORIGINS
+        return origin is None or origin in allowed_origins
 
     def token_ok(given: str | None) -> bool:
         return given is not None and hmac.compare_digest(given.encode("utf-8"), token.encode("utf-8"))
@@ -839,12 +847,22 @@ def create_app(token: str, queue: JobQueue | None = None) -> FastAPI:
         auth = request.headers.get("authorization") or ""
         if request.method in ("GET", "HEAD") and MEDIA_ROUTE.match(request.url.path) and not auth:
             auth = "Bearer " + (request.query_params.get("token") or "")
-        if not (auth.startswith("Bearer ") and token_ok(auth[len("Bearer "):])):
+        given = auth[len("Bearer "):] if auth.startswith("Bearer ") else None
+        if cloud is not None:
+            if request.url.path == "/health":
+                return await call_next(request)
+            try:
+                home = user_home(given)
+            except PermissionError:
+                return _error(401, "unauthorized", "missing or wrong token")
+            with use_home(home):  # call_next's endpoint task copies this context
+                return await call_next(request)
+        if not token_ok(given):
             return _error(401, "unauthorized", "missing or wrong token")
         return await call_next(request)
 
     # added after guard, so it wraps it: preflights are answered here and errors still carry CORS headers
-    app.add_middleware(CORSMiddleware, allow_origins=list(ALLOWED_ORIGINS), allow_methods=["*"],
+    app.add_middleware(CORSMiddleware, allow_origins=list(allowed_origins), allow_methods=["*"],
                        allow_headers=["*"])
 
     @app.exception_handler(NotFound)
@@ -1188,9 +1206,24 @@ def create_app(token: str, queue: JobQueue | None = None) -> FastAPI:
 
     @app.websocket("/events")
     async def events(ws: WebSocket):
-        if not origin_ok(ws.headers.get("origin")) or not token_ok(ws.query_params.get("token")):
+        if not origin_ok(ws.headers.get("origin")):
             await ws.close(code=1008)
             return
+        if cloud is not None:
+            try:
+                home = user_home(ws.query_params.get("token"))
+            except PermissionError:
+                await ws.close(code=1008)
+                return
+            with use_home(home):
+                await _serve_events(ws)
+            return
+        if not token_ok(ws.query_params.get("token")):
+            await ws.close(code=1008)
+            return
+        await _serve_events(ws)
+
+    async def _serve_events(ws: WebSocket):
         await ws.accept()
         q: asyncio.Queue = asyncio.Queue(maxsize=WS_QUEUE_MAX)
         client = (asyncio.get_running_loop(), q)
