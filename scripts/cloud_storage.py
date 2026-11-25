@@ -1,6 +1,7 @@
 """Object storage for cloud mode: Cloudflare R2 (via boto3) and an in-memory stand-in for tests."""
 from __future__ import annotations
 
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Protocol
 from urllib.parse import quote
@@ -55,6 +56,8 @@ class Storage(Protocol):
     def delete(self, key: str) -> None: ...
     def delete_prefix(self, prefix: str) -> int: ...
     def usage_bytes(self, prefix: str) -> int: ...
+    def list_keys(self, prefix: str) -> list[str]: ...
+    def list(self, prefix: str) -> list[tuple[str, int, datetime]]: ...  # (key, size, last_modified, tz-aware UTC)
 
 
 def _content_disposition(filename: str) -> str:
@@ -148,6 +151,14 @@ class R2Storage:
         _check_prefix(prefix)
         return sum(o["Size"] for objs in self._pages(prefix) for o in objs)
 
+    def list_keys(self, prefix: str) -> list[str]:
+        _check_prefix(prefix)
+        return sorted(o["Key"] for objs in self._pages(prefix) for o in objs)
+
+    def list(self, prefix: str) -> list[tuple[str, int, datetime]]:
+        _check_prefix(prefix)
+        return sorted((o["Key"], int(o["Size"]), o["LastModified"]) for objs in self._pages(prefix) for o in objs)
+
 
 class MemoryStorage:
     """Dict-backed Storage for tests; presigned URLs are mem:// markers."""
@@ -155,6 +166,7 @@ class MemoryStorage:
     def __init__(self):
         self.objects: dict[str, bytes] = {}
         self.content_types: dict[str, str] = {}
+        self.modified: dict[str, datetime] = {}  # last-modified per key; a key put straight into `objects` is "now"
 
     def presign_put(self, key: str, content_type: str, size: int) -> str:
         return f"mem://put/{key}?type={quote(content_type)}&size={size}"
@@ -174,10 +186,12 @@ class MemoryStorage:
     def upload(self, src: Path, key: str, content_type: str) -> None:
         self.objects[key] = Path(src).read_bytes()
         self.content_types[key] = content_type
+        self.modified[key] = datetime.now(timezone.utc)
 
     def delete(self, key: str) -> None:
         self.objects.pop(key, None)
         self.content_types.pop(key, None)
+        self.modified.pop(key, None)
 
     def delete_prefix(self, prefix: str) -> int:
         _check_prefix(prefix)
@@ -189,3 +203,12 @@ class MemoryStorage:
     def usage_bytes(self, prefix: str) -> int:
         _check_prefix(prefix)
         return sum(len(v) for k, v in self.objects.items() if k.startswith(prefix))
+
+    def list_keys(self, prefix: str) -> list[str]:
+        _check_prefix(prefix)
+        return sorted(k for k in self.objects if k.startswith(prefix))
+
+    def list(self, prefix: str) -> list[tuple[str, int, datetime]]:
+        _check_prefix(prefix)
+        now = datetime.now(timezone.utc)
+        return sorted((k, len(v), self.modified.get(k, now)) for k, v in self.objects.items() if k.startswith(prefix))

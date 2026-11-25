@@ -4,6 +4,7 @@ import { useAuth } from "../auth/auth";
 import Avatar from "../components/Avatar";
 import Screen from "../components/Screen";
 import { engine, isTauri } from "../engine/client";
+import { isWeb } from "../engine/flavor";
 import { useJob } from "../engine/events";
 import type { Brand, CaptionTrack, Language, ModelStatus, Platform } from "../engine/types";
 import { CAPTION_FONTS, DEFAULT_CAPTION_FONT } from "../edit/captionFonts";
@@ -165,7 +166,7 @@ function GeneralSection() {
           value={theme}
           onChange={switchTheme}
         />
-        <fieldset className="field">
+        {!isWeb() && <fieldset className="field">
           <legend>{t("settings.output")}</legend>
           <div className="seg">
             <label className="seg-opt">
@@ -188,7 +189,7 @@ function GeneralSection() {
             <p className="set-note mono-line" title={settings.outputFolder}>{t("settings.output.chosen", { path: settings.outputFolder })}</p>
           )}
           {!desktop && <p className="set-note">{t("settings.output.browser")}</p>}
-        </fieldset>
+        </fieldset>}
       </div>
     </Section>
   );

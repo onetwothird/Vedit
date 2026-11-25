@@ -2,9 +2,11 @@ import { useEffect, useRef, useState, type DragEvent } from "react";
 import { Link, useNavigate, useParams, useSearchParams } from "react-router-dom";
 import ProgressStages from "../components/ProgressStages";
 import Screen from "../components/Screen";
+import { useAuth } from "../auth/auth";
 import { engine, isTauri } from "../engine/client";
+import { isWeb } from "../engine/flavor";
 import { useJob } from "../engine/events";
-import { EngineError, type Language, type Platform, type ProjectType } from "../engine/types";
+import { EngineError, type Language, type NewProjectBody, type Platform, type ProjectType } from "../engine/types";
 import { t } from "../i18n/t";
 import {
   VIDEO_ACCEPT, analyzeBody, baseName, isVideoName, listenNativeDrop, pickVideoNative, toPicked, type PickedFile,
@@ -13,6 +15,7 @@ import { getLanguage, getPlatform } from "../lib/prefs";
 import { PLATFORMS_FOR, isWhole, newImport, parseType, platformFor, projectHome } from "../lib/projectKind";
 import { hasModelStep } from "../lib/modelSeen";
 import { secondsLeft, stageRows } from "../lib/progress";
+import { UploadError, importProblem, uploadFile, videoDuration } from "../lib/upload";
 import "./import.css";
 
 interface Meta {
@@ -108,6 +111,13 @@ export default function Import() {
   const [previewFailed, setPreviewFailed] = useState(false);
   const [playhead, setPlayhead] = useState(0);
   const pickedFile = useRef<File | undefined>(undefined);
+  // the website uploads the video before the project exists: checking it, sending it, then making the project
+  const web = isWeb();
+  const account = useAuth((s) => s.account);
+  const [phase, setPhase] = useState<"idle" | "checking" | "uploading" | "creating">("idle");
+  const [uploadPct, setUploadPct] = useState(0);
+  const [uploadCancelled, setUploadCancelled] = useState(false);
+  const upload = useRef<AbortController | null>(null);
 
   const job = useJob(jobId);
   const running = job?.state === "queued" || job?.state === "running";
@@ -190,6 +200,7 @@ export default function Import() {
       return;
     }
     setError(null);
+    setUploadCancelled(false);
     pickedFile.current = picked;
     setFile(toPicked(path));
     if (pid) {
@@ -235,12 +246,40 @@ export default function Import() {
 
   async function start() {
     if (!file || busy) return;
+    const video = pickedFile.current;
+    if (web && !pid) {
+      if (!account) {
+        navigate("/signin"); // uploading needs an account
+        return;
+      }
+      if (!video) return;
+    }
     setBusy(true);
     setError(null);
+    setUploadCancelled(false);
+    const sending = new AbortController();
+    upload.current = sending;
     try {
       let project = pid;
       if (!project) {
-        const p = await engine.createProject({ source: file.path, language, platform: platformFor(kind, platform), type: kind });
+        let body: NewProjectBody = { source: file.path, language, platform: platformFor(kind, platform), type: kind };
+        if (web && video) {
+          // too long, too big or more than the minutes left: say so before a byte is sent
+          setPhase("checking");
+          const duration = await videoDuration(video).catch(() => null); // a file the browser cannot read: the engine checks it after
+          const problem = importProblem({ duration, size: video.size }, await engine.usage());
+          if (problem) {
+            setError(problem);
+            return;
+          }
+          if (sending.signal.aborted) throw new UploadError("aborted", t("upload.cancelled"));
+          setUploadPct(0);
+          setPhase("uploading");
+          const { upload_key } = await uploadFile(video, "video", setUploadPct, sending.signal);
+          setPhase("creating");
+          body = { upload_key, language, platform: platformFor(kind, platform), type: kind };
+        }
+        const p = await engine.createProject(body);
         project = p.id;
         ownedId.current = p.id;
         setPid(p.id);
@@ -251,8 +290,12 @@ export default function Import() {
       setNow(Date.now());
       setJobId(started.id);
     } catch (e) {
-      setError(e instanceof EngineError ? e.message : t("import.failed.generic"));
+      if (e instanceof UploadError && e.code === "aborted") setUploadCancelled(true);
+      else if (e instanceof EngineError && e.code === "signin") navigate("/signin");
+      else setError(e instanceof EngineError || e instanceof UploadError ? e.message : t("import.failed.generic"));
     } finally {
+      upload.current = null;
+      setPhase("idle");
       setBusy(false);
     }
   }
@@ -465,12 +508,31 @@ export default function Import() {
                 <span>{t("import.cancelled.hint")}</span>
               </p>
             )}
+            {uploadCancelled && (
+              <p className="notice" role="status">
+                <strong>{t("import.upload.cancelled")}</strong>
+                <span>{t("import.upload.cancelled.hint")}</span>
+              </p>
+            )}
             {error && <p className="error" role="alert">{error}</p>}
 
-            <button type="button" className="primary imp-start" onClick={start} disabled={!file || busy}>
-              {busy ? t("import.starting") : t("import.start")}
-            </button>
-            <p className="imp-start-note">{t(file ? "import.ready" : "import.start.needs")}</p>
+            {phase === "uploading" ? (
+              <div className="imp-upload">
+                <div className="meter" role="progressbar" aria-label={t("import.upload.label")} aria-valuemin={0} aria-valuemax={100} aria-valuenow={uploadPct}>
+                  <i style={{ width: `${uploadPct}%` }} />
+                </div>
+                <p className="imp-start-note" aria-live="polite">{t("import.upload.progress", { pct: uploadPct })}</p>
+                <p className="imp-start-note">{t("import.upload.note")}</p>
+                <button type="button" className="secondary" onClick={() => upload.current?.abort()}>{t("import.cancel")}</button>
+              </div>
+            ) : (
+              <>
+                <button type="button" className="primary imp-start" onClick={start} disabled={!file || busy}>
+                  {busy ? t("import.starting") : t("import.start")}
+                </button>
+                <p className="imp-start-note">{t(file ? (web ? "import.ready.web" : "import.ready") : "import.start.needs")}</p>
+              </>
+            )}
           </aside>
         </div>
       </div>

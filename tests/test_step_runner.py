@@ -65,6 +65,26 @@ def test_queue_uses_the_given_runner():
         q.shutdown()
 
 
+def test_python_step_runs_in_process_under_the_home_and_fails_the_job_by_raising(tmp_path):
+    runner = FakeRunner()
+    q = JobQueue(lambda j: None, runner=runner)
+    seen = []
+    try:
+        with use_home(tmp_path / "u1"):
+            ok = q.submit("p", "export", [("a", ["x"], 1.0), ("publish", lambda: seen.append(USER_HOME.get()), 0.0)])
+        assert wait_for(lambda: q.get(ok.id).state == "done")
+        assert seen == [tmp_path / "u1"] and [c[1] for c in runner.calls] == ["a"]  # never sent to the runner
+
+        def boom():
+            raise OSError("r2 down")
+
+        bad = q.submit("p", "export", [("a", ["x"], 1.0), ("publish", boom, 0.0)])
+        assert wait_for(lambda: q.get(bad.id).state == "failed")
+        assert q.get(bad.id).error == "step 'publish' failed: r2 down"
+    finally:
+        q.shutdown()
+
+
 def test_cancel_calls_runner_cancel():
     runner = FakeRunner(block=True)
     q = JobQueue(lambda j: None, runner=runner)

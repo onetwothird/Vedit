@@ -1,5 +1,6 @@
 import { useEffect, useId, useRef, useState } from "react";
 import { isTauri } from "../engine/client";
+import { isWeb } from "../engine/flavor";
 import type { BrollSuggestions, Overlay } from "../engine/types";
 import { duplicateLayer, newBroll, newText, withIds } from "../edit/overlays";
 import { t } from "../i18n/t";
@@ -21,8 +22,9 @@ export interface LayerToolProps {
   t0: number;
   t1: number;
   onSeek(srcT: number): void;
-  /** Suggests b-roll for this clip from a folder of photos and videos; without it the B-roll tool offers none. */
-  suggestBroll?(folder: string): Promise<BrollSuggestions>;
+  /** Suggests b-roll for this clip from a folder of photos and videos (the website: from `assets`, the files the user
+      uploaded); without it the B-roll tool offers none. */
+  suggestBroll?(folder: string, assets?: string[]): Promise<BrollSuggestions>;
 }
 
 const TEXT_POS = ["top", "center", "bottom"] as const;
@@ -179,30 +181,49 @@ export function BrollTool(props: LayerToolProps) {
   const { playhead, t0, t1, onLayer, onSeek, onOverlays, overlays, suggestBroll } = props;
   const file = useRef<HTMLInputElement>(null);
   const addPath = (path: string) => add(newBroll(path, playhead, t0, t1));
+  const web = isWeb();
+  const [sending, setSending] = useState<number | null>(null); // the website: how far the upload has got
+  const [sendError, setSendError] = useState<string | null>(null);
   async function pick() {
+    if (web) {
+      if (sending !== null) return;
+      setSendError(null);
+      try {
+        const ref = await pickFileNative(t("edit.ly.broll.add"), [...BROLL_IMAGE, ...BROLL_VIDEO], (p) => setSending(p.pct));
+        if (ref) addPath(ref);
+      } catch (e) {
+        setSendError(e instanceof Error ? e.message : t("upload.failed"));
+      } finally {
+        setSending(null);
+      }
+      return;
+    }
     if (!isTauri()) return file.current?.click();
     const path = await pickFileNative(t("edit.ly.broll.add"), [...BROLL_IMAGE, ...BROLL_VIDEO]).catch(() => null);
     if (path) addPath(path);
   }
   return (
     <>
-      <button type="button" className="ly-add" onClick={pick}>
+      <button type="button" className="ly-add" onClick={pick} disabled={sending !== null}>
         <Icon d={PLUS} />
-        {t("edit.ly.broll.add")}
+        {sending !== null ? t("edit.ly.broll.uploading", { pct: sending }) : t("edit.ly.broll.add")}
       </button>
-      <input
-        ref={file}
-        type="file"
-        accept="image/*,video/*"
-        className="sr-only"
-        tabIndex={-1}
-        aria-hidden="true"
-        onChange={(e) => {
-          const f = e.currentTarget.files?.[0];
-          e.currentTarget.value = "";
-          if (f) addPath(rememberPicked(f));
-        }}
-      />
+      {sendError && <p className="error" role="alert">{sendError}</p>}
+      {!web && (
+        <input
+          ref={file}
+          type="file"
+          accept="image/*,video/*"
+          className="sr-only"
+          tabIndex={-1}
+          aria-hidden="true"
+          onChange={(e) => {
+            const f = e.currentTarget.files?.[0];
+            e.currentTarget.value = "";
+            if (f) addPath(rememberPicked(f));
+          }}
+        />
+      )}
       {!mine.length && <p className="hint">{t("edit.ly.broll.empty")}</p>}
       <LayerList items={mine} selected={selected} t0={t0} name={(o) => (o.type === "text" ? "" : baseName(o.path))} onPick={(o) => { onLayer(o.id!); onSeek(o.at.t); }} />
       {selected && selected.type !== "text" && (

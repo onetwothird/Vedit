@@ -9,6 +9,7 @@ import os
 import re
 import sys
 import tempfile
+import threading
 from dataclasses import asdict, dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
@@ -46,6 +47,7 @@ class Project:
     clips: list[ProjectClip] = field(default_factory=list)
     settings: dict = field(default_factory=dict)
     last_job: dict | None = None
+    last_activity: str | None = None  # cloud only: ISO UTC time of the last write, for retention; desktop leaves it unset
 
 
 def _now() -> str:
@@ -109,9 +111,15 @@ def _atomic_write_json(path: Path, data) -> None:
         raise
 
 
+# one read-modify-write of a registry at a time: a recency bump racing a new project's entry would drop it, and on
+# Windows a read during the atomic replace fails (the cloud engine reads and writes from many threads)
+_registry_lock = threading.RLock()
+
+
 def _read_registry() -> dict:
     try:
-        data = json.loads(_registry_path().read_text(encoding="utf-8"))
+        with _registry_lock:
+            data = json.loads(_registry_path().read_text(encoding="utf-8"))
     except (OSError, ValueError):
         return {}  # missing or unreadable: the registry is only an index and rebuilds as projects are created
     return data if isinstance(data, dict) else {}
@@ -129,6 +137,11 @@ def _backup(path: Path) -> Path:
 
 
 def _register(pid: str, wd: Path, file: str = PROJECT_FILE) -> None:
+    with _registry_lock:
+        _register_locked(pid, wd, file)
+
+
+def _register_locked(pid: str, wd: Path, file: str) -> None:
     path = _registry_path()
     try:
         reg = json.loads(path.read_text(encoding="utf-8"))
@@ -154,7 +167,8 @@ def _touch_registry(pid: str, wd: Path, file: str = PROJECT_FILE) -> None:
 def _from_dict(d: dict) -> Project:
     clips = [ProjectClip(highlight=c["highlight"], kept=c["kept"], edl_file=c["edl_file"]) for c in d["clips"]]
     return Project(id=d["id"], type=d["type"], source=d["source"], language=d["language"], platform=d["platform"],
-                   created=d["created"], clips=clips, settings=d["settings"], last_job=d["last_job"])
+                   created=d["created"], clips=clips, settings=d["settings"], last_job=d["last_job"],
+                   last_activity=d.get("last_activity"))
 
 
 def _read_project(wd: Path, file: str = PROJECT_FILE) -> Project:
@@ -165,8 +179,16 @@ def _read_project(wd: Path, file: str = PROJECT_FILE) -> Project:
         raise ValueError(f"corrupt or unreadable project file {f}: {e}") from e
 
 
+def project_doc(p: Project) -> dict:
+    """The project as stored and served: `last_activity` appears only once something (the cloud) has set it."""
+    doc = asdict(p)
+    if doc.get("last_activity") is None:
+        doc.pop("last_activity", None)
+    return doc
+
+
 def save_project(p: Project) -> None:
-    _atomic_write_json(workdir_for(p.source) / project_file(p.type), asdict(p))
+    _atomic_write_json(workdir_for(p.source) / project_file(p.type), project_doc(p))
 
 
 def create_project(source: Path, language: str, platform: str, kind: str = "clip") -> Project:

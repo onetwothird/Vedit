@@ -127,3 +127,19 @@ revoke execute on function public.vedit_refund(text) from public, anon, authenti
 grant execute on function public.vedit_remaining(uuid, text, float8) to service_role;
 grant execute on function public.vedit_charge(uuid, text, float8, text, float8, float8) to service_role;
 grant execute on function public.vedit_refund(text) to service_role;
+
+-- Seconds used and the limit for the month, for the usage meter.
+create or replace function public.vedit_status(p_uid uuid, p_month text, p_default_limit float8)
+returns jsonb
+language sql
+security definer
+set search_path = public
+as $$
+  select jsonb_build_object(
+    'seconds_used', coalesce((select seconds_used from public.usage where user_id = p_uid and month = p_month), 0),
+    'seconds_limit', coalesce((select seconds_limit from public.limits where user_id = p_uid), p_default_limit)
+  );
+$$;
+
+revoke execute on function public.vedit_status(uuid, text, float8) from public, anon, authenticated;
+grant execute on function public.vedit_status(uuid, text, float8) to service_role;

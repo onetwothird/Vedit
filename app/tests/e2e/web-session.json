@@ -1,0 +1,12 @@
+{
+  "cookies": [],
+  "origins": [
+    {
+      "origin": "http://localhost:5198",
+      "localStorage": [
+        { "name": "vedit.signin.skipped", "value": "true" },
+        { "name": "vedit.account", "value": "{\"id\":\"demo-web\",\"name\":\"Demo Creator\",\"email\":\"demo.creator@gmail.com\",\"provider\":\"google\",\"plan\":\"free\"}" }
+      ]
+    }
+  ]
+}

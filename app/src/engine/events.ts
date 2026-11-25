@@ -2,11 +2,20 @@
 
 import { useCallback, useSyncExternalStore } from "react";
 import { engine, fetchEngineInfo, isMock, onJobResult } from "./client";
+import { isCloud } from "./flavor";
 import { mockEngine } from "./mock";
 import type { EngineInfo, Job } from "./types";
 
 export const BACKOFF_MS = [1000, 2000, 4000, 8000, 10000];
+/** The web build's reconnect schedule: 1 s, 2 s, 4 s ... capped at 15 s. */
+export const CLOUD_BACKOFF_MS = [1000, 2000, 4000, 8000, 15000];
 const TERMINAL = ["done", "failed", "cancelled"];
+
+/** The /events websocket address for an engine: wss from a cloud origin, else the local engine's port. */
+export function eventsUrl(info: EngineInfo): string {
+  const root = info.base ? info.base.replace(/\/+$/, "").replace(/^http/i, "ws") : `ws://127.0.0.1:${info.port}`;
+  return `${root}/events?token=${encodeURIComponent(info.token)}`;
+}
 
 export interface SocketLike {
   onopen: ((ev: unknown) => void) | null;
@@ -22,6 +31,10 @@ export interface JobStoreOptions {
   createSocket: (url: string) => SocketLike;
   /** Re-reads a job the socket may have missed while it was down. */
   resync?: (id: string) => Promise<Job>;
+  /** Reconnect delays in ms; the last one repeats. Default BACKOFF_MS. */
+  backoff?: number[];
+  /** Cloud: after a reconnect, re-read every active job (GET /jobs), since events may have been missed while down. */
+  resyncAll?: () => Promise<Job[]>;
   /** Live source instead of a socket (the mock engine). Returns its unsubscribe. */
   subscribeSource?: (onJob: (job: Job) => void) => () => void;
 }
@@ -49,6 +62,7 @@ export function createJobStore(opts: JobStoreOptions): JobStore {
   let stopSource: (() => void) | null = null;
   let timer: ReturnType<typeof setTimeout> | null = null;
   let attempt = 0;
+  let opened = false; // a socket has opened before, so the next open is a reconnect
   let generation = 0; // bumps on every stop, so a late async step of an old connection does nothing
 
   function upsert(job: Job, source: JobSource = "ws"): void {
@@ -103,9 +117,20 @@ export function createJobStore(opts: JobStoreOptions): JobStore {
     }
   }
 
+  async function resyncAll(gen: number): Promise<void> {
+    if (!opts.resyncAll) return;
+    try {
+      const list = await opts.resyncAll();
+      if (gen === generation) list.forEach((j) => upsert(j, "http"));
+    } catch {
+      // the socket's own snapshots still arrive; the next reconnect tries again
+    }
+  }
+
   function scheduleReconnect(gen: number): void {
     if (gen !== generation || timer) return;
-    const delay = BACKOFF_MS[Math.min(attempt, BACKOFF_MS.length - 1)];
+    const schedule = opts.backoff ?? BACKOFF_MS;
+    const delay = schedule[Math.min(attempt, schedule.length - 1)];
     attempt++;
     timer = setTimeout(() => {
       timer = null;
@@ -124,7 +149,7 @@ export function createJobStore(opts: JobStoreOptions): JobStore {
     if (gen !== generation) return;
     let ws: SocketLike;
     try {
-      ws = opts.createSocket(`ws://127.0.0.1:${info.port}/events?token=${encodeURIComponent(info.token)}`);
+      ws = opts.createSocket(eventsUrl(info));
     } catch {
       scheduleReconnect(gen);
       return;
@@ -133,7 +158,10 @@ export function createJobStore(opts: JobStoreOptions): JobStore {
     ws.onopen = () => {
       if (gen !== generation || socket !== ws) return;
       attempt = 0; // backoff restarts after a successful open
+      const reconnect = opened;
+      opened = true;
       resyncOpen();
+      if (reconnect) void resyncAll(gen);
     };
     ws.onmessage = (ev) => {
       if (socket === ws) onMessage(ev);
@@ -153,6 +181,7 @@ export function createJobStore(opts: JobStoreOptions): JobStore {
       return;
     }
     attempt = 0;
+    opened = false;
     void connect(gen, false);
   }
 
@@ -195,6 +224,7 @@ export const jobStore: JobStore = createJobStore({
   getInfo: () => fetchEngineInfo(),
   createSocket: (url) => new WebSocket(url) as unknown as SocketLike,
   resync: (id) => engine.getJob(id),
+  ...(isCloud() ? { backoff: CLOUD_BACKOFF_MS, resyncAll: () => engine.activeJobs() } : {}),
   subscribeSource: isMock() ? (onJob) => mockEngine.onJob(onJob) : undefined,
 });
 

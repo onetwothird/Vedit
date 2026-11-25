@@ -2,8 +2,9 @@ import { useEffect, useId, useRef, useState, type ReactNode } from "react";
 import { Link, useParams } from "react-router-dom";
 import Screen from "../components/Screen";
 import { engine, isTauri } from "../engine/client";
+import { isWeb } from "../engine/flavor";
 import { jobStore, useJob, useJobs } from "../engine/events";
-import type { Aspect, ExportBody, ExportResult, Job, Project, ProjectClip } from "../engine/types";
+import type { Aspect, ExportBody, ExportLink, ExportResult, Job, Project, ProjectClip } from "../engine/types";
 import { t } from "../i18n/t";
 import { defaultFormat, isWhole } from "../lib/projectKind";
 import { sortClips } from "../lib/clips";
@@ -14,6 +15,9 @@ import { getSettings } from "../lib/prefs";
 type Quality = "normal" | "high";
 
 const ACTIVE = ["queued", "running"];
+
+/** A download link lasts 24 hours; one this old is replaced before it is followed. */
+const LINK_STALE_MS = 23 * 3600 * 1000;
 
 /** Every queued or running export job of the project, straight from the engine and into the live job store. */
 async function seedActive(pid: string): Promise<Job[]> {
@@ -60,14 +64,21 @@ function Check({ checked, onChange, children }: { checked: boolean; onChange(v: 
   );
 }
 
-function QueueRow({ row, desktop, busy, onRetry }: { row: Row; desktop: boolean; busy: boolean; onRetry(row: Row): void }) {
+function QueueRow({ row, pid, desktop, busy, onRetry }: { row: Row; pid: string; desktop: boolean; busy: boolean; onRetry(row: Row): void }) {
   const job = useJob(row.jobId);
   const nameId = useId();
+  const web = isWeb();
   const [showError, setShowError] = useState(false);
+  // the website: links to the finished files, replaced by fresh ones once they are about to expire
+  const [fresh, setFresh] = useState<ExportLink[] | null>(null);
+  const [linkError, setLinkError] = useState(false);
+  const issued = useRef(Date.now());
   const state = row.startError ? "failed" : job?.state ?? "queued";
   const pct = Math.round(job?.pct ?? 0);
   const result = job?.result as ExportResult | null | undefined;
   const files = (result?.renders ?? []).map((r) => r.path);
+  const issuedLinks = (result?.files ?? []).filter((f): f is ExportLink => typeof f === "object");
+  const links = issuedLinks.map((l) => fresh?.find((f) => f.name === l.name) ?? l);
   const warnedThumb = !!result?.warnings?.some((w) => w.kind === "thumbnail");
 
   async function show(path: string) {
@@ -76,6 +87,25 @@ function QueueRow({ row, desktop, busy, onRetry }: { row: Row; desktop: boolean;
       await showInFolder(path);
     } catch {
       setShowError(true);
+    }
+  }
+
+  async function follow(e: React.MouseEvent<HTMLAnchorElement>, link: ExportLink) {
+    setLinkError(false);
+    if (Date.now() - issued.current < LINK_STALE_MS) return; // still good: the browser follows it
+    e.preventDefault();
+    try {
+      const again = await engine.projectExports(pid);
+      const next = again.find((l) => l.name === link.name);
+      if (!next) throw new Error("gone");
+      issued.current = Date.now();
+      setFresh(again);
+      const a = document.createElement("a"); // follow the new link for the person
+      a.href = next.url;
+      a.download = next.name;
+      a.click();
+    } catch {
+      setLinkError(true);
     }
   }
 
@@ -92,7 +122,20 @@ function QueueRow({ row, desktop, busy, onRetry }: { row: Row; desktop: boolean;
           <i style={{ width: `${pct}%` }} />
         </div>
       )}
-      {state === "done" && (
+      {state === "done" && web && (
+        <ul className="q-files">
+          {links.map((link, i) => (
+            <li key={link.name} className="q-file">
+              <span className="q-name mono" id={`${nameId}-${i}`} title={link.name}>{link.name}</span>
+              <a className="secondary inline" href={link.url} download={link.name} aria-label={t("export.download.label", { name: link.name })} onClick={(e) => void follow(e, link)}>
+                {t("export.download")}
+              </a>
+            </li>
+          ))}
+        </ul>
+      )}
+      {state === "done" && web && linkError && <p className="error" role="alert">{t("export.download.error")}</p>}
+      {state === "done" && !web && (
         <ul className="q-files">
           {files.map((path, i) => (
             <li key={path} className="q-file">
@@ -119,6 +162,7 @@ function QueueRow({ row, desktop, busy, onRetry }: { row: Row; desktop: boolean;
 export default function Export() {
   const { id } = useParams();
   const desktop = isTauri();
+  const web = isWeb();
   const [project, setProject] = useState<Project | null>(null);
   const [missing, setMissing] = useState(false);
   const [off, setOff] = useState<ReadonlySet<string>>(new Set()); // kept clips switched off for this export
@@ -172,8 +216,8 @@ export default function Export() {
   const chosen = kept.filter((c) => !off.has(c.highlight.id));
   const settings = getSettings();
   // an explicit folder is sent to the engine; "next to the video" is the engine's own default
-  const sendFolder = override ?? (settings.outputMode === "folder" ? settings.outputFolder : "");
-  const shownFolder = sendFolder || (project ? defaultOutputFolder(project.source) : "");
+  const sendFolder = web ? "" : override ?? (settings.outputMode === "folder" ? settings.outputFolder : "");
+  const shownFolder = web ? "" : sendFolder || (project ? defaultOutputFolder(project.source) : "");
   const bar = { fileName: project ? baseName(project.source) : undefined, step: 4 as const, whole: isWhole(project?.type) };
 
   function bodyFor(row: Row): ExportBody {
@@ -291,11 +335,11 @@ export default function Export() {
         <div className="settings">
           <section className="set-sec" aria-label={t("export.queue")}>
             <h2 aria-live="polite">{summary}</h2>
-            <p className="set-note wrap-path" title={shownFolder}>{shownFolder}</p>
+            {!web && <p className="set-note wrap-path" title={shownFolder}>{shownFolder}</p>}
             <ul className="q-list">
-              {rows.map((row) => <QueueRow key={row.hid} row={row} desktop={desktop} busy={busy.has(row.hid)} onRetry={retry} />)}
+              {rows.map((row) => <QueueRow key={row.hid} row={row} pid={project.id} desktop={desktop} busy={busy.has(row.hid)} onRetry={retry} />)}
             </ul>
-            {!desktop && <p className="set-note">{t("export.show.browser")}</p>}
+            {web ? <p className="set-note">{t("export.download.note")}</p> : !desktop && <p className="set-note">{t("export.show.browser")}</p>}
           </section>
           <div className="row wrap">
             {over ? (
@@ -368,7 +412,7 @@ export default function Export() {
           </div>
         </section>
 
-        <section className="set-sec" aria-labelledby="ex-folder">
+        {!web && <section className="set-sec" aria-labelledby="ex-folder">
           <h2 id="ex-folder">{t("export.folder")}</h2>
           <p className="set-note wrap-path" title={shownFolder} data-testid="export-folder">{shownFolder}</p>
           <div className="row wrap">
@@ -376,7 +420,7 @@ export default function Export() {
             {override && <button type="button" className="secondary" onClick={() => setOverride(null)}>{t("export.folder.reset")}</button>}
           </div>
           {!desktop && <p className="set-note">{t("export.folder.browser")}</p>}
-        </section>
+        </section>}
 
         {blocked && (
           <div className="set-sec" role="status">

@@ -23,8 +23,11 @@ def make_token(uid=UID_A, aud="authenticated", exp=3600, secret=SECRET):
 
 @pytest.fixture
 def cfg(tmp_path):
+    import cloud_storage
+    from cloud_usage import MemoryUsage
+
     return CloudConfig(data_root=tmp_path / "data", origins=(ORIGIN,), supabase_url="https://x.supabase.test",
-                       jwt_secret=SECRET)
+                       jwt_secret=SECRET, storage=cloud_storage.MemoryStorage(), usage=MemoryUsage())
 
 
 @pytest.fixture
@@ -55,11 +58,15 @@ def test_bad_token_is_401(client, token):
     assert client.get("/projects/recent", headers=h).status_code == 401
 
 
-def test_project_lands_under_user_root_and_is_private(client, cfg, tmp_path):
-    src = tmp_path / "v.mp4"
-    src.write_bytes(b"x")
+def test_project_lands_under_user_root_and_is_private(client, cfg, monkeypatch):
+    import studio_server
+
+    monkeypatch.setattr(studio_server, "cached_probe", lambda p: {"duration": 60.0, "has_video": True})
+    up = client.post("/uploads", headers=auth(make_token(UID_A)),
+                     json={"kind": "video", "name": "v.mp4", "size": 1, "content_type": "video/mp4"}).json()
+    cfg.storage.objects[up["upload_key"]] = b"x"
     r = client.post("/projects", headers=auth(make_token(UID_A)),
-                    json={"source": str(src), "language": "en", "platform": "tiktok", "type": "clip"})
+                    json={"upload_key": up["upload_key"], "language": "en", "platform": "tiktok", "type": "clip"})
     assert r.status_code == 200, r.text
     pid = r.json()["id"]
     assert (cfg.data_root / "users" / UID_A / "projects.json").is_file()

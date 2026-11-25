@@ -24,6 +24,8 @@ export interface PlayerProps {
   view: ClipView;
   /** What the video element loads (see previewSrc). */
   src: string;
+  /** The video could not be loaded from `src`: the website asks for a fresh link (see useMediaUrl). */
+  onMediaError?: () => void;
   aspect: Aspect;
   /** The largest box the frame may fill. */
   fit?: { width: number; height: number };
@@ -56,7 +58,7 @@ const Icon = ({ d, fill }: { d: string; fill?: boolean }) => (
   </svg>
 );
 
-export default function Player({ view, src, aspect, fit = { width: 360, height: 420 }, onTime, poster, ref }: PlayerProps) {
+export default function Player({ view, src, onMediaError, aspect, fit = { width: 360, height: 420 }, onTime, poster, ref }: PlayerProps) {
   const video = useRef<HTMLVideoElement>(null);
   const ranges = useMemo(() => viewRanges(view), [view]);
   // overlays are saved in real source time; the mock plays a sample shifted by sample_offset
@@ -232,7 +234,10 @@ export default function Player({ view, src, aspect, fit = { width: 360, height: 
             onLoadedData={() => setReady(true)}
             onPlay={() => setPlaying(true)}
             onPause={() => setPlaying(false)}
-            onError={() => setFailed(true)}
+            onError={() => {
+              setFailed(true);
+              onMediaError?.();
+            }}
           />
         )}
         {look.filter && (

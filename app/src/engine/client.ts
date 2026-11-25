@@ -2,9 +2,12 @@
 // The token and any AI key are never logged and never put into an error message.
 
 import type {
-  AiTestBody, AiTestResult, AnalyzeBody, Batch, BrollBody, BrollSuggestions, BatchBody, Brand, BuildStoryBody, Story, StoryBody, StoryVoice, ClipOp, ClipView, Doctor, Engine, EngineInfo, ErrorBody, ExportBody, FilmstripInfo, Health, Job, ModelStatus,
-  NewProjectBody, Project, Transcript,
+  AiTestBody, AiTestResult, AnalyzeBody, Asset, Batch, BrollBody, BrollSuggestions, BatchBody, Brand, BuildStoryBody, Story, StoryBody, StoryVoice, ClipOp, ClipView, Doctor, Engine, EngineInfo, ErrorBody, ExportBody, ExportLink, FilmstripInfo, Health, Job, ModelStatus,
+  NewProjectBody, Project, Transcript, UploadTicket, Usage,
 } from "./types";
+import { getAccessToken } from "../auth/accessToken";
+import { isCloud, isTauri } from "./flavor";
+import { setMediaRefresher, setMediaToken } from "./mediaToken";
 import { mockEngine } from "./mock";
 import { EngineError } from "./types";
 
@@ -16,6 +19,9 @@ export interface ClientOptions {
   /** Asks for the engine's current port and token. Called again after a network failure or a 401. */
   getInfo: InfoSource;
   fetchImpl?: typeof fetch;
+  /** Keep the first answer of getInfo until a failure or a 401. Default: yes on desktop, no in the cloud, where the
+      access token is refreshed hourly and every request must carry the latest one. */
+  cacheInfo?: boolean;
   /** Called with every Job a route returns, so live-job stores can pick it up before the first event. */
   onJob?: (job: Job) => void;
 }
@@ -32,7 +38,7 @@ export function createClient(opts: ClientOptions): Engine {
   let current: Promise<EngineInfo> | null = null;
 
   function info(): Promise<EngineInfo> {
-    if (!current) {
+    if (!current || !(opts.cacheInfo ?? !isCloud())) {
       const p = opts.getInfo();
       current = p;
       p.catch(() => {
@@ -48,12 +54,13 @@ export function createClient(opts: ClientOptions): Engine {
       let conn: EngineInfo;
       try {
         conn = await used;
-      } catch {
+      } catch (e) {
+        if (e instanceof EngineError && e.code === "signin") throw e; // cloud build, nobody signed in
         throw new EngineError(0, "engine_unavailable", "the engine is not running");
       }
       let res: Response;
       try {
-        res = await doFetch(`http://127.0.0.1:${conn.port}${path}`, {
+        res = await doFetch(`${conn.base ?? `http://127.0.0.1:${conn.port}`}${path}`, {
           method,
           headers: {
             Authorization: `Bearer ${conn.token}`,
@@ -129,36 +136,59 @@ export function createClient(opts: ClientOptions): Engine {
     buildStory: (sid, body?: BuildStoryBody) => job(request<Job>("POST", `/stories/${enc(sid)}/build`, body ?? {})),
     createBatch: (body: BatchBody) => request<Batch>("POST", "/batches", body),
     getBatch: (bid) => request<Batch>("GET", `/batches/${enc(bid)}`),
+    createUpload: (body) => request<UploadTicket>("POST", "/uploads", body),
+    commitAsset: (uploadKey) => request<Asset>("POST", "/assets", { upload_key: uploadKey }),
+    usage: () => request<Usage>("GET", "/usage"),
+    projectExports: (pid) => request<ExportLink[]>("GET", `/projects/${enc(pid)}/exports`),
   };
 }
 
 // ---- which engine -------------------------------------------------------------------------------------------
 
-export const isTauri = (): boolean => typeof window !== "undefined" && "__TAURI_INTERNALS__" in window;
+export { isCloud, isTauri };
 
 export const isMock = (): boolean => !isTauri() && import.meta.env.VITE_ENGINE === "mock";
 
 let lastInfo: EngineInfo | null = null; // the engine the app last reached, for media URLs
+/** Remembers the engine the app last reached; media elements watching the token hear when it changes. */
+function reached(info: EngineInfo): EngineInfo {
+  const changed = lastInfo?.token !== info.token || lastInfo?.base !== info.base;
+  lastInfo = info;
+  setMediaToken(info.token, changed);
+  return info;
+}
+
+// media URLs of the website expire with the access token: useMediaUrl asks for a fresh one through this
+setMediaRefresher(async () => {
+  if (isCloud()) await fetchEngineInfo();
+});
 
 /** Port and token of the running engine: the Tauri command, else the VITE_ENGINE_URL/VITE_ENGINE_TOKEN dev pair. */
 export async function fetchEngineInfo(): Promise<EngineInfo> {
   if (isTauri()) {
     const { invoke } = await import("@tauri-apps/api/core");
-    return (lastInfo = await invoke<EngineInfo>("engine_info"));
+    return reached(await invoke<EngineInfo>("engine_info"));
+  }
+  if (isCloud()) {
+    const base = ((import.meta.env.VITE_ENGINE_URL as string | undefined) ?? "").trim().replace(/\/+$/, "");
+    if (!base) throw new Error("no engine: set VITE_ENGINE_URL to the cloud API address");
+    const token = await getAccessToken(); // fetched per request: it is refreshed while the app is open
+    if (!token) throw new EngineError(401, "signin", "sign in to use Vedit");
+    return reached({ base, token, port: 0 });
   }
   const url = import.meta.env.VITE_ENGINE_URL as string | undefined;
   const token = import.meta.env.VITE_ENGINE_TOKEN as string | undefined;
   if (!url || !token) throw new Error("no engine: set VITE_ENGINE_URL and VITE_ENGINE_TOKEN, or run dev:mock");
   const port = Number(new URL(url).port);
   if (!Number.isInteger(port) || port <= 0) throw new Error("VITE_ENGINE_URL needs an explicit port");
-  return (lastInfo = { port, token });
+  return reached({ port, token });
 }
 
 /** A URL a <video> or <img> can load from the engine (which streams the file, with seeking): the token rides in
     the query because media elements cannot send headers. Null until the app has reached the engine once. */
 export function engineMediaUrl(route: string, params: Record<string, string> = {}): string | null {
   if (!lastInfo) return null;
-  return `http://127.0.0.1:${lastInfo.port}${route}?${new URLSearchParams({ ...params, token: lastInfo.token })}`;
+  return `${lastInfo.base ?? `http://127.0.0.1:${lastInfo.port}`}${route}?${new URLSearchParams({ ...params, token: lastInfo.token })}`;
 }
 
 const jobListeners = new Set<(job: Job) => void>();
