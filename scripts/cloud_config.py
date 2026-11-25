@@ -21,6 +21,8 @@ class CloudConfig:
     usage: "Usage | None" = None  # SupabaseUsage in production; wired in from_env by the deploy task
     runner_factory: Callable | None = None
     paused: bool = False
+    sweep_token: str | None = None  # VEDIT_SWEEP_TOKEN: lets the daily cron start the retention sweep (route is 404 without)
+    commit: Callable[[], None] | None = None  # the Modal Volume's commit, run after the sweep
 
 
 def from_env() -> CloudConfig | None:
@@ -33,4 +35,5 @@ def from_env() -> CloudConfig | None:
         supabase_url=os.environ.get("SUPABASE_URL", "").rstrip("/"),
         jwt_secret=os.environ.get("SUPABASE_JWT_SECRET") or None,
         paused=os.environ.get("VEDIT_PAUSED") == "1",
+        sweep_token=os.environ.get("VEDIT_SWEEP_TOKEN") or None,
     )

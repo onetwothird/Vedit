@@ -362,3 +362,92 @@ def test_desktop_project_is_never_expired(tmp_path):
 
     assert "expired" not in studio_server._project_dict(p)
     assert cloud_cleanup.sweep(tmp_path / "nodata", cs.MemoryStorage(), NOW)["projects_expired"] == 0
+
+
+# ---- running safely beside the API ------------------------------------------------------------------------------
+
+def test_a_project_used_after_the_sweep_looked_keeps_its_source(root, storage):
+    """An analyse that starts between the sweep's first look and its delete (it stamps last_activity and queues
+    a job under the user's lock) must not lose the video."""
+    import contextlib
+
+    p, folder, _wd = make(root)
+    put_exports(storage, UID_A, p.id)
+
+    @contextlib.contextmanager
+    def lock(uid):
+        with use_home(user_home(root)):
+            fresh = load_project(p.id)
+            fresh.last_activity = NOW.isoformat()
+            save_project(fresh)
+        write_job(root, "late", "queued", p.id)
+        yield
+
+    counts = cloud_cleanup.sweep(root, storage, NOW, lock=lock)
+    assert counts["projects_expired"] == 0
+    assert (folder / "source.mp4").is_file() and cs.export_key(UID_A, p.id, "out.mp4") in storage.objects
+    assert "expired" not in settings_of(root, p.id)
+
+
+def test_a_job_started_after_the_sweep_looked_also_keeps_the_source(root, storage):
+    import contextlib
+
+    p, folder, _wd = make(root)
+
+    @contextlib.contextmanager
+    def lock(uid):
+        write_job(root, "late", "running", p.id)  # only the job file appears; last_activity is unchanged
+        yield
+
+    assert cloud_cleanup.sweep(root, storage, NOW, lock=lock)["projects_expired"] == 0
+    assert (folder / "source.mp4").is_file()
+
+
+def test_sweep_takes_the_users_lock_around_the_delete(root, storage):
+    import contextlib
+
+    make(root)
+    seen = []
+
+    @contextlib.contextmanager
+    def lock(uid):
+        seen.append(("in", uid))
+        yield
+        seen.append(("out", uid))
+
+    assert cloud_cleanup.sweep(root, storage, NOW, lock=lock)["projects_expired"] == 1
+    assert seen == [("in", UID_A), ("out", UID_A)]
+
+
+def test_analyse_stamps_activity(client, storage, cfg, runner):
+    r = make_project(client, storage)
+    pid = r.json()["id"]
+    before = r.json()["last_activity"]
+    assert analyze(client, pid).status_code == 200
+    assert client.get(f"/projects/{pid}", headers=A).json()["last_activity"] > before
+
+
+def test_sweep_route_rejects_without_the_token_and_runs_with_it(client, cfg, storage, monkeypatch):
+
+    calls = []
+    committed = []
+
+    def fake(data_root, store, now, **kw):
+        calls.append((data_root, store, kw.get("lock")))
+        return {"projects_expired": 0}
+
+    monkeypatch.setattr(cloud_cleanup, "sweep", fake)
+    cfg.commit = lambda: committed.append(1)
+    # no token configured: the route does not exist
+    assert client.post("/internal/sweep", headers={"Authorization": "Bearer anything"}).status_code == 404
+    cfg.sweep_token = "s3cret-sweep"
+    assert client.post("/internal/sweep").status_code == 401
+    assert client.post("/internal/sweep", headers={"Authorization": "Bearer nope"}).status_code == 401
+    assert client.post("/internal/sweep", headers=A).status_code == 401  # a user's JWT is not the sweep token
+    assert calls == []
+    r = client.post("/internal/sweep", headers={"Authorization": "Bearer s3cret-sweep"})
+    assert r.status_code == 202 and r.json() == {"started": True}
+    client.app.state.sweep_thread.join(5)
+    assert len(calls) == 1 and calls[0][0] == cfg.data_root and calls[0][1] is storage and calls[0][2] is not None
+    assert committed == [1] and client.app.state.last_sweep == {"projects_expired": 0}
+    assert client.app.state.sweeping is False

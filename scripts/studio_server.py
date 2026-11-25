@@ -19,6 +19,7 @@ import tempfile
 import threading
 import uuid
 from contextlib import asynccontextmanager
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Literal, Optional
 
@@ -237,6 +238,7 @@ def _project_dict(p: Project) -> dict:
     return doc
 
 
+SWEEP_ROUTE = "/internal/sweep"
 DOCTOR_UID = "00000000-0000-0000-0000-000000000000"  # nobody: /doctor reads its minutes to reach the usage table
 
 
@@ -1041,7 +1043,7 @@ def create_app(token: str | None, queue: JobQueue | None = None, cloud=None) -> 
             auth = "Bearer " + (request.query_params.get("token") or "")
         given = auth[len("Bearer "):] if auth.startswith("Bearer ") else None
         if cloud is not None:
-            if request.url.path == "/health":
+            if request.url.path in ("/health", SWEEP_ROUTE):  # the sweep route checks its own shared secret
                 return await call_next(request)
             try:
                 home = await asyncio.to_thread(user_home, given)
@@ -1079,6 +1081,44 @@ def create_app(token: str | None, queue: JobQueue | None = None, cloud=None) -> 
     async def internal(_request: Request, exc: Exception):
         print(f"vedit: internal error: {type(exc).__name__}: {exc}", file=sys.stderr)
         return _error(500, "internal", "internal error")
+
+    if cloud is not None:
+        sweep_lock = threading.Lock()
+        app.state.sweeping = False
+        app.state.last_sweep = None
+
+        def run_sweep() -> None:
+            import cloud_cleanup
+            import cloud_projects as cp
+
+            try:
+                app.state.last_sweep = cloud_cleanup.sweep(cloud.data_root, cloud.storage,
+                                                           datetime.now(timezone.utc), lock=cp.lock_for_user)
+                print(f"vedit retention sweep: {app.state.last_sweep}", file=sys.stderr)
+                if cloud.commit is not None:
+                    cloud.commit()  # this process is the Volume's only writer: publish what the sweep changed
+            except Exception as e:  # noqa: BLE001
+                print(f"vedit: retention sweep failed: {type(e).__name__}: {e}", file=sys.stderr)
+            finally:
+                app.state.sweeping = False
+                sweep_lock.release()
+
+        @app.post(SWEEP_ROUTE)
+        def start_sweep(request: Request):
+            """The daily cron (not a user): runs the retention sweep here, in the one process that writes the data."""
+            if not cloud.sweep_token:
+                raise NotFound("route")
+            auth = request.headers.get("authorization") or ""
+            given = auth[len("Bearer "):] if auth.startswith("Bearer ") else ""
+            if not hmac.compare_digest(given.encode("utf-8"), cloud.sweep_token.encode("utf-8")):
+                return _error(401, "unauthorized", "missing or wrong token")
+            if not sweep_lock.acquire(blocking=False):
+                return JSONResponse({"started": False, "reason": "already running"}, status_code=202)
+            app.state.sweeping = True
+            t = threading.Thread(target=run_sweep, name="vedit-retention-sweep", daemon=True)
+            app.state.sweep_thread = t
+            t.start()
+            return JSONResponse({"started": True}, status_code=202)
 
     @app.get("/health")
     def health():

@@ -132,6 +132,11 @@ def create_from_upload(cloud, upload_key: str, language: str, platform: str, kin
         return project
 
 
+def lock_for_user(user: str) -> threading.RLock:
+    """Another user's job-start lock (the retention sweep takes it before it deletes that user's video)."""
+    return _lock_for(user)
+
+
 def user_lock() -> threading.RLock:
     """The caller's lock: guard checks, the charge and the submit of one user's jobs happen one at a time.
     Lock order: this lock first, then a project's (engine.lock_for); never the other way round."""
@@ -203,8 +208,9 @@ def start_analyze(engine, cloud, p: Project, steps: list, probe: Callable[[Path]
     slip under the 2-job limit. The job id is made here so the charge can name it before the job exists. A batch
     item (`in_batch`) is already inside its batch's slot, so only the pause applies.
     """
-    check_not_expired(p)
     with user_lock():
+        p = load_project(p.id)  # fresh, under the lock the retention sweep also takes before it deletes a video
+        check_not_expired(p)
         if not in_batch:
             check_cap(engine)
         if any(j.project_id == p.id and j.kind == "analyze" for j in engine.active_jobs()):

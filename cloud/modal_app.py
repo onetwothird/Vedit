@@ -5,7 +5,7 @@
 
 Needs the Modal secret "vedit-cloud" with: SUPABASE_URL, SUPABASE_JWT_SECRET (or JWKS), SUPABASE_SECRET_KEY,
 R2_ACCOUNT_ID, R2_ACCESS_KEY_ID, R2_SECRET_ACCESS_KEY, R2_BUCKET (default vedit-media), VEDIT_ORIGINS, and optionally
-VEDIT_GLOBAL_LIMIT_SECONDS and VEDIT_PAUSED=1. Nothing here is imported by the engine or its tests.
+VEDIT_GLOBAL_LIMIT_SECONDS, VEDIT_PAUSED=1 and VEDIT_SWEEP_TOKEN (the daily retention cron calls the API with it). Nothing here is imported by the engine or its tests.
 """
 from __future__ import annotations
 
@@ -90,23 +90,20 @@ def download_models() -> None:
     volume.commit()
 
 
-@app.function(image=image, volumes={DATA: volume}, secrets=secrets, timeout=3600,
-              schedule=modal.Cron("0 3 * * *"))
+@app.function(image=image, secrets=secrets, timeout=300, schedule=modal.Cron("0 3 * * *"))
 def retention_sweep() -> dict:
-    """Daily 7-day retention: sources, previews and exports of idle projects, old zips and uncommitted uploads."""
-    from datetime import datetime, timezone
+    """Daily 7-day retention. It does not touch the Volume: it asks the API (the one writer of /data) to run the
+    sweep in its own process (POST /internal/sweep with VEDIT_SWEEP_TOKEN from the secret). The API replies 202 at
+    once and sweeps in a thread; the web function URL is used because an ASGI function has no .remote()."""
+    import json
+    import urllib.request
 
-    sys.path.insert(0, f"{REPO}/scripts")
-    import cloud_cleanup
-    from cloud_storage import R2Storage
-
-    storage = R2Storage(os.environ["R2_ACCOUNT_ID"], os.environ.get("R2_BUCKET", "vedit-media"),
-                        os.environ["R2_ACCESS_KEY_ID"], os.environ["R2_SECRET_ACCESS_KEY"])
-    volume.reload()  # see what the API and the steps committed since this container's snapshot
-    counts = cloud_cleanup.sweep(Path(DATA), storage, datetime.now(timezone.utc))
-    volume.commit()
-    print(f"vedit retention sweep: {counts}")
-    return counts
+    req = urllib.request.Request(api.get_web_url().rstrip("/") + "/internal/sweep", data=b"", method="POST",
+                                 headers={"Authorization": f"Bearer {os.environ['VEDIT_SWEEP_TOKEN']}"})
+    with urllib.request.urlopen(req, timeout=240) as resp:  # a cold API container may take a while to start
+        body = json.loads(resp.read().decode("utf-8") or "{}")
+    print(f"vedit retention sweep requested: {body}")
+    return body
 
 
 def _cloud_config():
@@ -119,6 +116,7 @@ def _cloud_config():
     cfg = cloud_config.from_env()
     if cfg is None:
         raise RuntimeError("VEDIT_CLOUD=1 is not set in the image")
+    cfg.commit = volume.commit  # the sweep (run in this process) publishes its changes
     cfg.storage = R2Storage(os.environ["R2_ACCOUNT_ID"], os.environ.get("R2_BUCKET", "vedit-media"),
                             os.environ["R2_ACCESS_KEY_ID"], os.environ["R2_SECRET_ACCESS_KEY"])
     global_limit = os.environ.get("VEDIT_GLOBAL_LIMIT_SECONDS")
@@ -130,7 +128,7 @@ def _cloud_config():
     return cfg
 
 
-def _keep_warm_while_busy(engine, interval: float = 60.0) -> None:
+def _keep_warm_while_busy(engine, web_state, interval: float = 60.0) -> None:
     """The API container follows the running steps: while any job runs, keep one container up (scaledown would
     otherwise stop it after 5 idle minutes, and the next one would have to recover every job)."""
     warm = False
@@ -139,7 +137,8 @@ def _keep_warm_while_busy(engine, interval: float = 60.0) -> None:
         nonlocal warm
         while True:
             try:
-                busy = any(j.state in ("queued", "running") for j in list(engine._jobs.values()))
+                busy = (any(j.state in ("queued", "running") for j in list(engine._jobs.values()))
+                        or bool(getattr(web_state, "sweeping", False)))
                 if busy != warm:
                     api.update_autoscaler(min_containers=1 if busy else 0)
                     warm = busy
@@ -159,5 +158,5 @@ def api():
     from studio_server import create_app
 
     web = create_app(None, cloud=_cloud_config())
-    _keep_warm_while_busy(web.state.engine)
+    _keep_warm_while_busy(web.state.engine, web.state)
     return web
