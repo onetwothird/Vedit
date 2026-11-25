@@ -467,7 +467,7 @@ function BatchRow({ index, item, exporting, onSettled }: { index: number; item: 
   const web = isWeb();
   const [fresh, setFresh] = useState<ExportLink[] | null>(null);
   const [linkError, setLinkError] = useState(false);
-  const issued = useRef(Date.now());
+  const issued = useRef(0); // when the shown links were signed; 0 until fresh ones are fetched
   const exp = useJob(item.export ?? undefined);
   const [showError, setShowError] = useState(false);
   const desktop = isTauri();
@@ -507,6 +507,23 @@ function BatchRow({ index, item, exporting, onSettled }: { index: number; item: 
   const links = exporting && state === "done" && web
     ? ((exp?.result as ExportResult | null)?.files ?? []).filter((f): f is ExportLink => typeof f === "object").map((l) => fresh?.find((f) => f.name === l.name) ?? l)
     : [];
+
+  // the website: links stored in a job result were signed when the job finished, maybe days ago. Once the row is done,
+  // ask for fresh ones and count their age from then; until they arrive the stored ones count as stale (issued 0).
+  const pid = item.project?.id;
+  const finished = web && exporting && state === "done" && !!pid;
+  useEffect(() => {
+    if (!finished || !pid) return;
+    let live = true;
+    engine.projectExports(pid).then((again) => {
+      if (!live) return;
+      issued.current = Date.now();
+      setFresh(again);
+    }, () => undefined);
+    return () => {
+      live = false;
+    };
+  }, [finished, pid]);
 
   async function follow(e: React.MouseEvent<HTMLAnchorElement>, link: ExportLink) {
     setLinkError(false);

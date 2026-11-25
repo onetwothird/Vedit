@@ -347,6 +347,28 @@ test.describe("batch", () => {
     await expect(zip).toBeVisible({ timeout: 15_000 });
     await expect(zip).toHaveAttribute("href", /__mock-r2\/zips\/b\d+\.zip/);
   });
+
+  test("a finished batch opened again shows freshly signed links, not the ones stored with the job", async ({ page }) => {
+    await acceptUploads(page);
+    await page.goto("/#/batch");
+    await page.locator('input[type="file"]').setInputFiles(video("a.webm"));
+    await page.getByRole("button", { name: "Start 1 video" }).click();
+    await expect(page).toHaveURL(/#\/batch\/b\d+/, { timeout: 15_000 });
+    const url = page.url();
+    await expect(page.getByText("All done.")).toBeVisible({ timeout: 30_000 });
+    const link = page.getByRole("link", { name: /^Download 01 / }).first();
+    await expect(link).toBeVisible();
+    const before = await link.getAttribute("href");
+
+    // come back later: the job's stored result is the same, so only a new projectExports call can change the link
+    await page.getByRole("link", { name: "Vedit home" }).click();
+    await expect(page.getByRole("link", { name: /podcast-ep12\.mp4/ })).toBeVisible();
+    await expect(page.getByText("All done.")).toHaveCount(0);
+    await page.goto(url);
+    await expect(page.getByText("All done.")).toBeVisible({ timeout: 15_000 });
+    await expect(link).toHaveAttribute("href", /__mock-r2\/exports\//);
+    await expect(link).not.toHaveAttribute("href", before!);
+  });
 });
 
 test.describe("brand kit", () => {
