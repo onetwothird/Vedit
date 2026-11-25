@@ -6,6 +6,7 @@ auth guard sets to data_root/users/<uid>, so another user's ids are simply not f
 """
 from __future__ import annotations
 
+import contextlib
 import json
 import os
 import re
@@ -134,6 +135,35 @@ def _content_type_ok(kind: str, content_type: str) -> bool:
     return ct in ("application/octet-stream", "text/plain") or ct.startswith("text/")  # lut (.cube)
 
 
+@contextlib.contextmanager
+def claim_pending(uid: str, key: str):
+    """Claim this user's pending upload `key` exclusively and yield (upload_id, pending record, record path).
+
+    Not this user's key, or no such pending upload -> 404 (the same answer, so nothing leaks); a concurrent claim
+    -> 409. The claim is an exclusive-create marker next to the record, released on exit.
+    """
+    prefix = cs.uploads_prefix(uid)
+    upload_id = key[len(prefix):] if isinstance(key, str) and key.startswith(prefix) else ""
+    if not UPLOAD_ID.match(upload_id):
+        raise _not_found()
+    pending_file = _pending_path(upload_id)
+    claimed = pending_file.with_suffix(".claimed")
+    try:
+        os.close(os.open(claimed, os.O_CREAT | os.O_EXCL | os.O_WRONLY))
+    except FileExistsError:
+        raise StarletteHTTPException(409, "Upload is already being saved") from None
+    except FileNotFoundError:  # the uploads/ directory does not exist: nothing was ever started
+        raise _not_found() from None
+    try:
+        try:  # re-read under the claim: a commit that finished just before us removed the record
+            pending = json.loads(pending_file.read_text(encoding="utf-8"))
+        except (FileNotFoundError, ValueError):
+            raise _not_found() from None
+        yield upload_id, pending, pending_file
+    finally:
+        claimed.unlink(missing_ok=True)
+
+
 class UploadRequest(BaseModel):
     kind: str
     name: str
@@ -178,25 +208,8 @@ def build_router(cloud) -> APIRouter:
     @router.post("/assets")
     def commit_asset(req: CommitRequest):
         uid = _uid()
-        prefix = cs.uploads_prefix(uid)
         key = req.upload_key
-        upload_id = key[len(prefix):] if key.startswith(prefix) else ""
-        if not UPLOAD_ID.match(upload_id):
-            raise _not_found()
-        pending_file = _pending_path(upload_id)
-        claimed = pending_file.with_suffix(".claimed")
-        # The claim is an exclusive-create marker next to the pending record: one concurrent commit gets it.
-        try:
-            os.close(os.open(claimed, os.O_CREAT | os.O_EXCL | os.O_WRONLY))
-        except FileExistsError:
-            raise StarletteHTTPException(409, "Upload is already being saved") from None
-        except FileNotFoundError:  # the uploads/ directory does not exist: nothing was ever started
-            raise _not_found() from None
-        try:
-            try:  # re-read under the claim: a commit that finished just before us removed the record
-                pending = json.loads(pending_file.read_text(encoding="utf-8"))
-            except (FileNotFoundError, ValueError):
-                raise _not_found() from None
+        with claim_pending(uid, key) as (upload_id, pending, pending_file):
             remote = storage.size(key)
             if remote is None:
                 raise ValueError("Upload not finished")  # record kept: the client can retry
@@ -223,8 +236,6 @@ def build_router(cloud) -> APIRouter:
             storage.delete(key)
             pending_file.unlink(missing_ok=True)  # before the claim is released
             return _public(entry)
-        finally:
-            claimed.unlink(missing_ok=True)
 
     @router.get("/assets")
     def list_assets(kind: str | None = None):

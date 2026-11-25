@@ -33,6 +33,7 @@ from pydantic import BaseModel, Field  # noqa: E402
 from starlette.exceptions import HTTPException as StarletteHTTPException  # noqa: E402
 
 import accel  # noqa: E402
+import cloud_projects  # noqa: E402
 import broll  # noqa: E402
 import models  # noqa: E402
 import vedit  # noqa: E402
@@ -43,7 +44,7 @@ from edl_ops import clip_edl, cut_words, fix_word, kept_ranges, patch_section, r
 from highlights_llm import HID_RE  # noqa: E402
 from studio_jobs import Job, JobQueue  # noqa: E402
 import studio_stories as stories  # noqa: E402
-from studio_projects import (LANG_MODEL, use_home, Project, ProjectClip, _atomic_write_json, _home, USER_HOME,  # noqa: E402
+from studio_projects import (LANG_MODEL, use_home, Project, ProjectClip, _atomic_write_json, _home, USER_HOME, project_doc,  # noqa: E402
                              create_project, list_recent, load_project, output_dir, output_name, save_project)
 
 ALLOWED_ORIGINS = ("tauri://localhost", "http://tauri.localhost", "http://localhost:5173")
@@ -56,13 +57,15 @@ WHOLE_ID = "h01"
 PRESET_FOR = {"vlog": "youtube"}  # clip and reel projects use their platform's preset
 TERMINAL = ("done", "failed", "cancelled")
 WS_QUEUE_MAX = 256
+CLOUD_PARALLEL_JOBS = 4  # cloud: jobs of different users run side by side (each user is capped at 2)
 OVERLAP_DROP = 0.5  # a new highlight overlapping a kept clip by more than this share of the shorter one is dropped
 
 
 # ---- request bodies -------------------------------------------------------------------------------------------
 
 class NewProject(BaseModel):
-    source: str
+    source: Optional[str] = None  # desktop: a path on this computer
+    upload_key: Optional[str] = None  # cloud: a video the visitor uploaded to R2
     language: Literal["en", "tl", "taglish"]
     platform: Literal["reels", "shorts", "tiktok", "youtube"]
     type: Literal["clip", "vlog", "reel"] = "clip"
@@ -203,7 +206,7 @@ def _error(status: int, code: str, detail: str) -> JSONResponse:
 
 
 def _project_dict(p: Project) -> dict:
-    return dataclasses.asdict(p)
+    return project_doc(p)
 
 
 def _job_dict(j: Job) -> dict:
@@ -329,8 +332,9 @@ class Engine:
     every snapshot, so GET /jobs, cancel, last_job and the WebSocket always agree.
     """
 
-    def __init__(self, token: str, job_queue=None, scoped: bool = False):
+    def __init__(self, token: str, job_queue=None, scoped: bool = False, cloud=None):
         self.token = token
+        self.cloud = cloud  # cloud only: failed jobs give their minutes back through cloud.usage
         self.scoped = scoped  # cloud: jobs and their events belong to the user (home) that submitted them
         self._events: queue.Queue[Optional[Job]] = queue.Queue()
         self._locks: dict[str, threading.Lock] = {}
@@ -344,7 +348,12 @@ class Engine:
         self._clients_lock = threading.Lock()
         self._closed = False
         self._recover_interrupted()
-        self.queue = job_queue if job_queue is not None else JobQueue(self.on_event)
+        if job_queue is not None:
+            self.queue = job_queue
+        elif cloud is not None and cloud.runner_factory is not None:
+            self.queue = JobQueue(self.on_event, max_parallel=CLOUD_PARALLEL_JOBS, runner=cloud.runner_factory())
+        else:
+            self.queue = JobQueue(self.on_event)
         self._dispatcher = threading.Thread(target=self._dispatch, name="vedit-dispatch", daemon=True)
         self._dispatcher.start()
 
@@ -403,9 +412,11 @@ class Engine:
         with self._meta_lock:
             self._overlay.setdefault(job_id, {}).update(fields)
 
-    def submit(self, project_id: str, kind: str, steps: list, renders: list[dict] | None = None) -> Job:
+    def submit(self, project_id: str, kind: str, steps: list, renders: list[dict] | None = None,
+               job_id: str | None = None) -> Job:
         with self._meta_lock:  # held so no event of this job is processed before its plan is registered
-            job = self.queue.submit(project_id, kind, steps)
+            extra = {'job_id': job_id} if job_id else {}
+            job = self.queue.submit(project_id, kind, steps, **extra)
             if renders is not None:
                 self._exports[job.id] = renders
                 self._overlay[job.id] = {"result": {"renders": _public_renders(renders), "files": []}}
@@ -481,6 +492,11 @@ class Engine:
                         self._set_overlay(raw.id, result=self._finish_story(raw))
                 except Exception as e:  # noqa: BLE001 - post-processing failure fails the job, not the server
                     self._set_overlay(raw.id, state="failed", error=f"post-processing failed: {e}")
+                if self.cloud is not None:  # a failed job (even one that failed after its steps) gives its minutes back
+                    with self._meta_lock:
+                        final = self._overlaid(raw).state
+                    if final == "failed":
+                        cloud_projects.refund(self.cloud, raw.id)
             with self._meta_lock:
                 job = self._overlaid(raw)
                 self._jobs[job.id] = job
@@ -833,7 +849,7 @@ def create_app(token: str | None, queue: JobQueue | None = None, cloud=None) -> 
     if cloud is None and (not isinstance(token, str) or not token.strip()):
         raise ValueError("the engine needs a non-empty bearer token")
     token = token if isinstance(token, str) else ""
-    engine = Engine(token, queue, scoped=cloud is not None)
+    engine = Engine(token, queue, scoped=cloud is not None, cloud=cloud)
     allowed_origins = tuple(cloud.origins) if cloud is not None else ALLOWED_ORIGINS
 
     def user_home(jwt_token: str | None) -> Path:
@@ -959,6 +975,13 @@ def create_app(token: str | None, queue: JobQueue | None = None, cloud=None) -> 
 
     @app.post("/projects")
     def new_project(body: NewProject):
+        if cloud is not None:  # the visitor's uploaded video; a path on the server is never read
+            if body.source is not None or not body.upload_key:
+                raise ValueError("Upload a video to start a project")
+            return _project_dict(cloud_projects.create_from_upload(
+                cloud, body.upload_key, body.language, body.platform, body.type, lambda f: cached_probe(f)))
+        if not body.source:
+            raise ValueError("source is required")
         src = Path(body.source)
         if not src.is_file():
             raise ValueError(f"source video not found: {body.source}")
@@ -987,6 +1010,8 @@ def create_app(token: str | None, queue: JobQueue | None = None, cloud=None) -> 
         stages = ANALYZE_STEPS if p.type == "clip" else WHOLE_STEPS
         steps = [(stage, argv[stage], share) + ((step_env[stage],) if stage in step_env else ())
                  for stage, share in stages]
+        if cloud is not None:  # models live on the Volume and the step runs on a GPU: no model step, no CPU stand-in
+            return _job_dict(cloud_projects.start_analyze(engine, cloud, p, steps, lambda f: cached_probe(f)))
         # the model this computer will run: without a GPU, the faster stand-in (see accel.speech_plan)
         need = model if accel.gpu_ready() else accel.CPU_SWAP.get(model, model)
         if not models.status()[need]["installed"]:  # fetch the speech model first, as 30% of the job
@@ -1049,6 +1074,8 @@ def create_app(token: str | None, queue: JobQueue | None = None, cloud=None) -> 
                 os.replace(tmp_path, path)
             finally:
                 tmp_path.unlink(missing_ok=True)
+            if cloud is not None:
+                cloud_projects.touch(pid)
             return view
 
     @app.post("/projects/{pid}/clips/{hid}/broll")
@@ -1073,13 +1100,18 @@ def create_app(token: str | None, queue: JobQueue | None = None, cloud=None) -> 
         with engine.lock_for(pid):
             p = _project(pid)
             _find_clip(p, hid).kept = body.kept
+            if cloud is not None:
+                p.last_activity = cloud_projects.now_iso()
             save_project(p)
             return _project_dict(p)
 
     @app.post("/projects/{pid}/export")
     def export(pid: str, body: ExportBody):
         with engine.lock_for(pid):
-            return _job_dict(submit_export(engine, _project(pid), body))
+            p = _project(pid)
+            if cloud is not None:
+                cloud_projects.touch(pid)
+            return _job_dict(submit_export(engine, p, body))
 
     # ---- stories: photos or clips + a script -> a narrated video
     def _story(sid: str) -> dict:

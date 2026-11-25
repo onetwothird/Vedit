@@ -272,8 +272,10 @@ class JobQueue:
             t.start()
 
     # ---- public API -------------------------------------------------------------------------------------------
-    def submit(self, project_id: str, kind: str, steps: list[Step], env: dict[str, str] | None = None) -> Job:
-        job = Job(id=uuid.uuid4().hex[:12], project_id=project_id, kind=kind)  # type: ignore[arg-type]
+    def submit(self, project_id: str, kind: str, steps: list[Step], env: dict[str, str] | None = None,
+               job_id: str | None = None) -> Job:
+        """`job_id` lets a caller that must charge for the job first know its id; it must never be reused."""
+        job = Job(id=job_id or uuid.uuid4().hex[:12], project_id=project_id, kind=kind)  # type: ignore[arg-type]
         with self._lock:
             if self._closed:
                 raise RuntimeError("job queue is shut down")
