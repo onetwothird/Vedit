@@ -9,6 +9,7 @@ import os
 import re
 import sys
 import tempfile
+import threading
 from dataclasses import asdict, dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
@@ -110,9 +111,15 @@ def _atomic_write_json(path: Path, data) -> None:
         raise
 
 
+# one read-modify-write of a registry at a time: a recency bump racing a new project's entry would drop it, and on
+# Windows a read during the atomic replace fails (the cloud engine reads and writes from many threads)
+_registry_lock = threading.RLock()
+
+
 def _read_registry() -> dict:
     try:
-        data = json.loads(_registry_path().read_text(encoding="utf-8"))
+        with _registry_lock:
+            data = json.loads(_registry_path().read_text(encoding="utf-8"))
     except (OSError, ValueError):
         return {}  # missing or unreadable: the registry is only an index and rebuilds as projects are created
     return data if isinstance(data, dict) else {}
@@ -130,6 +137,11 @@ def _backup(path: Path) -> Path:
 
 
 def _register(pid: str, wd: Path, file: str = PROJECT_FILE) -> None:
+    with _registry_lock:
+        _register_locked(pid, wd, file)
+
+
+def _register_locked(pid: str, wd: Path, file: str) -> None:
     path = _registry_path()
     try:
         reg = json.loads(path.read_text(encoding="utf-8"))

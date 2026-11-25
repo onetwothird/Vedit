@@ -20,15 +20,18 @@ from studio_projects import USER_HOME, use_home
 PROGRESS_PREFIX = "@@progress "
 TAIL_LINES = 20
 
-# (stage name, argv, share of the whole job 0-1[, env merged into this step only])
-Step = Union[tuple[str, list[str], float], tuple[str, list[str], float, dict[str, str]]]
+# (stage name, argv, share of the whole job 0-1[, env merged into this step only]). Instead of an argv, a step can be
+# a zero-argument Python callable: it runs on the queue's worker thread (under the job's home), never on the runner,
+# and fails the job by raising (cloud: publishing the rendered files to R2 is such a step)
+Step = Union[tuple[str, Union[list[str], Callable[[], None]], float],
+             tuple[str, Union[list[str], Callable[[], None]], float, dict[str, str]]]
 
 
 @dataclass
 class Job:
     id: str
     project_id: str
-    kind: Literal["analyze", "export", "model", "story"]
+    kind: Literal["analyze", "export", "model", "story", "zip"]
     state: Literal["queued", "running", "done", "failed", "cancelled"] = "queued"
     stage: str = ""
     pct: float = 0.0
@@ -403,7 +406,16 @@ class JobQueue:
             if entry.cancelled:
                 return self._finish(entry, "cancelled")
             self._update(entry, stage=stage)
-            code, tail = self._run_step(entry, stage, argv, done_share, share, step_env)
+            if callable(argv):
+                try:
+                    argv()
+                except Exception as exc:  # noqa: BLE001 - any failure of an in-process step fails the job
+                    if entry.cancelled:
+                        return self._finish(entry, "cancelled")
+                    return self._finish(entry, "failed", error=f"step '{stage}' failed: {exc}")
+                code, tail = 0, []
+            else:
+                code, tail = self._run_step(entry, stage, argv, done_share, share, step_env)
             if entry.cancelled:
                 return self._finish(entry, "cancelled")
             if code != 0:

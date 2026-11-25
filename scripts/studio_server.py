@@ -106,9 +106,15 @@ class ExportBody(BaseModel):
     first_number: int = Field(1, ge=1, le=999)  # the "NN" the first clip's file name starts at (a retry keeps its number)
 
 
+class TTSKey(BaseModel):
+    provider: Literal["openai", "elevenlabs"]
+    api_key: str
+
+
 class BuildStoryBody(BaseModel):
     out_dir: Optional[str] = None  # absolute folder for the video; default: the user's Videos/Vedit folder
     quality: Literal["normal", "high"] = "normal"
+    tts: Optional[TTSKey] = None  # cloud: the visitor's premium-voice key, held only in the job's in-memory env
 
 
 class BatchBody(BaseModel):
@@ -126,6 +132,12 @@ class BatchBody(BaseModel):
     thumbnail: bool = False
 
 
+class CloudBatchBody(BatchBody):
+    """Cloud: the batch's videos are the visitor's uploads; `sources` and `out_dir` are refused (400), not ignored."""
+    sources: Optional[list[str]] = None  # type: ignore[assignment]
+    upload_keys: list[str] = Field(default_factory=list, max_length=50)
+
+
 BRAND_KEYS = ("font", "caption_color", "highlight", "logo", "intro", "outro", "music")
 AI_TEST_URLS = {"anthropic": "https://api.anthropic.com/v1/models", "openai": "https://api.openai.com/v1/models"}
 
@@ -139,6 +151,19 @@ class BrandBody(BaseModel):
     intro: str = ""
     outro: str = ""
     music: str = ""
+
+
+class CloudBrandBody(BaseModel):
+    """The cloud brand kit (see cloud_outputs.put_brand): files are `asset:` references of the caller's library."""
+    font: str = ""  # a caption font name (the bundled fonts), not a file
+    caption_color: str = ""
+    highlight: str = ""
+    logo: str = ""
+    intro: str = ""
+    outro: str = ""
+    music: str = ""
+    lut: str = ""
+    fonts: dict[str, str] = Field(default_factory=dict)  # card fonts by weight -> asset reference
 
 
 def brand_file() -> Path:
@@ -347,6 +372,12 @@ class Engine:
         self._clients: dict[tuple[asyncio.AbstractEventLoop, asyncio.Queue], Path | None] = {}
         self._clients_lock = threading.Lock()
         self._closed = False
+        # cloud only (see cloud_projects / cloud_outputs): job ids this process charged (only those are refunded),
+        # the files a job published to R2, the batches running now, the server functions the cloud code calls
+        self.charged: set[str] = set()
+        self.published: dict[str, list[dict]] = {}
+        self.batch_runs: dict[str, dict] = {}
+        self.cloud_hooks = None
         self._recover_interrupted()
         if job_queue is not None:
             self.queue = job_queue
@@ -478,7 +509,12 @@ class Engine:
             if any(j is None for j in batch):
                 return
 
+    def _take_published(self, job_id: str) -> list[dict]:
+        with self._meta_lock:
+            return self.published.pop(job_id, [])
+
     def _handle(self, raw: Job) -> None:
+        finished_now = False
         with self.lock_for(raw.project_id):
             try:
                 p = load_project(raw.project_id)
@@ -486,32 +522,44 @@ class Engine:
                 p = None
             if raw.state in TERMINAL and raw.id not in self._finalized:
                 self._finalized.add(raw.id)
+                finished_now = True
                 try:
                     if raw.kind == "analyze" and raw.state == "done" and p is not None:
                         self._set_overlay(raw.id, result=self._finish_analyze(p))
                     elif raw.kind == "export":
-                        self._set_overlay(raw.id, result=self._finish_export(raw))
+                        result = self._finish_export(raw)
+                        if self.cloud is not None:  # the downloads are the files the job published to R2
+                            result["files"] = self._take_published(raw.id)
+                        self._set_overlay(raw.id, result=result)
                     elif raw.kind == "story":
-                        self._set_overlay(raw.id, result=self._finish_story(raw))
+                        self._set_overlay(raw.id, result={"files": self._take_published(raw.id)}
+                                          if self.cloud is not None else self._finish_story(raw))
+                    elif raw.kind == "zip":
+                        self._set_overlay(raw.id, result={"files": self._take_published(raw.id)})
                 except Exception as e:  # noqa: BLE001 - post-processing failure fails the job, not the server
                     self._set_overlay(raw.id, state="failed", error=f"post-processing failed: {e}")
                 if self.cloud is not None:  # a failed job (even one that failed after its steps) gives its minutes back
                     with self._meta_lock:
                         final = self._overlaid(raw).state
                     if final == "failed":
-                        cloud_projects.refund(self.cloud, raw.id)
+                        cloud_projects.refund_charged(self, self.cloud, raw.id)
             with self._meta_lock:
                 job = self._overlaid(raw)
                 self._jobs[job.id] = job
             if p is not None:
                 p.last_job = _job_dict(job)
                 auto = p.settings.get("auto_export")
-                if raw.kind == "analyze" and job.state == "done" and isinstance(auto, dict) and not auto.get("job"):
+                if raw.kind == "analyze" and job.state == "done" and isinstance(auto, dict) and not auto.get("job") \
+                        and self.cloud is None:  # cloud: the batch runner exports (cloud_outputs.after_job)
                     self._auto_export(p, auto)
                 save_project(p)
             elif raw.kind == "story":
                 self._record_story_job(job)
         self._broadcast(_event(job), job.id)
+        if finished_now and self.cloud is not None:  # outside the project lock: it may submit a batch's next job
+            import cloud_outputs
+
+            cloud_outputs.after_job(self, job)
 
     def _auto_export(self, p: Project, auto: dict) -> None:
         """A batch video: export its kept clips right after analysis. A failure is kept on the project."""
@@ -559,6 +607,7 @@ class Engine:
         preserved = [c for c in p.clips if _valid_hid(c.highlight.get("id")) and (wd / c.edl_file).is_file()]
         used = {c.highlight["id"] for c in preserved}
         added = []
+        brand = self._brand_file()
         for h in data.get("highlights") or []:
             hid = h.get("id")
             if not _valid_hid(hid):
@@ -567,7 +616,7 @@ class Engine:
             if any(_overlap_share(h, c.highlight) > OVERLAP_DROP for c in preserved):
                 continue
             try:
-                edl = clip_edl(wd, h, p.platform, language, usable_brand_file())
+                edl = clip_edl(wd, h, p.platform, language, brand)
             except ValueError as e:
                 print(f"vedit: skipping highlight {hid}: {e}", file=sys.stderr)
                 continue
@@ -586,6 +635,14 @@ class Engine:
         p.clips = preserved + added
         self._set_media(p, wd)
         return {"clips": len(p.clips), "new": len(added), "reason": data.get("reason")}
+
+    def _brand_file(self) -> Path | None:
+        """The brand kit edits are built with. Cloud: its asset references resolved to this user's files now."""
+        if self.cloud is not None:
+            import cloud_outputs
+
+            return cloud_outputs.resolved_brand_file()
+        return usable_brand_file()
 
     @staticmethod
     def _set_media(p: Project, wd: Path) -> None:
@@ -610,7 +667,7 @@ class Engine:
         h = whole_highlight(wd, p.source)
         language = LANG_MODEL[p.language][0]
         try:
-            edl = clip_edl(wd, h, PRESET_FOR.get(p.type, p.platform), language, usable_brand_file())
+            edl = clip_edl(wd, h, PRESET_FOR.get(p.type, p.platform), language, self._brand_file())
         except ValueError:
             raise ValueError("no speech was found in this video, so there is nothing to edit") from None
         if not edl["output"].get("aspect"):
@@ -629,7 +686,7 @@ class Engine:
         for i, e in enumerate(plan):
             by_stage[e["stage"]] = i
             by_stage[e["stage"].replace("render ", "thumb ")] = i
-        if job.state == "done":
+        if job.state == "done" or job.stage == "publish":  # cloud: every render finished before the upload failed
             finished, failed = plan, None
         else:
             at = by_stage.get(job.stage, 0)
@@ -700,8 +757,12 @@ def whole_highlight(wd: Path, source: str) -> dict:
             "score": 100, "title": Path(source).stem[:60] or "Video", "features": {}}
 
 
-def submit_export(engine: "Engine", p: Project, body: ExportBody) -> Job:
-    """Plan and queue the renders of an export. The caller holds the project's lock."""
+def export_seconds(edl_path: Path) -> float:
+    """Output length of one planned render (cloud charges the sum over an export)."""
+    return float(_timeline(edl_path).duration)
+
+
+def _check_export_body(body: ExportBody) -> None:
     if not body.clips or not body.formats:
         raise ValueError("export needs at least one clip and one format")
     bad = [f for f in body.formats if f not in FORMATS]
@@ -709,10 +770,24 @@ def submit_export(engine: "Engine", p: Project, body: ExportBody) -> Job:
         raise ValueError(f"unsupported formats: {bad}")
     if len(set(body.clips)) != len(body.clips) or len(set(body.formats)) != len(body.formats):
         raise ValueError("duplicate clips or formats in export")
-    wd = workdir_for(p.source)
+
+
+def submit_export(engine: "Engine", p: Project, body: ExportBody) -> Job:
+    """Plan and queue the renders of an export. The caller holds the project's lock."""
+    _check_export_body(body)  # before out_dir is created
     out_dir = output_dir(Path(p.source))
     if body.out_dir:
         out_dir = _safe_out_dir(body.out_dir)
+    steps, renders = plan_export(p, body, out_dir)
+    return engine.submit(p.id, "export", steps, renders=renders)
+
+
+def plan_export(p: Project, body: ExportBody, out_dir: Path, name=None, check=None) -> tuple[list, list[dict]]:
+    """The render steps of an export and their plan; writes each render's edit file. `name` maps the output file
+    name and `check(edl, workdir)` vets each planned edit before anything is written (cloud). The caller holds the
+    project's lock."""
+    _check_export_body(body)
+    wd = workdir_for(p.source)
     plan = []
     for i, hid in enumerate(body.clips, body.first_number):
         clip = _find_clip(p, hid)
@@ -722,11 +797,14 @@ def submit_export(engine: "Engine", p: Project, body: ExportBody) -> Job:
         for aspect in body.formats:
             e = json.loads(json.dumps(edl))
             out = {k: v for k, v in (e.get("output") or {}).items() if k not in ("width", "height")}
-            path = out_dir / output_name(i, clip.highlight.get("title", ""), aspect)
+            file = output_name(i, clip.highlight.get("title", ""), aspect)
+            path = out_dir / (name(file) if name is not None else file)
             out.update(aspect=aspect, path=str(path))
             e["output"] = out
             if not body.srt:
                 e["captions"] = {**(e.get("captions") or {}), "srt": False}
+            if check is not None:
+                check(e, wd)
             plan.append((hid, aspect, e, path))
     n = len(plan)
     crf = ["--crf", HIGH_CRF] if body.quality == "high" else []
@@ -744,7 +822,34 @@ def submit_export(engine: "Engine", p: Project, body: ExportBody) -> Job:
             steps.append((f"thumb {k}/{n}", py_cmd("thumb_frame.py", str(path), str(path.with_suffix(".jpg"))), share * 0.1))
         renders.append({"stage": stage, "hid": hid, "aspect": aspect, "path": str(path), "tmp": str(tmp),
                         "thumb": body.thumbnail})
-    return engine.submit(p.id, "export", steps, renders=renders)
+    return steps, renders
+
+
+def analyze_steps(p: Project, body: Optional[AnalyzeBody]) -> list:
+    """The steps of analysing a project (the desktop route adds the model download step when it is needed)."""
+    lang, model = LANG_MODEL[p.language]
+    src = str(Path(p.source))
+    hl_args: list[str] = []
+    if body is not None and body.max_clips is not None:
+        hl_args += ["--max", str(body.max_clips)]
+    step_env: dict[str, dict] = {}
+    if body is not None and body.ai is not None:
+        hl_args += ["--ai", body.ai.provider] + (["--ai-model", body.ai.model] if body.ai.model else [])
+        step_env["highlights"] = {"VEDIT_AI_KEY": body.ai.api_key}  # only the step that calls the AI sees it
+    argv = {"proxy": py_cmd("proxy.py", src),
+            "analyze": py_cmd("analyze.py", src, "--model", model, "--language", lang),
+            "highlights": py_cmd("highlights.py", src, *hl_args),
+            "framing": py_cmd("highlights.py", src, "--framing")}
+    stages = ANALYZE_STEPS if p.type == "clip" else WHOLE_STEPS
+    return [(stage, argv[stage], share) + ((step_env[stage],) if stage in step_env else ())
+            for stage, share in stages]
+
+
+def _load_story(sid: str) -> dict:
+    try:
+        return stories.load_story_doc(sid)
+    except KeyError:
+        raise NotFound(f"story {sid}") from None
 
 
 def default_story_dir() -> Path:
@@ -853,6 +958,14 @@ def create_app(token: str | None, queue: JobQueue | None = None, cloud=None) -> 
         raise ValueError("the engine needs a non-empty bearer token")
     token = token if isinstance(token, str) else ""
     engine = Engine(token, queue, scoped=cloud is not None, cloud=cloud)
+    if cloud is not None:
+        import cloud_assets  # lazy: only the cloud needs these
+        import cloud_outputs
+
+        cloud_outputs.attach(engine, cloud, project=_project, story=_load_story, batch_path=_batch_path,
+                             plan_export=plan_export, export_seconds=lambda path: export_seconds(path),
+                             probe=lambda f: cached_probe(f), analyze_steps=analyze_steps, ExportBody=ExportBody,
+                             AnalyzeBody=AnalyzeBody, not_found=NotFound, job_dict=_job_dict)
     allowed_origins = tuple(cloud.origins) if cloud is not None else ALLOWED_ORIGINS
 
     def user_home(jwt_token: str | None) -> Path:
@@ -956,6 +1069,16 @@ def create_app(token: str | None, queue: JobQueue | None = None, cloud=None) -> 
             return {"ok": False, "error": "empty"}
         return check_ai_key(body.provider, body.api_key.strip())
 
+    if cloud is not None:  # registered first, so they answer /brand in cloud mode
+        @app.get("/brand")
+        def get_cloud_brand():
+            return cloud_outputs.brand_view(read_brand())
+
+        @app.put("/brand")
+        def put_cloud_brand(body: CloudBrandBody):
+            """Every file of the kit is an asset reference of the caller's library, checked before anything is saved."""
+            return cloud_outputs.put_brand(body, read_brand(), brand_file())
+
     @app.get("/brand")
     def get_brand():
         saved = read_brand()
@@ -997,22 +1120,8 @@ def create_app(token: str | None, queue: JobQueue | None = None, cloud=None) -> 
     @app.post("/projects/{pid}/analyze")
     def analyze(pid: str, body: Optional[AnalyzeBody] = None):
         p = _project(pid)
-        lang, model = LANG_MODEL[p.language]
-        src = str(Path(p.source))
-        hl_args: list[str] = []
-        if body is not None and body.max_clips is not None:
-            hl_args += ["--max", str(body.max_clips)]
-        step_env: dict[str, dict] = {}
-        if body is not None and body.ai is not None:
-            hl_args += ["--ai", body.ai.provider] + (["--ai-model", body.ai.model] if body.ai.model else [])
-            step_env["highlights"] = {"VEDIT_AI_KEY": body.ai.api_key}  # only the step that calls the AI sees it
-        argv = {"proxy": py_cmd("proxy.py", src),
-                "analyze": py_cmd("analyze.py", src, "--model", model, "--language", lang),
-                "highlights": py_cmd("highlights.py", src, *hl_args),
-                "framing": py_cmd("highlights.py", src, "--framing")}
-        stages = ANALYZE_STEPS if p.type == "clip" else WHOLE_STEPS
-        steps = [(stage, argv[stage], share) + ((step_env[stage],) if stage in step_env else ())
-                 for stage, share in stages]
+        model = LANG_MODEL[p.language][1]
+        steps = analyze_steps(p, body)
         if cloud is not None:  # models live on the Volume and the step runs on a GPU: no model step, no CPU stand-in
             return _job_dict(cloud_projects.start_analyze(engine, cloud, p, steps, lambda f: cached_probe(f)))
         # the model this computer will run: without a GPU, the faster stand-in (see accel.speech_plan)
@@ -1110,18 +1219,20 @@ def create_app(token: str | None, queue: JobQueue | None = None, cloud=None) -> 
 
     @app.post("/projects/{pid}/export")
     def export(pid: str, body: ExportBody):
+        if cloud is not None:  # rendered on the volume, published to R2, charged its output length
+            return _job_dict(cloud_outputs.start_export(engine, cloud, pid, body))
         with engine.lock_for(pid):
             p = _project(pid)
-            if cloud is not None:
-                cloud_projects.touch(pid)
             return _job_dict(submit_export(engine, p, body))
 
+    if cloud is not None:
+        @app.get("/projects/{pid}/exports")
+        def list_exports(pid: str):
+            """This project's exported files with fresh 24 h download links."""
+            return cloud_outputs.list_exports(cloud, pid)
+
     # ---- stories: photos or clips + a script -> a narrated video
-    def _story(sid: str) -> dict:
-        try:
-            return stories.load_story_doc(sid)
-        except KeyError:
-            raise NotFound(f"story {sid}") from None
+    _story = _load_story
 
     def _story_dict(doc: dict) -> dict:
         return {k: v for k, v in doc.items() if k != "building"}
@@ -1149,7 +1260,7 @@ def create_app(token: str | None, queue: JobQueue | None = None, cloud=None) -> 
     def put_story(sid: str, body: dict = Body(...)):
         with engine.lock_for(sid):
             old = _story(sid)
-            doc = stories.clean_doc(sid, body, old)
+            doc = stories.clean_doc(sid, body, old, cloud_assets.resolve if cloud is not None else None)
             stories.save_story_doc(doc)
             return _story_dict(doc)
 
@@ -1159,11 +1270,15 @@ def create_app(token: str | None, queue: JobQueue | None = None, cloud=None) -> 
         doc = _story(sid)
         if path not in stories.story_media(doc):
             raise NotFound("file")
+        if cloud is not None:  # an asset reference of this user; a plain path is never read
+            return _media_response(cloud_assets.resolve(path))
         return _media_response(Path(path))
 
     @app.post("/stories/{sid}/build")
     def build_story(sid: str, body: Optional[BuildStoryBody] = None):
         body = body or BuildStoryBody()
+        if cloud is not None:
+            return _job_dict(cloud_outputs.start_story(engine, cloud, sid, body))
         with engine.lock_for(sid):
             doc = _story(sid)
             stories.check_buildable(doc)
@@ -1194,8 +1309,19 @@ def create_app(token: str | None, queue: JobQueue | None = None, cloud=None) -> 
                 items.append({**it, "project": None, "export": None, "error": "the project is gone"})
                 continue
             auto = p.settings.get("auto_export") if isinstance(p.settings.get("auto_export"), dict) else {}
-            items.append({**it, "project": _project_dict(p), "export": auto.get("job"), "error": auto.get("error")})
+            items.append({**it, "project": _project_dict(p), "export": auto.get("job"),
+                          "error": auto.get("error") or it.get("error")})
         return {**data, "items": items}
+
+    if cloud is not None:  # registered first, so they answer these paths in cloud mode
+        @app.post("/batches")
+        def new_cloud_batch(body: CloudBatchBody):
+            return _batch_view(cloud_outputs.start_batch(engine, cloud, body))
+
+        @app.post("/batches/{bid}/zip")
+        def zip_batch(bid: str):
+            """Every exported file of the batch in one zip, built in a job; its result is a 24 h link."""
+            return _job_dict(cloud_outputs.start_zip(engine, cloud, bid))
 
     @app.post("/batches")
     def new_batch(body: BatchBody):
@@ -1300,8 +1426,6 @@ def create_app(token: str | None, queue: JobQueue | None = None, cloud=None) -> 
             await asyncio.gather(*tasks, return_exceptions=True)
 
     if cloud is not None:
-        import cloud_assets  # lazy: pulls in nothing desktop installs lack, but only the cloud needs it
-
         app.include_router(cloud_assets.build_router(cloud))
 
     return app

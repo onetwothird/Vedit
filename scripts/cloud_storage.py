@@ -55,6 +55,7 @@ class Storage(Protocol):
     def delete(self, key: str) -> None: ...
     def delete_prefix(self, prefix: str) -> int: ...
     def usage_bytes(self, prefix: str) -> int: ...
+    def list_keys(self, prefix: str) -> list[str]: ...
 
 
 def _content_disposition(filename: str) -> str:
@@ -148,6 +149,10 @@ class R2Storage:
         _check_prefix(prefix)
         return sum(o["Size"] for objs in self._pages(prefix) for o in objs)
 
+    def list_keys(self, prefix: str) -> list[str]:
+        _check_prefix(prefix)
+        return sorted(o["Key"] for objs in self._pages(prefix) for o in objs)
+
 
 class MemoryStorage:
     """Dict-backed Storage for tests; presigned URLs are mem:// markers."""
@@ -189,3 +194,7 @@ class MemoryStorage:
     def usage_bytes(self, prefix: str) -> int:
         _check_prefix(prefix)
         return sum(len(v) for k, v in self.objects.items() if k.startswith(prefix))
+
+    def list_keys(self, prefix: str) -> list[str]:
+        _check_prefix(prefix)
+        return sorted(k for k in self.objects if k.startswith(prefix))

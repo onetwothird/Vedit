@@ -9,6 +9,7 @@ import re
 import uuid
 from datetime import datetime, timezone
 from pathlib import Path
+from typing import Callable, Optional
 
 from studio_projects import _ILLEGAL, _atomic_write_json, _home
 
@@ -33,6 +34,11 @@ MAX_TITLE = 80
 SILENT_SECONDS = 3.0  # a photo with nothing to say stays on screen this long
 SID_RE = re.compile(r"^s[0-9a-f]{12}$")
 DOC = "story.doc.json"
+# cloud: every media field is an `asset:<id>` of the caller's library, resolved to a path only when a step needs it
+MAX_ASSETS = 200
+MAX_STORY_SECONDS = 180.0
+WORDS_PER_SECOND = 2.5  # 150 words a minute: the narration estimate a build is checked and charged against
+Resolve = Optional[Callable[[str], Path]]
 
 
 def _now() -> str:
@@ -65,8 +71,27 @@ def default_doc(sid: str, title: str = "") -> dict:
             "created": now, "updated": now, "output": None, "last_job": None}
 
 
-def clean_doc(sid: str, body: dict, old: dict) -> dict:
-    """The editable fields of `body`, checked; everything else is kept from `old`. Raises ValueError."""
+def _resolved(ref, resolve: Resolve, what: str) -> Path:
+    """Cloud: the path of one of the caller's assets; a plain path, an unknown id or another user's id is refused
+    without touching the disk."""
+    try:
+        return resolve(ref)  # type: ignore[misc]
+    except ValueError:
+        raise ValueError(f"{what}: choose a file from your library") from None
+
+
+def clean_doc(sid: str, body: dict, old: dict, resolve: Resolve = None) -> dict:
+    """The editable fields of `body`, checked; everything else is kept from `old`. Raises ValueError.
+
+    `resolve` (cloud) turns `asset:` references into paths: media must then be references, which stay in the doc."""
+    if resolve is not None:
+        scenes_in = body.get("scenes", old["scenes"])
+        # every media field counts (the scene limit is lower today; this is the cloud's own ceiling, checked first)
+        uses = len(scenes_in) if isinstance(scenes_in, list) else 0
+        if uses + (body.get("music", old["music"]) is not None) > MAX_ASSETS:
+            raise ValueError(f"a story can use at most {MAX_ASSETS} files")
+        if str(body.get("voice", old["voice"]) or "").lower().startswith("piper"):
+            raise ValueError("Piper voices are not available on the web")
     title = str(body.get("title", old["title"]) or "").strip()
     if len(title) > MAX_TITLE:
         raise ValueError(f"the title can be at most {MAX_TITLE} characters")
@@ -81,7 +106,8 @@ def clean_doc(sid: str, body: dict, old: dict) -> dict:
         raise ValueError(f"unsupported caption style: {captions}")
     music = body.get("music", old["music"])
     if music is not None:
-        if not isinstance(music, str) or Path(music).suffix.lower() not in AUDIO_EXT:
+        name = _resolved(music, resolve, "music") if resolve is not None and isinstance(music, str) else music
+        if not isinstance(music, str) or Path(name).suffix.lower() not in AUDIO_EXT:
             raise ValueError("music must be an audio file")
     try:
         volume = float(body.get("music_volume", old["music_volume"]))
@@ -98,9 +124,10 @@ def clean_doc(sid: str, body: dict, old: dict) -> dict:
     for i, sc in enumerate(raw, 1):
         if not isinstance(sc, dict) or not isinstance(sc.get("media"), str) or not sc["media"]:
             raise ValueError(f"scene {i} needs a photo or a clip")
-        kind = media_kind(sc["media"])
+        path = _resolved(sc["media"], resolve, f"scene {i}") if resolve is not None else Path(sc["media"])
+        kind = media_kind(str(path))
         if kind is None:
-            raise ValueError(f"scene {i}: {Path(sc['media']).name} is not a photo or a video")
+            raise ValueError(f"scene {i}: {path.name} is not a photo or a video")
         text = str(sc.get("text") or "")
         if len(text) > MAX_TEXT:
             raise ValueError(f"scene {i}: the script can be at most {MAX_TEXT} characters")
@@ -172,10 +199,16 @@ def output_file(doc: dict, out_dir: Path) -> Path:
     return out_dir / f"{clean}{suffix}.mp4"
 
 
-def check_buildable(doc: dict) -> None:
+def check_buildable(doc: dict, resolve: Resolve = None) -> None:
     """Raises ValueError with a message for the person when the story cannot be made yet."""
     if not doc["scenes"]:
         raise ValueError("add at least one photo or clip first")
+    if resolve is not None:  # cloud: every reference must still be one of the caller's assets
+        for i, sc in enumerate(doc["scenes"], 1):
+            _resolved(sc.get("media"), resolve, f"scene {i}")
+        if doc.get("music"):
+            _resolved(doc["music"], resolve, "music")
+        return
     for i, sc in enumerate(doc["scenes"], 1):
         if not Path(sc["media"]).is_file():
             raise ValueError(f"scene {i}: {Path(sc['media']).name} was moved or deleted")
@@ -183,11 +216,30 @@ def check_buildable(doc: dict) -> None:
         raise ValueError(f"the music file {Path(doc['music']).name} was moved or deleted")
 
 
-def to_story_json(doc: dict, out: Path) -> dict:
-    """story.py's format (see story.py's docstring), with one narrator."""
+def estimate_seconds(doc: dict, resolve: Callable[[str], Path], probe: Callable[[Path], dict]) -> float:
+    """The output length a build is checked and charged against: narration at WORDS_PER_SECOND, a talking clip or
+    an unnarrated clip its own length, a silent photo SILENT_SECONDS."""
+    total = 0.0
+    for sc in doc["scenes"]:
+        words = sum(len(ln.split()) for ln in lines_of(sc.get("text") or ""))
+        if sc["kind"] == "video" and (sc.get("keep_audio") or not words):
+            info = probe(resolve(sc["media"]))
+            total += float(info.get("duration") or (info.get("format") or {}).get("duration") or 0)
+        elif words:
+            total += words / WORDS_PER_SECOND
+        else:
+            total += SILENT_SECONDS
+    return total
+
+
+def to_story_json(doc: dict, out: Path, resolve: Resolve = None) -> dict:
+    """story.py's format (see story.py's docstring), with one narrator. `resolve` (cloud) maps refs to paths."""
+    def path(ref: str) -> str:
+        return str(resolve(ref)) if resolve is not None else ref
+
     scenes = []
     for sc in doc["scenes"]:
-        s: dict = {sc["kind"]: sc["media"]}
+        s: dict = {sc["kind"]: path(sc["media"])}
         if sc["kind"] == "image":
             s["motion"] = sc["motion"]
         if sc.get("keep_audio"):
@@ -208,11 +260,11 @@ def to_story_json(doc: dict, out: Path) -> dict:
         "scenes": scenes,
     }
     if doc.get("music"):
-        story["music"] = {"path": doc["music"], "volume": doc["music_volume"]}
+        story["music"] = {"path": path(doc["music"]), "volume": doc["music_volume"]}
     return story
 
 
-def write_story_json(doc: dict, out: Path) -> Path:
+def write_story_json(doc: dict, out: Path, resolve: Resolve = None) -> Path:
     path = story_dir(doc["id"]) / "story.json"
-    _atomic_write_json(path, to_story_json(doc, out))
+    _atomic_write_json(path, to_story_json(doc, out, resolve))
     return path

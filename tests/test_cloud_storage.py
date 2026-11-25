@@ -128,6 +128,21 @@ def test_usage_bytes_pages():
         assert r.usage_bytes("u/") == 15
 
 
+def test_list_keys_pages_and_memory():
+    r = _r2()
+    with Stubber(r._client) as st:
+        st.add_response("list_objects_v2", {"Contents": [{"Key": "u/b", "Size": 5}], "IsTruncated": True,
+                                            "NextContinuationToken": "t"}, {"Bucket": "bkt", "Prefix": "u/"})
+        st.add_response("list_objects_v2", {"Contents": [{"Key": "u/a", "Size": 3}], "IsTruncated": False},
+                        {"Bucket": "bkt", "Prefix": "u/", "ContinuationToken": "t"})
+        assert r.list_keys("u/") == ["u/a", "u/b"]
+    m = cs.MemoryStorage()
+    m.objects = {"exports/u1/p/a.mp4": b"1", "exports/u10/p/b.mp4": b"2"}
+    assert m.list_keys("exports/u1/") == ["exports/u1/p/a.mp4"]
+    with pytest.raises(ValueError):
+        m.list_keys("exports/u1")
+
+
 def test_upload_and_download_call_client(tmp_path):
     r = _r2()
     calls = []
