@@ -302,3 +302,23 @@ def test_desktop_project_file_has_no_last_activity(tmp_path, monkeypatch):
     p = create_project(src, "en", "tiktok")
     doc = json.loads((tmp_path / "v.edit" / "project.json").read_text())
     assert "last_activity" not in doc and p.last_activity is None
+
+
+def test_guards_hold_while_the_dispatcher_lags(client, storage, usage, runner, monkeypatch):
+    """Back-to-back requests (a double click) must see each other's jobs even before the dispatcher has."""
+    engine = client.app.state.engine
+    gate = threading.Event()
+    real = engine._handle
+    monkeypatch.setattr(engine, "_handle", lambda job: (gate.wait(10), real(job))[1])
+    try:
+        p1, p2, p3 = (make_project(client, storage).json()["id"] for _ in range(3))
+        runner.block = True
+        assert analyze(client, p1).status_code == 200
+        assert analyze(client, p1).status_code == 409  # same project, dispatcher still blocked
+        assert used(usage) == 600  # charged once
+        assert analyze(client, p2).status_code == 200
+        assert analyze(client, p3).status_code == 409  # the 2-job cap
+        assert used(usage) == 1200
+    finally:
+        gate.set()
+        runner.release_all()

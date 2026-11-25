@@ -417,6 +417,9 @@ class Engine:
         with self._meta_lock:  # held so no event of this job is processed before its plan is registered
             extra = {'job_id': job_id} if job_id else {}
             job = self.queue.submit(project_id, kind, steps, **extra)
+            # visible to active_jobs() at once: the dispatcher only learns of the job later, and the cloud per-user
+            # checks must not miss a job submitted a moment ago (the dispatcher's later snapshots replace this one)
+            self._jobs[job.id] = dataclasses.replace(job)
             if renders is not None:
                 self._exports[job.id] = renders
                 self._overlay[job.id] = {"result": {"renders": _public_renders(renders), "files": []}}
