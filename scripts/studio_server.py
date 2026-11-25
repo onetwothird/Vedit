@@ -1264,6 +1264,11 @@ def create_app(token: str | None, queue: JobQueue | None = None, cloud=None) -> 
                 t.cancel()
             await asyncio.gather(*tasks, return_exceptions=True)
 
+    if cloud is not None:
+        import cloud_assets  # lazy: pulls in nothing desktop installs lack, but only the cloud needs it
+
+        app.include_router(cloud_assets.build_router(cloud))
+
     return app
 
 

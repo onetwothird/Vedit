@@ -25,6 +25,7 @@ class UsageError(RuntimeError):
 
 class Usage(Protocol):
     def remaining(self, uid: str) -> float: ...
+    def status(self, uid: str) -> dict[str, float]: ...
     def charge(self, uid: str, job_id: str, seconds: float) -> None: ...
     def refund(self, job_id: str) -> None: ...
 
@@ -62,6 +63,12 @@ class MemoryUsage:
     def remaining(self, uid: str) -> float:
         with self._lock:
             return self._remaining(uid, _month(self._now))
+
+    def status(self, uid: str) -> dict[str, float]:
+        with self._lock:
+            month = _month(self._now)
+            return {"seconds_used": float(self._usage.get((uid, month), 0.0)),
+                    "seconds_limit": float(self._limits.get(uid, self.default_limit))}
 
     def charge(self, uid: str, job_id: str, seconds: float) -> None:
         with self._lock:
@@ -135,6 +142,19 @@ class SupabaseUsage:
         if isinstance(out, bool) or not isinstance(out, (int, float)):
             raise UsageError("vedit_remaining returned an unexpected value")
         return float(out)
+
+    def status(self, uid: str) -> dict[str, float]:
+        out = self._rpc(
+            "vedit_status",
+            {"p_uid": uid, "p_month": _month(self._now), "p_default_limit": self.default_limit},
+        )
+        try:
+            used, limit = out["seconds_used"], out["seconds_limit"]
+        except (TypeError, KeyError):
+            raise UsageError("vedit_status returned an unexpected value") from None
+        if any(isinstance(v, bool) or not isinstance(v, (int, float)) for v in (used, limit)):
+            raise UsageError("vedit_status returned an unexpected value")
+        return {"seconds_used": float(used), "seconds_limit": float(limit)}
 
     def charge(self, uid: str, job_id: str, seconds: float) -> None:
         out = self._rpc(

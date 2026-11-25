@@ -209,3 +209,34 @@ def test_supabase_unknown_status_is_error():
     u = _make(lambda r: httpx.Response(200, json={"status": "wat"}))
     with pytest.raises(UsageError):
         u.charge(UID, "j1", 1)
+
+
+def test_memory_status_tracks_usage_and_limit():
+    u = MemoryUsage(default_limit=100, now=clock(), limits={"vip": 500})
+    assert u.status(UID) == {"seconds_used": 0.0, "seconds_limit": 100.0}
+    u.charge(UID, "j1", 40)
+    assert u.status(UID) == {"seconds_used": 40.0, "seconds_limit": 100.0}
+    assert u.status("vip")["seconds_limit"] == 500.0
+    u.refund("j1")
+    assert u.status(UID)["seconds_used"] == 0.0
+
+
+def test_supabase_status_body_and_parse():
+    httpx = pytest.importorskip("httpx")
+    calls = []
+
+    def handler(req):
+        calls.append((req.url.path, json.loads(req.content)))
+        return httpx.Response(200, json={"seconds_used": 12, "seconds_limit": 3600})
+
+    assert _make(handler).status(UID) == {"seconds_used": 12.0, "seconds_limit": 3600.0}
+    assert calls == [("/rest/v1/rpc/vedit_status",
+                      {"p_uid": UID, "p_month": "2026-11", "p_default_limit": 3600})]
+
+
+def test_supabase_status_bad_shape_is_error():
+    httpx = pytest.importorskip("httpx")
+    from scripts.cloud_usage import UsageError
+
+    with pytest.raises(UsageError):
+        _make(lambda req: httpx.Response(200, json={"seconds_used": 1})).status(UID)
