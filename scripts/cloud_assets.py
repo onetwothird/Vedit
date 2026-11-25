@@ -34,6 +34,7 @@ ASSET_ID = re.compile(r"^a[0-9a-f]{12}$")
 UPLOAD_ID = re.compile(r"^[0-9a-f]{32}$")
 
 _index_lock = threading.Lock()
+_start_lock = threading.Lock()  # quota check + reservation must be one step
 
 
 def _not_found() -> StarletteHTTPException:
@@ -100,10 +101,28 @@ def _disk_bytes(root: Path) -> int:
     return total
 
 
-def storage_bytes(storage, uid: str) -> int:
-    """Bytes on this user's volume home plus their objects still in R2 (uploads, exports, zips)."""
-    remote = sum(storage.usage_bytes(p) for p in (cs.uploads_prefix(uid), cs.exports_prefix(uid), cs.zips_prefix(uid)))
-    return _disk_bytes(_home()) + remote
+def _reserved_bytes(exclude: str | None = None) -> int:
+    """Declared sizes of uploads started but not yet committed (their pending records)."""
+    d = _home() / "uploads"
+    if not d.is_dir():
+        return 0
+    total = 0
+    for f in d.glob("*.json"):
+        if exclude is not None and f.stem == exclude:
+            continue
+        try:
+            total += int(json.loads(f.read_text(encoding="utf-8"))["size"])
+        except (OSError, ValueError, KeyError, TypeError):
+            pass
+    return total
+
+
+def storage_bytes(storage, uid: str, exclude_upload: str | None = None) -> int:
+    """Bytes on this user's volume home, plus their exports and zips in R2, plus the declared size of every
+    unfinished upload. Pending records are the reservation for uploads/, so the uploads/ prefix is not counted
+    (it would double-count an object that is both pending and already in R2)."""
+    remote = sum(storage.usage_bytes(p) for p in (cs.exports_prefix(uid), cs.zips_prefix(uid)))
+    return _disk_bytes(_home()) + remote + _reserved_bytes(exclude_upload)
 
 
 def _content_type_ok(kind: str, content_type: str) -> bool:
@@ -146,13 +165,14 @@ def build_router(cloud) -> APIRouter:
         if req.size > KIND_LIMITS[req.kind]:
             raise ValueError(f"a {req.kind} file can be at most {KIND_LIMITS[req.kind] // 1024 ** 2} MB")
         uid = _uid()
-        if storage_bytes(storage, uid) + req.size > STORAGE_LIMIT:
-            raise ValueError("Not enough storage: the 10 GB limit would be exceeded. Delete some files first.")
         upload_id = secrets.token_hex(16)
         key = cs.upload_key(uid, upload_id)
-        _atomic_write_json(_pending_path(upload_id), {
-            "kind": req.kind, "name": name, "size": req.size, "content_type": req.content_type,
-            "created": time.time()})
+        with _start_lock:
+            if storage_bytes(storage, uid) + req.size > STORAGE_LIMIT:
+                raise ValueError("Not enough storage: the 10 GB limit would be exceeded. Delete some files first.")
+            _atomic_write_json(_pending_path(upload_id), {
+                "kind": req.kind, "name": name, "size": req.size, "content_type": req.content_type,
+                "created": time.time()})
         return {"upload_key": key, "url": storage.presign_put(key, req.content_type, req.size)}
 
     @router.post("/assets")
@@ -163,34 +183,48 @@ def build_router(cloud) -> APIRouter:
         upload_id = key[len(prefix):] if key.startswith(prefix) else ""
         if not UPLOAD_ID.match(upload_id):
             raise _not_found()
+        pending_file = _pending_path(upload_id)
+        claimed = pending_file.with_suffix(".claimed")
+        # The claim is an exclusive-create marker next to the pending record: one concurrent commit gets it.
         try:
-            pending = json.loads(_pending_path(upload_id).read_text(encoding="utf-8"))
-        except (FileNotFoundError, ValueError):
+            os.close(os.open(claimed, os.O_CREAT | os.O_EXCL | os.O_WRONLY))
+        except FileExistsError:
+            raise StarletteHTTPException(409, "Upload is already being saved") from None
+        except FileNotFoundError:  # the uploads/ directory does not exist: nothing was ever started
             raise _not_found() from None
-        remote = storage.size(key)
-        if remote is None:
-            raise ValueError("Upload not finished")
-        if remote != pending["size"]:
-            storage.delete(key)
-            _pending_path(upload_id).unlink(missing_ok=True)
-            raise ValueError("Upload size does not match what was declared; upload it again")
-        ext = os.path.splitext(pending["name"])[1].lower()
-        asset_id = "a" + secrets.token_hex(6)
-        assets = _assets_dir()
-        assets.mkdir(parents=True, exist_ok=True)
-        part = assets / f"{asset_id}{ext}.part"
         try:
-            storage.download(key, part)
-            os.replace(part, assets / f"{asset_id}{ext}")
+            try:  # re-read under the claim: a commit that finished just before us removed the record
+                pending = json.loads(pending_file.read_text(encoding="utf-8"))
+            except (FileNotFoundError, ValueError):
+                raise _not_found() from None
+            remote = storage.size(key)
+            if remote is None:
+                raise ValueError("Upload not finished")  # record kept: the client can retry
+            if remote != pending["size"] or storage_bytes(storage, uid, upload_id) + remote > STORAGE_LIMIT:
+                storage.delete(key)
+                pending_file.unlink(missing_ok=True)
+                if remote != pending["size"]:
+                    raise ValueError("Upload size does not match what was declared; upload it again")
+                raise ValueError("Not enough storage: the 10 GB limit would be exceeded. Delete some files first.")
+            ext = os.path.splitext(pending["name"])[1].lower()
+            asset_id = "a" + secrets.token_hex(6)
+            assets = _assets_dir()
+            assets.mkdir(parents=True, exist_ok=True)
+            part = assets / f"{asset_id}{ext}.part"
+            try:
+                storage.download(key, part)
+                os.replace(part, assets / f"{asset_id}{ext}")
+            finally:
+                part.unlink(missing_ok=True)
+            entry = {"asset_id": asset_id, "kind": pending["kind"], "name": pending["name"],
+                     "size": pending["size"], "ext": ext, "created": time.time()}
+            with _index_lock:
+                _write_index(_read_index() + [entry])
+            storage.delete(key)
+            pending_file.unlink(missing_ok=True)  # before the claim is released
+            return _public(entry)
         finally:
-            part.unlink(missing_ok=True)
-        entry = {"asset_id": asset_id, "kind": pending["kind"], "name": pending["name"], "size": pending["size"],
-                 "ext": ext, "created": time.time()}
-        with _index_lock:
-            _write_index(_read_index() + [entry])
-        storage.delete(key)
-        _pending_path(upload_id).unlink(missing_ok=True)
-        return _public(entry)
+            claimed.unlink(missing_ok=True)
 
     @router.get("/assets")
     def list_assets(kind: str | None = None):

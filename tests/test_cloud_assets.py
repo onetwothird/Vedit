@@ -237,3 +237,65 @@ def test_resolve_known_asset_and_isolation(client, cfg, storage):
     with use_home(cfg.data_root / "users" / UID_B):
         with pytest.raises(ValueError):
             cloud_assets.resolve(f"asset:{aid}")
+
+
+def test_unfinished_uploads_reserve_quota(client):
+    for _ in range(4):
+        assert start(client, size=2 * GB).status_code == 200
+    r = start(client, size=3 * GB)
+    assert r.status_code == 400 and "storage" in r.json()["detail"].lower()
+    assert start(client, B, size=3 * GB).status_code == 200  # another user is unaffected
+
+
+def test_two_6gb_starts_second_fails(client, storage):
+    # a video is capped at 3 GB per file, so reserve through several declared uploads
+    codes = [start(client, size=3 * GB).status_code for _ in range(4)]
+    assert codes == [200, 200, 200, 400]
+
+
+def test_pending_object_in_uploads_prefix_is_not_double_counted(client, storage):
+    key = start(client, size=5 * 1024 ** 2).json()["upload_key"]
+    storage.objects[key] = b"x" * 10
+    storage.usage_bytes = lambda prefix: 10 * 1024 ** 2 if prefix.startswith("uploads/") else 0
+    assert client.get("/usage", headers=A).json()["storage_bytes"] < 6 * 1024 ** 2
+
+
+def test_commit_rechecks_quota(client, storage):
+    key = start(client, size=5).json()["upload_key"]
+    storage.objects[key] = b"12345"
+    storage.usage_bytes = lambda prefix: 10 * GB if prefix == cs.exports_prefix(UID_A) else 0
+    r = client.post("/assets", headers=A, json={"upload_key": key})
+    assert r.status_code == 400 and "storage" in r.json()["detail"].lower()
+    assert key not in storage.objects
+    assert client.get("/assets", headers=A).json() == []
+
+
+def test_double_commit_same_key_makes_one_asset(client, cfg, storage):
+    key = start(client, size=5).json()["upload_key"]
+    storage.objects[key] = b"12345"
+    codes = []
+    barrier = threading.Barrier(2)
+
+    def go():
+        barrier.wait()
+        codes.append(client.post("/assets", headers=A, json={"upload_key": key}).status_code)
+
+    ts = [threading.Thread(target=go) for _ in range(2)]
+    for t in ts:
+        t.start()
+    for t in ts:
+        t.join()
+    assert sorted(codes)[0] == 200 and sorted(codes)[1] in (404, 409), codes
+    assert len(client.get("/assets", headers=A).json()) == 1
+    assert len(list((cfg.data_root / "users" / UID_A / "assets").glob("a*.mp4"))) == 1
+
+
+def test_claimed_upload_is_409_and_failed_commit_keeps_record(client, cfg):
+    key = start(client, size=5).json()["upload_key"]
+    rec = next((cfg.data_root / "users" / UID_A / "uploads").glob("*.json"))
+    claimed = rec.with_suffix(".claimed")
+    claimed.write_bytes(b"")  # another commit holds the claim
+    assert client.post("/assets", headers=A, json={"upload_key": key}).status_code == 409
+    claimed.unlink()
+    assert client.post("/assets", headers=A, json={"upload_key": key}).status_code == 400  # not finished
+    assert rec.exists() and not claimed.exists()  # retryable, claim released
