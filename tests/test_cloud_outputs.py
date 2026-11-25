@@ -546,3 +546,71 @@ def test_brand_holds_refs_resolved_when_edits_are_built(client, storage, cfg):
     assert Path(b["logo"]).parent == home_of(cfg) / "assets"
     assert Path(b["lut"]).suffix == ".cube" and Path(b["fonts"]["ExtraBold"]).suffix == ".ttf"
     assert client.get("/brand", headers=B).json()["logo"] == ""
+
+
+# ---- b-roll from the library -----------------------------------------------------------------------------------
+
+def broll_clip(client, storage, cfg):
+    """A project whose clip plays 0-10 s, where the speaker says "the beach" at 1.4 s."""
+    pid = make_project(client, storage).json()["id"]
+    add_clip(cfg, pid, "h01", 10, extra={"clips": [{"in": 0, "out": 10}]})
+    with use_home(home_of(cfg)):
+        wd = workdir_for(load_project(pid).source)
+    words = [{"text": "we", "start": 0.5, "end": 0.8}, {"text": "went", "start": 0.9, "end": 1.2},
+             {"text": "the", "start": 1.25, "end": 1.35}, {"text": "beach", "start": 1.4, "end": 1.9},
+             {"text": "today", "start": 2.0, "end": 2.5}]
+    save_json({"words": words, "duration": 10}, wd / "transcript.main.json")
+    return pid
+
+
+def test_broll_suggests_from_the_callers_assets(client, storage, cfg):
+    pid = broll_clip(client, storage, cfg)
+    beach = asset(client, storage, b"jpg", "beach-sunset.jpg", "image", "image/jpeg")
+    other = asset(client, storage, b"video:5", "city lights.mp4", "video", "video/mp4")
+    r = client.post(f"/projects/{pid}/clips/h01/broll", headers=A, json={"folder": "", "assets": [beach, other]})
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert body["files"] == 2 and body["ai"] is None
+    [s] = body["suggestions"]
+    assert s["path"] == beach and s["name"] == "beach-sunset.jpg" and s["type"] == "image"
+    assert s["t"] == 1.4 and s["word"] == "beach"
+    # a file the clip already shows as b-roll is not suggested again
+    with use_home(home_of(cfg)):
+        wd = workdir_for(load_project(pid).source)
+    edl = load_json(wd / "clip-h01.edl.json")
+    edl["overlays"] = [{"type": "image", "path": beach, "at": {"src": "main", "t": 5}, "duration": 2}]
+    save_json(edl, wd / "clip-h01.edl.json")
+    r = client.post(f"/projects/{pid}/clips/h01/broll", headers=A, json={"folder": "", "assets": [beach]})
+    assert r.json()["suggestions"] == []
+
+
+def test_broll_refuses_paths_folders_and_foreign_assets(client, storage, cfg, tmp_path):
+    pid = broll_clip(client, storage, cfg)
+    pic = tmp_path / "beach.jpg"
+    pic.write_bytes(b"jpg")
+    url = f"/projects/{pid}/clips/h01/broll"
+    theirs = asset(client, storage, b"jpg", "beach.jpg", "image", "image/jpeg", headers=B)
+    for body in ({"folder": str(tmp_path), "assets": []}, {"folder": "", "assets": [str(pic)]},
+                 {"folder": "", "assets": [theirs]}, {"folder": "", "assets": ["asset:nope"]},
+                 {"folder": "", "assets": []}):
+        r = client.post(url, headers=A, json=body)
+        assert r.status_code == 400, (body, r.text)
+    font = asset(client, storage, b"ttf", "beach.ttf", "font", "font/ttf")
+    r = client.post(url, headers=A, json={"folder": "", "assets": [font]})
+    assert r.status_code == 200 and r.json()["files"] == 0  # not a photo or a video: never suggested
+    assert client.post(url, headers=B, json={"folder": "", "assets": [theirs]}).status_code == 404
+
+
+def test_file_route_serves_only_the_callers_assets(client, storage, cfg, tmp_path):
+    mine = asset(client, storage, b"jpg-bytes", "beach.jpg", "image", "image/jpeg")
+    theirs = asset(client, storage, b"jpg", "b.jpg", "image", "image/jpeg", headers=B)
+    token_a = make_token(UID_A)
+    r = client.get("/file", params={"path": mine, "token": token_a})
+    assert r.status_code == 200 and r.content == b"jpg-bytes"
+    assert r.headers["content-type"] == "image/jpeg"
+    assert client.get("/file", params={"path": theirs, "token": token_a}).status_code == 404
+    assert client.get("/file", params={"path": "asset:a000000000000", "token": token_a}).status_code == 404
+    pic = tmp_path / "x.jpg"
+    pic.write_bytes(b"jpg")
+    assert client.get("/file", params={"path": str(pic), "token": token_a}).status_code == 404
+    assert client.get("/file", params={"path": mine}).status_code == 401
