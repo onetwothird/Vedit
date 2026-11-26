@@ -34,10 +34,58 @@ def _safe_name(name) -> bool:
     return isinstance(name, str) and any(p.fullmatch(name) for p in _FILE_PATTERNS)
 
 
-def _is_abs(s: str, pathy: bool) -> bool:
+# settings that travel; everything else (proxy, workdir, expired, auto_export, cloud_id, cloud_rev...) is machine-local
+# or set by the sync layer (the bundle's top-level id and rev)
+PORTABLE_SETTINGS = ("title", "web_video")
+_TEXTY = {"text", "w", "word", "title", "reason", "caption", "name"}
+# the keys that hold a file reference (an edl's `sources` entries and a brand kit's `fonts` values do too)
+_REF_KEYS = {"path", "source", "logo", "intro", "outro", "music", "lut", "header_overlay", "background", "file",
+             "transcript"}
+_LOCAL_NAME = re.compile(r"local:[^/\\\x00]+")
+
+
+def _is_abs(s: str, pathy: bool, key: str = "") -> bool:
     if s.startswith((ASSET, SOURCE, LOCAL)) or "\n" in s:
         return False
-    return bool(_DRIVE.match(s)) or (pathy and s.startswith("/") and len(s) > 1)
+    if _DRIVE.match(s):
+        return True
+    if not s.startswith("/") or len(s) < 2:
+        return False
+    # a POSIX path under a path-like key; elsewhere only something with no spaces and more than one segment,
+    # so overlay text such as "/hi there" survives
+    return pathy or (key not in _TEXTY and not any(c.isspace() for c in s) and "/" in s[1:])
+
+
+def _check_ref(v, where: str) -> None:
+    """`v` must be exactly "source:", "asset:<id>" or "local:<basename>"."""
+    ok = False
+    if isinstance(v, str):
+        if v == SOURCE:
+            ok = True
+        elif v.startswith(ASSET):
+            from cloud_assets import ASSET_ID  # lazy: pulls in the web framework
+
+            ok = bool(ASSET_ID.fullmatch(v[len(ASSET):]))
+        elif v.startswith(LOCAL):
+            ok = bool(_LOCAL_NAME.fullmatch(v)) and v[len(LOCAL):] not in (".", "..")
+    if not ok:
+        raise ValueError(f"Project bundle has a file reference that is not allowed in {where}: {v!r}")
+
+
+def _check_refs(node, where: str, key: str = "", ref: bool = False) -> None:
+    """Every file-valued field in `node` must be a portable reference (see _check_ref); crafted paths are refused."""
+    ref = ref or key in ("sources", "fonts")
+    if isinstance(node, dict):
+        for k, v in node.items():
+            _check_refs(v, where, k, ref)
+    elif isinstance(node, list):
+        for v in node:
+            _check_refs(v, where, key, ref)
+    elif isinstance(node, str):
+        if ref or key in _REF_KEYS:
+            _check_ref(node, where)
+    elif node is not None and key in _REF_KEYS:
+        _check_ref(node, where)
 
 
 def _basename(s: str) -> str:
@@ -53,7 +101,7 @@ def _portable(node, key: str = "", pathy: bool = False, in_sources: bool = False
         return {k: _portable(v, k, pathy, in_sources) for k, v in node.items()}
     if isinstance(node, list):
         return [_portable(v, key, pathy, in_sources) for v in node]
-    if isinstance(node, str) and _is_abs(node, pathy):
+    if isinstance(node, str) and _is_abs(node, pathy, key):
         return SOURCE if in_sources or key == "source" else LOCAL + _basename(node)
     return node
 
@@ -95,6 +143,7 @@ def export_bundle(p: Project) -> dict:
             continue  # an unreadable file is left out rather than failing the whole sync
     doc = project_doc(p)
     doc["last_job"] = None
+    doc["settings"] = {k: p.settings[k] for k in PORTABLE_SETTINGS if k in p.settings}
     doc.pop("last_activity", None)
     brand = None
     bf = _brand_file()
@@ -136,6 +185,13 @@ def _validate(bundle) -> tuple[dict, dict, dict]:
     brand = bundle.get("brand")
     if brand is not None and not isinstance(brand, dict):
         raise ValueError("Project bundle brand kit is not a JSON object")
+    for name, content in files.items():
+        _check_refs({k: v for k, v in content.items() if k != "output"}, name)
+        out = content.get("output")
+        if isinstance(out, dict):
+            _check_refs({k: v for k, v in out.items() if k != "path"}, name)
+    _check_refs(clips, "clips")
+    _check_refs(brand, "brand")
     return doc, files, brand
 
 
@@ -163,12 +219,16 @@ def import_bundle(bundle: dict, source: Path | None) -> Project:
     p.language, p.platform = resolved["language"], resolved["platform"]
     p.clips = [ProjectClip(highlight=c["highlight"], kept=bool(c.get("kept", True)), edl_file=c["edl_file"])
                for c in resolved["clips"]]
-    p.settings = {**p.settings, **resolved.get("settings", {})}
+    bundled = resolved.get("settings", {})
+    p.settings = {**p.settings, **{k: bundled[k] for k in PORTABLE_SETTINGS if k in bundled}}
     if cloud_id is not None:
         p.settings["cloud_id"] = cloud_id
     p.settings["cloud_rev"] = rev
     for name, content in files.items():
-        save_json(_resolve_source(content, p.source), wd / name)
+        content = _resolve_source(content, p.source)
+        if isinstance(content.get("output"), dict) and "path" in content["output"]:
+            content["output"]["path"] = ""  # render targets are assigned by the exporter on this machine
+        save_json(content, wd / name)
     if brand and not _brand_file().is_file():  # never replace the kit already on this machine
         save_json(brand, _brand_file())
     save_project(p)
