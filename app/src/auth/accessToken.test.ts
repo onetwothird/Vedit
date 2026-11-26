@@ -52,3 +52,16 @@ describe("getAccessToken", () => {
     expect(await getAccessToken()).toBeNull();
   });
 });
+
+describe("getSyncSession and signedInUserId", () => {
+  it("give the token with the id of the account it belongs to, from the same saved session", async () => {
+    const { getSyncSession, signedInUserId } = await import("./accessToken");
+    expect(await getSyncSession()).toBeNull();
+    expect(signedInUserId()).toBeNull();
+    save("live", now() + 3600);
+    expect(await getSyncSession()).toEqual({ token: "live", uid: "u" });
+    expect(signedInUserId()).toBe("u");
+    localStorage.setItem("vedit.session", JSON.stringify({ access_token: "x", expires_at: now() + 3600 }));
+    expect(await getSyncSession()).toBeNull(); // no account id: not a session sync can act as
+  });
+});

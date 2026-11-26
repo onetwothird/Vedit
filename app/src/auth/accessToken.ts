@@ -11,6 +11,7 @@ const SKEW_MS = 60_000; // refresh a minute before the token runs out
 interface Saved {
   access_token?: string;
   expires_at?: number; // unix seconds
+  account?: { id?: unknown }; // the signed-in account, saved with its token
 }
 
 const saved = (): Saved | null => read<Saved | null>(SESSION, null);
@@ -45,4 +46,22 @@ export async function getAccessToken(): Promise<string | null> {
     if (!usable(s)) return null;
   }
   return s.access_token;
+}
+
+const uidOf = (s: Saved | null): string | null =>
+  usable(s) && typeof s.account?.id === "string" && s.account.id !== "" ? s.account.id : null;
+
+/** The signed-in account's id as saved now (no refresh); null when nobody is signed in. */
+export function signedInUserId(): string | null {
+  return uidOf(saved());
+}
+
+/** A current access token and the id of the account it belongs to, read from the same saved session; null when
+    nobody is signed in. */
+export async function getSyncSession(): Promise<{ token: string; uid: string } | null> {
+  const token = await getAccessToken();
+  if (!token) return null;
+  const s = saved();
+  const uid = uidOf(s);
+  return uid && s?.access_token === token ? { token, uid } : null;
 }

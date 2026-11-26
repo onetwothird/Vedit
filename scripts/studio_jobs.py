@@ -35,7 +35,7 @@ Step = Union[tuple[str, Union[list[str], Callable[[], None]], float],
 class Job:
     id: str
     project_id: str
-    kind: Literal["analyze", "export", "model", "story", "zip"]
+    kind: Literal["analyze", "export", "model", "story", "zip", "sync"]
     state: Literal["queued", "running", "done", "failed", "cancelled"] = "queued"
     stage: str = ""
     pct: float = 0.0
