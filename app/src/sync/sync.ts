@@ -8,7 +8,7 @@
 // 60 s cycle when the two differ. Every error is quiet: busy (409) and network errors are retried later.
 
 import { useSyncExternalStore } from "react";
-import { getAccessToken } from "../auth/accessToken";
+import { getSyncSession, signedInUserId } from "../auth/accessToken";
 import { createCloudApi, localSync, onProjectEdited } from "../engine/client";
 import { isTauri, isWeb } from "../engine/flavor";
 import { EngineError } from "../engine/types";
@@ -74,12 +74,35 @@ const storeToast = (message: string): void => update({ toasts: [...snapshot.toas
 
 // ---- the sync loop ---------------------------------------------------------------------------------------------
 
+/** The signed-in account, read once (token and user id together) at the start of a unit of work. */
+export interface SyncIdentity {
+  token: string;
+  uid: string;
+}
+
+/** The account changed while a unit of work ran: it stops before writing anything, and the next cycle starts over. */
+class AccountSwitched extends Error {
+  constructor() {
+    super("You signed in with another account. Try again.");
+    this.name = "AccountSwitched";
+  }
+}
+
+/** One unit of work (a cycle, a debounced push, opening a cloud project, the web-video switch): every cloud request
+    goes out with the token read at its start, and every owner recorded is the account that token belongs to. */
+interface Unit {
+  uid: string;
+  cloud: CloudApi;
+  /** Throws AccountSwitched unless the same account is still signed in. Called before every write and before a
+      404 is acted on. */
+  check(): void;
+}
+
 interface Running {
   local: LocalSyncApi;
-  cloud: CloudApi;
-  user: () => string | null;
+  begin(): Promise<Unit | null>;
   enqueue<T>(task: () => Promise<T>): Promise<T>;
-  push(s: SyncState, uid: string): Promise<string>;
+  push(s: SyncState, unit: Unit): Promise<string>;
   jobPollMs: number;
 }
 
@@ -95,23 +118,25 @@ const isDirty = (s: SyncState): boolean => s.hash !== null && (s.cloud_id === nu
 
 /** An engine that could not be reached (or broke): the cycle stops and is retried with backoff. */
 const transient = (e: unknown): boolean =>
-  !(e instanceof EngineError) || e.status === 0 || e.status >= 500;
+  !(e instanceof AccountSwitched) && (!(e instanceof EngineError) || e.status === 0 || e.status >= 500);
 
 function withoutLink(b: ProjectBundle & { video_url?: string }): ProjectBundle {
   const { video_url: _drop, ...bundle } = b;
   return bundle;
 }
 
-/** Starts syncing; returns the stop function. With no cloud API (VITE_CLOUD_URL unset) nothing ever runs; signed
-    out (session() gives null, or user() gives no account id) a cycle makes no request at all. */
+/** Starts syncing; returns the stop function.
+    - `cloudFor(token)`: the cloud API acting as that token's account; null (VITE_CLOUD_URL unset) = nothing runs.
+    - `session()`: the signed-in account's token and user id, read together; null = signed out, no request at all.
+    - `user()`: who is signed in right now (synchronous), to notice an account switch inside a unit of work. */
 export function startSync(
   local: LocalSyncApi,
-  cloud: CloudApi | null,
-  session: () => Promise<string | null>,
+  cloudFor: ((token: string) => CloudApi) | null,
+  session: () => Promise<SyncIdentity | null>,
   user: () => string | null,
   opts: SyncOptions = {},
 ): () => void {
-  if (!cloud) return () => undefined;
+  if (!cloudFor) return () => undefined;
   const debounceMs = opts.debounceMs ?? PUSH_DEBOUNCE_MS;
   const intervalMs = opts.intervalMs ?? PULL_INTERVAL_MS;
   const backoff = opts.backoffMs ?? SYNC_BACKOFF_MS;
@@ -129,22 +154,39 @@ export function startSync(
     return run;
   }
 
+  /** A unit of work as the account signed in now, or null when nobody is (or an account switch is under way). */
+  async function begin(): Promise<Unit | null> {
+    const id = await session();
+    if (!id || user() !== id.uid) return null;
+    return {
+      uid: id.uid,
+      cloud: cloudFor!(id.token),
+      check() {
+        if (user() !== id.uid) throw new AccountSwitched();
+      },
+    };
+  }
+
   /** Pushes one project; returns the cloud id it is linked to afterwards. Errors are the caller's. */
-  async function push(s: SyncState, uid: string): Promise<string> {
+  async function push(s: SyncState, unit: Unit): Promise<string> {
+    const { uid, cloud } = unit;
     const bundle = await local.projectBundle(s.id);
     const hash = s.hash ?? undefined;
     const pushNew = async (): Promise<string> => {
-      const r = await cloud!.pushNew(bundle);
+      unit.check();
+      const r = await cloud.pushNew(bundle);
       await local.patchSyncSettings(s.id, { cloud_id: r.id, cloud_rev: r.rev, cloud_hash: hash, cloud_owner: uid });
       return r.id;
     };
     if (!s.cloud_id) return pushNew();
     let r: PushResult;
+    unit.check();
     try {
-      r = await cloud!.pushSynced(s.cloud_id, s.cloud_rev, bundle);
+      r = await cloud.pushSynced(s.cloud_id, s.cloud_rev, bundle);
     } catch (e) {
       // only a link this account made is known to be gone (a 404 is also what another account's project gets)
       if (!(e instanceof EngineError && e.status === 404) || s.cloud_owner !== uid) throw e;
+      unit.check();
       const id = await pushNew(); // deleted on the website: this computer still has it, so it goes up again
       toast(`${bundle.title} was removed from the web, so it was uploaded again`);
       return id;
@@ -156,7 +198,9 @@ export function startSync(
       await local.patchSyncSettings(s.id, { cloud_id: r.id, cloud_rev: 0, cloud_hash: hash, cloud_owner: uid });
       toast(`Saved a copy: ${bundle.title} (copy)`);
       try {
-        await local.importBundle({ bundle: withoutLink(await cloud!.getSynced(r.id)), expect_hash: hash, cloud_owner: uid });
+        const copy = withoutLink(await cloud.getSynced(r.id));
+        unit.check();
+        await local.importBundle({ bundle: copy, expect_hash: hash, cloud_owner: uid });
       } catch {
         // retried by the next cycle (cloud rev 1 > 0)
       }
@@ -166,23 +210,25 @@ export function startSync(
     return r.id;
   }
 
-  /** Runs one project's step; a busy or refused one is left for the next cycle, an unreachable engine stops it. */
+  /** Runs one project's step; a busy or refused one is left for the next cycle, an unreachable engine (or an
+      account switch) stops the whole unit. */
   async function quietly<T>(step: () => Promise<T>): Promise<T | undefined> {
     try {
       return await step();
     } catch (e) {
-      if (transient(e)) throw e;
+      if (transient(e) || e instanceof AccountSwitched) throw e;
       return undefined; // 409 busy, 400/404/413: stays as it is, tried again next cycle
     }
   }
 
   async function cycle(): Promise<void> {
-    const uid = user();
-    if (!uid || !(await session())) {
+    const unit = await begin();
+    if (!unit) {
       if (snapshot.cloudOnly.length) update({ cloudOnly: [] });
       return;
     }
-    const [list, all] = await Promise.all([cloud!.listSynced(), local.syncState()]);
+    const { uid, cloud } = unit;
+    const [list, all] = await Promise.all([cloud.listSynced(), local.syncState()]);
     const states = all.filter((s) => ownedBy(s, uid)); // another account's links: no push, no pull, no toast
     const linked = new Set(states.flatMap((s) => (s.cloud_id ? [s.cloud_id] : [])));
     const handled = new Set<string>();
@@ -192,13 +238,14 @@ export function startSync(
       handled.add(s.id);
       if (isClean(s)) {
         await quietly(async () => {
-          const bundle = withoutLink(await cloud!.getSynced(c.id));
+          const bundle = withoutLink(await cloud.getSynced(c.id));
+          unit.check();
           // in place (the local video stays, nothing is downloaded), and only if nothing was edited meanwhile:
           // otherwise 409, and the next cycle sees the edit and pushes it (a conflict copy)
           await local.importBundle({ bundle, expect_hash: s.hash ?? undefined, cloud_owner: uid });
         });
       } else {
-        const now = await quietly(() => push(s, uid)); // the cloud answers with a copy: both versions are kept
+        const now = await quietly(() => push(s, unit)); // the cloud answers with a copy: both versions are kept
         if (now !== undefined && now !== c.id) {
           linked.delete(c.id);
           linked.add(now);
@@ -207,20 +254,21 @@ export function startSync(
     }
     for (const s of states) {
       if (handled.has(s.id) || !isDirty(s)) continue;
-      const now = await quietly(() => push(s, uid));
+      const now = await quietly(() => push(s, unit));
       if (now !== undefined) {
         if (s.cloud_id && now !== s.cloud_id) linked.delete(s.cloud_id);
         linked.add(now);
       }
     }
+    unit.check();
     if (!stopped) update({ cloudOnly: list.filter((c) => !linked.has(c.id)) });
   }
 
   async function pushOne(pid: string): Promise<void> {
-    const uid = user();
-    if (!uid || !(await session())) return;
+    const unit = await begin();
+    if (!unit) return;
     const s = (await local.syncState()).find((x) => x.id === pid);
-    if (s && ownedBy(s, uid) && isDirty(s)) await quietly(() => push(s, uid));
+    if (s && ownedBy(s, unit.uid) && isDirty(s)) await quietly(() => push(s, unit));
   }
 
   function schedule(delay: number): void {
@@ -238,7 +286,9 @@ export function startSync(
       },
       (e: unknown) => {
         if (stopped) return;
-        if (transient(e)) {
+        if (e instanceof AccountSwitched) {
+          schedule(0); // start over as the account signed in now
+        } else if (transient(e)) {
           fails++;
           schedule(backoff[Math.min(fails - 1, backoff.length - 1)]);
         } else {
@@ -259,7 +309,7 @@ export function startSync(
   });
   const offSignIns = opts.signIns?.(() => schedule(0));
 
-  const me: Running = { local, cloud, user, enqueue, push, jobPollMs: opts.jobPollMs ?? JOB_POLL_MS };
+  const me: Running = { local, begin, enqueue, push, jobPollMs: opts.jobPollMs ?? JOB_POLL_MS };
   active = me;
   update({ cloudOnly: [], toasts: [] });
   schedule(0);
@@ -276,20 +326,25 @@ export function startSync(
   };
 }
 
-function running(): Running & { uid: string } {
-  const uid = active?.user();
-  if (!active || !uid) throw new Error("Sign in to sync with the website");
-  return { ...active, uid };
+/** The running sync and a unit of work as the account signed in now. */
+async function started(): Promise<{ a: Running; unit: Unit }> {
+  const a = active;
+  const unit = a ? await a.begin() : null;
+  if (!a || !unit) throw new Error("Sign in to sync with the website");
+  return { a, unit };
 }
 
 /** Brings a cloud-only project to this computer: its video (when it is in the cloud) is downloaded once into
     Videos/Vedit/Cloud by the local engine, as a job of kind "sync" whose result names the new project. */
 export async function openCloudProject(id: string): Promise<ImportBundleResult> {
-  const a = running();
+  const { a, unit } = await started();
   return a.enqueue(async () => {
-    const b = await a.cloud.getSynced(id);
+    const b = await unit.cloud.getSynced(id);
     const bundle = withoutLink(b);
-    const r = await a.local.importBundle(b.video_url ? { bundle, video_url: b.video_url, cloud_owner: a.uid } : { bundle, cloud_owner: a.uid });
+    unit.check();
+    const r = await a.local.importBundle(b.video_url
+      ? { bundle, video_url: b.video_url, cloud_owner: unit.uid }
+      : { bundle, cloud_owner: unit.uid });
     if (r.project) update({ cloudOnly: snapshot.cloudOnly.filter((c) => c.id !== id) });
     return r;
   });
@@ -311,11 +366,12 @@ async function finished(local: LocalSyncApi, job: Job, pollMs: number): Promise<
 }
 
 /** After the cloud changed web_video (one revision up): record it here too, so neither side looks newer. */
-async function settle(a: Running, pid: string, rev: number, on: boolean): Promise<void> {
+async function settle(a: Running, unit: Unit, pid: string, rev: number, on: boolean): Promise<void> {
   const now = await stateOf(a.local, pid);
   const clean = isClean(now);
   const patch: SyncSettingsPatch = { web_video: on };
   if (rev === now.cloud_rev + 1) patch.cloud_rev = rev; // nothing else changed in the cloud meanwhile
+  unit.check();
   const row = await a.local.patchSyncSettings(pid, patch);
   if (clean && patch.cloud_rev !== undefined && row.hash) await a.local.patchSyncSettings(pid, { cloud_hash: row.hash });
 }
@@ -324,12 +380,12 @@ async function settle(a: Running, pid: string, rev: number, on: boolean): Promis
     takes it (a refusal, such as over 60 minutes or out of storage, is thrown with the server's message). Off: the
     cloud copy of the video is deleted. The video on this computer is never touched. */
 export async function setWebVideo(pid: string, on: boolean): Promise<void> {
-  const a = running();
+  const { a, unit } = await started();
   const s = await a.enqueue(async () => {
     let s = await stateOf(a.local, pid);
-    if (!ownedBy(s, a.uid)) throw new Error("This project is synced with another account. Sign in with that account to change it.");
+    if (!ownedBy(s, unit.uid)) throw new Error("This project is synced with another account. Sign in with that account to change it.");
     if (!s.cloud_id) { // not in the cloud yet: push it first so there is a project to attach to
-      await a.push(s, a.uid);
+      await a.push(s, unit);
       s = await stateOf(a.local, pid);
     }
     return s;
@@ -337,34 +393,39 @@ export async function setWebVideo(pid: string, on: boolean): Promise<void> {
   const cloudId = s.cloud_id!;
   if (on) {
     if (!s.has_source) throw new Error("This project's video is not on this computer");
-    const ticket = await a.cloud.createUpload({ kind: "video", name: s.source_name, size: s.size, content_type: s.content_type });
+    unit.check();
+    const ticket = await unit.cloud.createUpload({ kind: "video", name: s.source_name, size: s.size, content_type: s.content_type });
     await finished(a.local, await a.local.publishVideo(pid, ticket.url), a.jobPollMs);
+    // the upload can outlast the access token: attach with a fresh one, of the same account only
+    const later = await a.begin();
+    if (!later || later.uid !== unit.uid) throw new AccountSwitched();
     await a.enqueue(async () => {
-      const summary = await a.cloud.attachVideo(cloudId, ticket.upload_key);
-      await settle(a, pid, summary.rev, true);
+      later.check();
+      const summary = await later.cloud.attachVideo(cloudId, ticket.upload_key);
+      await settle(a, later, pid, summary.rev, true);
     });
   } else {
     await a.enqueue(async () => {
-      const summary = await a.cloud.deleteVideo(cloudId);
-      await settle(a, pid, summary.rev, false);
+      unit.check();
+      const summary = await unit.cloud.deleteVideo(cloudId);
+      await settle(a, unit, pid, summary.rev, false);
     });
   }
 }
 
-/** The app's sync: on in the desktop app when VITE_CLOUD_URL is set, with the signed-in user's access token. */
+/** The app's sync: on in the desktop app when VITE_CLOUD_URL is set, as the signed-in account. */
 export function bootSync(): () => void {
   if (!isTauri() || isWeb() || !localSync) return () => undefined;
-  const cloud = createCloudApi();
-  if (!cloud) return () => undefined;
-  let account: string | null = null; // the signed-in user's id, from the auth store
-  return startSync(localSync, cloud, getAccessToken, () => account, {
+  const cloudFor = createCloudApi();
+  if (!cloudFor) return () => undefined;
+  return startSync(localSync, cloudFor, getSyncSession, signedInUserId, {
     edits: onProjectEdited,
     signIns: (fn) => {
       let off = (): void => undefined;
       let gone = false;
       void import("../auth/auth").then(({ useAuth }) => {
         if (gone) return;
-        account = useAuth.getState().account?.id ?? null;
+        let account = useAuth.getState().account?.id ?? null;
         if (account) fn(); // already signed in when the store loaded
         off = useAuth.subscribe((st) => {
           const next = st.account?.id ?? null;

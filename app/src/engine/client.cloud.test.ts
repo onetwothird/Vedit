@@ -242,24 +242,22 @@ describe("desktop sync clients", () => {
     expect(createCloudApi()).toBeNull();
   });
 
-  it("the cloud API reaches VITE_CLOUD_URL with the current access token on every request", async () => {
+  it("a cloud API bound to a token reaches VITE_CLOUD_URL with that token on every request", async () => {
     vi.stubEnv("VITE_ENGINE", "");
     vi.stubEnv("VITE_CLOUD_URL", "https://me--vedit.modal.run/");
     const fetchImpl = vi.fn(async () => json({ id: "c1", rev: 2 }));
     const { createCloudApi } = await import("./client");
-    const cloud = createCloudApi(fetchImpl as unknown as typeof fetch)!;
+    const cloud = createCloudApi(fetchImpl as unknown as typeof fetch)!("tok-A");
     await cloud.pushSynced("c1", 1, { format: 1 } as never);
-    session.token = "tok-2";
+    session.token = "tok-2"; // the saved session changes: a bound client does not follow it
     await cloud.listSynced();
     const [url, init] = fetchImpl.mock.calls[0] as unknown as [string, RequestInit];
     expect(url).toBe("https://me--vedit.modal.run/sync/projects/c1");
     expect(init.method).toBe("PUT");
     expect(JSON.parse(init.body as string)).toEqual({ base_rev: 1, bundle: { format: 1 } });
-    expect(authOf(fetchImpl, 0)).toBe("Bearer tok-1");
-    expect(authOf(fetchImpl, 1)).toBe("Bearer tok-2");
-    session.token = null;
-    await expect(cloud.listSynced()).rejects.toMatchObject({ code: "signin" });
-    expect(fetchImpl).toHaveBeenCalledTimes(2); // signed out: no request
+    expect(authOf(fetchImpl, 0)).toBe("Bearer tok-A");
+    expect(authOf(fetchImpl, 1)).toBe("Bearer tok-A");
+    expect(session.calls).toBe(0); // never reads the session itself
   });
 
   it("a clip edit through the client is reported with its project id", async () => {

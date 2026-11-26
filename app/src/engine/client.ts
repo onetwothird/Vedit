@@ -252,18 +252,11 @@ export const engine: Engine = realEngine ?? mockEngine;
 /** The local engine's sync routes; null with the mock engine. */
 export const localSync: LocalSyncApi | null = realEngine;
 
-/** The cloud engine's sync routes for the desktop app, at VITE_CLOUD_URL with the signed-in user's access token
-    (a fresh one per request). Null when VITE_CLOUD_URL is not set: then there is no sync at all. */
-export function createCloudApi(fetchImpl?: typeof fetch): CloudApi | null {
+/** The cloud engine's sync routes for the desktop app, at VITE_CLOUD_URL: `cloudFor(token)` is a client that sends
+    that one access token with every request, so a unit of sync work acts as one account from start to end. Null when
+    VITE_CLOUD_URL is not set: then there is no sync at all. */
+export function createCloudApi(fetchImpl?: typeof fetch): ((token: string) => CloudApi) | null {
   const base = ((import.meta.env.VITE_CLOUD_URL as string | undefined) ?? "").trim().replace(/\/+$/, "");
   if (!base) return null;
-  return createClient({
-    cacheInfo: false,
-    fetchImpl,
-    getInfo: async () => {
-      const token = await getAccessToken();
-      if (!token) throw new EngineError(401, "signin", "sign in to sync");
-      return { base, token, port: 0 };
-    },
-  });
+  return (token: string) => createClient({ cacheInfo: false, fetchImpl, getInfo: async () => ({ base, token, port: 0 }) });
 }
