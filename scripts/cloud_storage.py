@@ -33,6 +33,11 @@ def sync_video_key(uid: str, pid: str) -> str:
     return f"zips/{_part(uid)}/{_part(pid)}.video"
 
 
+def is_sync_video_key(key: str) -> bool:
+    """A temporary download copy of a project video that is already counted on the Volume."""
+    return key.startswith("zips/") and key.endswith(".video")
+
+
 def uploads_prefix(uid: str) -> str:
     return f"uploads/{_part(uid)}/"
 

@@ -388,3 +388,70 @@ def test_pushes_and_pulls_never_charge(client, storage, usage):
     client.delete(f"/sync/projects/{pid}/video", headers=A)
     assert usage.charges == []
     assert client.get("/usage", headers=A).json()["seconds_used"] == 0
+
+
+# ---- review fixes: length cap, busy pushes, published-copy accounting ---------------------------------------------
+
+def test_attach_over_an_hour_is_refused_and_the_old_video_stays(client, storage, cfg):
+    pid = push_new(client)["id"]
+    assert attach(client, storage, pid, b"video:600", "a.mp4").status_code == 200
+    with use_home(home_of(cfg)):
+        src = Path(load_project(pid).source)
+    rev = listed(client, pid)["rev"]
+    key = upload(client, storage, b"video:10800", name="long.mp4")  # 3 h
+    r = client.post(f"/sync/projects/{pid}/video", headers=A, json={"upload_key": key})
+    assert r.status_code == 400 and r.json()["detail"] == "Videos can be up to 60 minutes"
+    assert storage.size(key) is None  # the upload is deleted and its record gone, like the other refusals
+    assert not list((home_of(cfg) / "uploads").glob("*.json"))
+    assert not list((home_of(cfg) / "uploads").glob("*.claimed"))
+    assert src.read_bytes() == b"video:600"
+    assert not list(src.parent.glob("incoming-*"))
+    row = listed(client, pid)
+    assert row["has_video_in_cloud"] is True and row["rev"] == rev
+
+
+def test_push_while_a_job_runs_is_409_and_changes_nothing(client, storage, cfg, runner):
+    pid = make_project(client, storage).json()["id"]
+    runner.block = True
+    assert client.post(f"/projects/{pid}/analyze", headers=A, json={}).status_code == 200
+    with use_home(home_of(cfg)):
+        before = load_project(pid)
+    r = client.put(f"/sync/projects/{pid}", headers=A, json={"base_rev": 0, "bundle": bundle(note="mid-job")})
+    assert r.status_code == 409 and r.json()["detail"] == "This project is busy on the website. Try again in a moment."
+    with use_home(home_of(cfg)):
+        after = load_project(pid)
+        assert not (workdir_for(after.source) / "clip-h01.edl.json").exists()
+    assert after.clips == before.clips and after.settings == before.settings
+    assert listed(client, pid)["rev"] == 0
+    assert push_new(client)["rev"] == 1  # a new project is never busy
+    runner.release_all()
+
+
+def _expires(url):
+    return int(url.split("expires=")[1].split("&")[0])
+
+
+def _published(storage, url):
+    return url[len("mem://get/"):].split("?")[0]
+
+
+def test_published_copy_is_not_counted_and_is_reused_for_its_life(client, storage, monkeypatch):
+    pid = make_project(client, storage).json()["id"]
+    before = client.get("/usage", headers=A).json()["storage_bytes"]
+    uploads = []
+    real = storage.upload
+    monkeypatch.setattr(storage, "upload", lambda src, key, ct: (uploads.append(key), real(src, key, ct)))
+    first = client.get(f"/sync/projects/{pid}", headers=A).json()["video_url"]
+    key = _published(storage, first)
+    assert uploads == [key] and _expires(first) == 86400
+    assert client.get("/usage", headers=A).json()["storage_bytes"] == before  # a copy of a file already counted
+    # within its life: linked again, not uploaded again, and the link never outlives the object
+    storage.modified[key] -= timedelta(hours=10)
+    again = client.get(f"/sync/projects/{pid}", headers=A).json()["video_url"]
+    assert uploads == [key]
+    assert 14 * 3600 - 60 <= _expires(again) <= 14 * 3600
+    # under 6 h left: published again, with a full day
+    storage.modified[key] -= timedelta(hours=9)
+    late = client.get(f"/sync/projects/{pid}", headers=A).json()["video_url"]
+    assert uploads == [key, key] and _expires(late) == 86400
+    assert client.get("/usage", headers=A).json()["storage_bytes"] == before

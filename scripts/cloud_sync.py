@@ -21,6 +21,7 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 import cloud_assets
+import cloud_cleanup
 import cloud_projects as cp
 import cloud_storage as cs
 import sync_bundle
@@ -29,11 +30,13 @@ from pydantic import BaseModel
 from starlette.exceptions import HTTPException as StarletteHTTPException
 from studio_projects import Project, _home, list_recent, load_project, save_project
 
-URL_SECONDS = 24 * 3600
-REUSE_PUBLISHED = timedelta(hours=1)  # a published video younger than this is linked again, not uploaded again
+# a published video lives as long as a zip (the retention sweep deletes it ZIP_TTL after its upload): it is linked
+# again for the rest of that life, and published again only when less than this would be left
+MIN_LINK_LIFE = timedelta(hours=6)
 ENVELOPE_BYTES = 64 * 1024  # base_rev and the JSON around the bundle
 TOO_LARGE = "Project bundle is too large (limit 20 MB)"
 BUSY_PROJECT = "This project has a job running; wait for it to finish"
+BUSY_PUSH = "This project is busy on the website. Try again in a moment."
 _UNSAFE_NAME = re.compile(r'[<>:"/\\|?*\x00-\x1f\x7f]')
 
 
@@ -58,9 +61,9 @@ def summary(p: Project) -> dict:
             "has_video_in_cloud": cp.has_video(p), "expired": bool(p.settings.get("expired"))}
 
 
-def _check_idle(engine, pid: str) -> None:
+def _check_idle(engine, pid: str, copy_: str = BUSY_PROJECT) -> None:
     if any(j.project_id == pid for j in engine.active_jobs()):
-        raise StarletteHTTPException(409, BUSY_PROJECT)
+        raise StarletteHTTPException(409, copy_)
 
 
 async def _read_body(request: Request) -> dict:
@@ -130,17 +133,19 @@ def build_router(engine, cloud, probe) -> APIRouter:
     storage = cloud.storage
 
     def video_url(p: Project) -> str:
-        """A 24 h link to the project's video, published to R2 (the Volume copy stays the project's source)."""
+        """A link to the project's video, published to R2 (the Volume copy stays the project's source). The copy
+        is reused while it has at least MIN_LINK_LIFE left, and the link never outlives it."""
         user = _home().name
         key = cs.sync_video_key(user, p.id)
         src = Path(p.source)
         now = datetime.now(timezone.utc)
-        fresh = any(k == key and size == src.stat().st_size and now - modified < REUSE_PUBLISHED
-                    for k, size, modified in storage.list(cs.zips_prefix(user)))
-        if not fresh:
+        left = next((cloud_cleanup.ZIP_TTL - (now - modified) for k, size, modified in storage.list(cs.zips_prefix(user))
+                     if k == key and size == src.stat().st_size), None)
+        if left is None or left < MIN_LINK_LIFE:
             storage.upload(src, key, "video/mp4" if src.suffix.lower() in (".mp4", ".m4v") else "application/octet-stream")
+            left = cloud_cleanup.ZIP_TTL
         name = " ".join(_UNSAFE_NAME.sub("", _title(p)).split()).strip(" .") or "video"
-        return storage.presign_get(key, name + src.suffix.lower(), URL_SECONDS)
+        return storage.presign_get(key, name + src.suffix.lower(), int(left.total_seconds()))
 
     @router.get("/sync/projects")
     def list_projects():
@@ -168,6 +173,7 @@ def build_router(engine, cloud, probe) -> APIRouter:
             _load(pid)
             with engine.lock_for(pid):
                 p = _load(pid)
+                _check_idle(engine, pid, BUSY_PUSH)  # a running analysis would overwrite what is pushed
                 cur = sync_bundle.rev_of(p)
                 if base != cur:  # the cloud moved on: the push is kept as its own project
                     t = bundle.get("title")
@@ -220,9 +226,10 @@ def build_router(engine, cloud, probe) -> APIRouter:
             try:
                 storage.download(key, part)
                 try:
-                    cp.video_seconds(probe, part)
+                    if cp.video_seconds(probe, part) > cp.MAX_VIDEO_SECONDS:  # the cap every web video has
+                        raise ValueError("Videos can be up to 60 minutes")
                 except ValueError:
-                    discard_upload()
+                    discard_upload()  # the project's own video is not touched: the swap comes later
                     raise
                 with cp.user_lock(), engine.lock_for(pid):
                     p = _load(pid)

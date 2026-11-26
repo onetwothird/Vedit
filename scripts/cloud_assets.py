@@ -126,8 +126,10 @@ def _reserved_bytes(exclude: str | None = None) -> int:
 def storage_bytes(storage, uid: str, exclude_upload: str | None = None) -> int:
     """Bytes on this user's volume home, plus their exports and zips in R2, plus the declared size of every
     unfinished upload. Pending records are the reservation for uploads/, so the uploads/ prefix is not counted
-    (it would double-count an object that is both pending and already in R2)."""
-    remote = sum(storage.usage_bytes(p) for p in (cs.exports_prefix(uid), cs.zips_prefix(uid)))
+    (it would double-count an object that is both pending and already in R2). A project video published for the
+    desktop to download (cloud_sync) is a temporary copy of a file already counted on the volume: left out too."""
+    zips = sum(size for key, size, _modified in storage.list(cs.zips_prefix(uid)) if not cs.is_sync_video_key(key))
+    remote = storage.usage_bytes(cs.exports_prefix(uid)) + zips
     return _disk_bytes(_home()) + remote + _reserved_bytes(exclude_upload)
 
 
