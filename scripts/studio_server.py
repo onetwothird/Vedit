@@ -80,6 +80,12 @@ class SyncSettingsBody(BaseModel):
 class ImportBundleBody(BaseModel):
     bundle: dict
     video_url: Optional[str] = None  # https:// only: the cloud's presigned link to the project's video
+    # an in-place import goes through only while the project still has this bundle_hash (else 409): an edit made
+    # after the client decided the project was unchanged is never overwritten
+    expect_hash: Optional[str] = Field(default=None, pattern=r"^[0-9a-f]{64}$")
+
+
+CHANGED_WHILE_SYNCING = "This project changed while syncing. It will sync again in a moment."
 
 
 class PublishBody(BaseModel):
@@ -1647,11 +1653,17 @@ def create_app(token: str | None, queue: JobQueue | None = None, cloud=None) -> 
                 save_project(p)
             return _sync_row(p)
 
-        def import_now(bundle: dict, source: Path | None) -> Project:
+        def import_now(bundle: dict, source: Path | None, expect_hash: str | None = None) -> Project:
             """import_bundle, in place when a project here is linked to the bundle's id (its `local:` references
-            mapped back to its files), then recorded as in step with the cloud."""
+            mapped back to its files), then recorded as in step with the cloud. With `expect_hash`, an in-place
+            import is refused (409) when the project's bundle hash is no longer that one."""
             linked = sync_bundle.find_linked(bundle.get("id") if isinstance(bundle.get("id"), str) else None)
             with engine.lock_for(linked.id) if linked is not None else contextlib.nullcontext():
+                if linked is not None:
+                    linked = _project(linked.id)  # as it is now, under the lock
+                    if expect_hash is not None and \
+                            sync_bundle.bundle_hash(sync_bundle.export_bundle(linked)) != expect_hash:
+                        raise StarletteHTTPException(409, CHANGED_WHILE_SYNCING)
                 local = sync_bundle.local_paths(linked) if linked is not None else None
                 p = sync_bundle.import_bundle(bundle, source, local)
                 p.settings["cloud_hash"] = sync_bundle.bundle_hash(sync_bundle.export_bundle(p))
@@ -1667,7 +1679,7 @@ def create_app(token: str | None, queue: JobQueue | None = None, cloud=None) -> 
             url = check_url(body.video_url) if body.video_url is not None else None
             linked = sync_bundle.find_linked(bundle.get("id") if isinstance(bundle.get("id"), str) else None)
             if url is None or linked is not None:
-                return {"project": _project_dict(import_now(bundle, None))}
+                return {"project": _project_dict(import_now(bundle, None, body.expect_hash))}
             dest = cloud_video_path(bundle.get("title"), url)
             part = dest.with_name(dest.name + ".part")
             jid = uuid.uuid4().hex[:12]

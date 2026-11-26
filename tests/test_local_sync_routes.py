@@ -362,3 +362,28 @@ def test_bundle_hash_ignores_id_and_rev():
     b = {"format": 1, "id": "a", "rev": 1, "title": "T", "project": {"x": 1}, "files": {}}
     assert sync_bundle.bundle_hash(b) == sync_bundle.bundle_hash({**b, "id": "b", "rev": 7})
     assert sync_bundle.bundle_hash(b) != sync_bundle.bundle_hash({**b, "title": "U"})
+
+
+def test_import_in_place_refuses_when_the_project_changed_since_the_client_looked(client, desk):
+    pid = desk["p"].id
+    client.patch(f"/projects/{pid}/settings", headers=AUTH, json={"cloud_id": "c7", "cloud_rev": 1})
+    seen = state_of(client, pid)["hash"]
+    b = cloud_copy(client, pid, "c7", 2)
+    b["files"]["clip-h01.edl.json"]["clips"][0]["out"] = 1.0  # the website's edit
+    e = load_json(desk["wd"] / "clip-h01.edl.json")  # an edit here, after the client took its snapshot
+    e["clips"][0]["out"] = 3.5
+    save_json(e, desk["wd"] / "clip-h01.edl.json")
+    r = client.post("/projects/import-bundle", headers=AUTH, json={"bundle": b, "expect_hash": seen})
+    assert r.status_code == 409
+    assert load_json(desk["wd"] / "clip-h01.edl.json")["clips"][0]["out"] == 3.5  # not overwritten
+    row = state_of(client, pid)
+    assert row["cloud_rev"] == 1 and row["hash"] != row["cloud_hash"]  # still to push
+    # with the hash it has now, the import goes through
+    r = client.post("/projects/import-bundle", headers=AUTH, json={"bundle": b, "expect_hash": row["hash"]})
+    assert r.status_code == 200
+    assert load_json(desk["wd"] / "clip-h01.edl.json")["clips"][0]["out"] == 1.0
+
+
+def test_import_refuses_a_malformed_expected_hash(client, desk):
+    b = cloud_copy(client, desk["p"].id, "c8", 1)
+    assert client.post("/projects/import-bundle", headers=AUTH, json={"bundle": b, "expect_hash": "x"}).status_code == 422

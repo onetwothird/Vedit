@@ -562,7 +562,8 @@ export interface PushResult {
 export interface LocalSyncApi {
   syncState(): Promise<SyncState[]>;
   projectBundle(pid: string): Promise<ProjectBundle>;
-  importBundle(body: { bundle: ProjectBundle; video_url?: string }): Promise<ImportBundleResult>;
+  /** `expect_hash`: an in-place import is refused (409) unless the project still has this bundle hash. */
+  importBundle(body: { bundle: ProjectBundle; video_url?: string; expect_hash?: string }): Promise<ImportBundleResult>;
   /** Streams the project's video to a presigned PUT URL, as a job of kind "sync". */
   publishVideo(pid: string, url: string): Promise<Job>;
   patchSyncSettings(pid: string, patch: SyncSettingsPatch): Promise<SyncState>;

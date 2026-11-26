@@ -12,7 +12,7 @@ import { getAccessToken } from "../auth/accessToken";
 import { createCloudApi, localSync, onProjectEdited } from "../engine/client";
 import { isTauri, isWeb } from "../engine/flavor";
 import { EngineError } from "../engine/types";
-import type { CloudApi, CloudProject, ImportBundleResult, Job, LocalSyncApi, ProjectBundle, SyncSettingsPatch, SyncState } from "../engine/types";
+import type { CloudApi, CloudProject, ImportBundleResult, Job, LocalSyncApi, ProjectBundle, PushResult, SyncSettingsPatch, SyncState } from "../engine/types";
 
 export const PUSH_DEBOUNCE_MS = 5_000;
 export const PULL_INTERVAL_MS = 60_000;
@@ -125,18 +125,36 @@ export function startSync(
   /** Pushes one project; returns the cloud id it is linked to afterwards. Errors are the caller's. */
   async function push(s: SyncState): Promise<string> {
     const bundle = await local.projectBundle(s.id);
-    if (!s.cloud_id) {
+    const hash = s.hash ?? undefined;
+    const pushNew = async (): Promise<string> => {
       const r = await cloud!.pushNew(bundle);
-      await local.patchSyncSettings(s.id, { cloud_id: r.id, cloud_rev: r.rev, cloud_hash: s.hash ?? undefined });
+      await local.patchSyncSettings(s.id, { cloud_id: r.id, cloud_rev: r.rev, cloud_hash: hash });
       return r.id;
+    };
+    if (!s.cloud_id) return pushNew();
+    let r: PushResult;
+    try {
+      r = await cloud!.pushSynced(s.cloud_id, s.cloud_rev, bundle);
+    } catch (e) {
+      if (!(e instanceof EngineError && e.status === 404)) throw e;
+      const id = await pushNew(); // deleted on the website: this computer still has it, so it goes up again
+      toast(`${bundle.title} was removed from the web, so it was uploaded again`);
+      return id;
     }
-    const r = await cloud!.pushSynced(s.cloud_id, s.cloud_rev, bundle);
-    if (r.conflict) { // the cloud moved on: the push became a copy, and this project follows it
-      await local.patchSyncSettings(s.id, { cloud_id: r.id, cloud_rev: r.rev, cloud_hash: s.hash ?? undefined });
+    if (r.conflict) {
+      // the cloud moved on: the push became a copy, and this project follows it. Linked at revision 0, so the copy
+      // (titled "<title> (copy)") is pulled in place now, or by the next cycle if that fails: the local title then
+      // matches the copy's and a later push never renames it back
+      await local.patchSyncSettings(s.id, { cloud_id: r.id, cloud_rev: 0, cloud_hash: hash });
       toast(`Saved a copy: ${bundle.title} (copy)`);
+      try {
+        await local.importBundle({ bundle: withoutLink(await cloud!.getSynced(r.id)), expect_hash: hash });
+      } catch {
+        // retried by the next cycle (cloud rev 1 > 0)
+      }
       return r.id;
     }
-    await local.patchSyncSettings(s.id, { cloud_rev: r.rev, cloud_hash: s.hash ?? undefined });
+    await local.patchSyncSettings(s.id, { cloud_rev: r.rev, cloud_hash: hash });
     return r.id;
   }
 
@@ -165,7 +183,9 @@ export function startSync(
       if (isClean(s)) {
         await quietly(async () => {
           const bundle = withoutLink(await cloud!.getSynced(c.id));
-          await local.importBundle({ bundle }); // in place: the local video stays, nothing is downloaded
+          // in place (the local video stays, nothing is downloaded), and only if nothing was edited meanwhile:
+          // otherwise 409, and the next cycle sees the edit and pushes it (a conflict copy)
+          await local.importBundle({ bundle, expect_hash: s.hash ?? undefined });
         });
       } else {
         const now = await quietly(() => push(s)); // the cloud answers with a copy: both versions are kept

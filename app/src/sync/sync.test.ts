@@ -26,7 +26,7 @@ function fakes(states: SyncState[], list: CloudProject[]) {
   const local = {
     syncState: vi.fn(async () => states.map((s) => ({ ...s }))),
     projectBundle: vi.fn(async () => bundleOf()),
-    importBundle: vi.fn(async (_body: { bundle: ProjectBundle; video_url?: string }) => ({ project: { id: "p9" } as never })),
+    importBundle: vi.fn(async (_body: { bundle: ProjectBundle; video_url?: string; expect_hash?: string }) => ({ project: { id: "p9" } as never })),
     publishVideo: vi.fn(async () => ({ ...doneJob("j1"), state: "running" as const })),
     patchSyncSettings: vi.fn(async (pid: string, patch: Record<string, unknown>) => {
       const s = states.find((x) => x.id === pid)!;
@@ -152,6 +152,7 @@ describe("startSync", () => {
     const body = local.importBundle.mock.calls[0][0] as { bundle: CloudBundle; video_url?: string };
     expect(body.video_url).toBeUndefined(); // the local video is there: nothing is downloaded
     expect(body.bundle.id).toBe("c1");
+    expect(body).toMatchObject({ expect_hash: H1 }); // refused by the engine if the project changed meanwhile
     expect("video_url" in body.bundle).toBe(false);
     expect(cloud.pushSynced).not.toHaveBeenCalled();
   });
@@ -164,11 +165,78 @@ describe("startSync", () => {
     stop = startSync(local, cloud, signedIn, { toast });
     await vi.advanceTimersByTimeAsync(0);
     expect(cloud.pushSynced).toHaveBeenCalledWith("c1", 2, bundleOf());
-    expect(local.importBundle).not.toHaveBeenCalled(); // the local edits are never overwritten
-    expect(local.patchSyncSettings).toHaveBeenCalledWith("p1", { cloud_id: "c2", cloud_rev: 1, cloud_hash: H2 });
+    // linked to the copy at revision 0, so the copy itself is pulled in place (its "(copy)" title included)
+    expect(local.patchSyncSettings).toHaveBeenCalledWith("p1", { cloud_id: "c2", cloud_rev: 0, cloud_hash: H2 });
+    expect(cloud.getSynced).toHaveBeenCalledWith("c2");
+    expect(local.importBundle).toHaveBeenCalledWith(expect.objectContaining({ expect_hash: H2 }));
     expect(toast).toHaveBeenCalledWith("Saved a copy: Talk (copy)");
     // the original is now a cloud-only project
     expect(syncStore.getSnapshot().cloudOnly.map((c) => c.id)).toEqual(["c1"]);
+  });
+
+  it("after a conflict the local project takes the copy's title, and later pushes keep it", async () => {
+    const states = [state({ hash: H2 })];
+    const list = [cloudRow({ rev: 3 })];
+    const { local, cloud } = fakes(states, list);
+    local.projectBundle.mockImplementation(async () => bundleOf(states[0].title));
+    cloud.pushSynced.mockResolvedValueOnce({ id: "c2", rev: 1, conflict: true, original: "c1" } as never);
+    cloud.getSynced.mockImplementation(async (id: string) => ({ ...bundleOf(id === "c2" ? "Talk (copy)" : "Talk"), id, rev: id === "c2" ? 1 : 3 }));
+    local.importBundle.mockImplementation(async (body) => {
+      if (body.expect_hash !== states[0].hash) throw new EngineError(409, "bad_request", "changed");
+      Object.assign(states[0], { title: body.bundle.title, cloud_rev: body.bundle.rev, hash: H3, cloud_hash: H3 });
+      return { project: { id: "p1" } as never };
+    });
+    let edit: (pid: string) => void = () => undefined;
+    stop = startSync(local, cloud, signedIn, { edits: (fn) => ((edit = fn), () => undefined) });
+    await vi.advanceTimersByTimeAsync(0);
+    expect(states[0]).toMatchObject({ cloud_id: "c2", title: "Talk (copy)", cloud_rev: 1, hash: H3, cloud_hash: H3 });
+    list.push(cloudRow({ id: "c2", title: "Talk (copy)", rev: 1 }));
+    await vi.advanceTimersByTimeAsync(60_000);
+    expect(cloud.pushSynced).toHaveBeenCalledTimes(1); // in step: nothing to push
+    states[0].hash = H1; // the next local edit
+    edit("p1");
+    await vi.advanceTimersByTimeAsync(5_000);
+    expect(cloud.pushSynced).toHaveBeenCalledTimes(2);
+    expect(cloud.pushSynced).toHaveBeenLastCalledWith("c2", 1, bundleOf("Talk (copy)"));
+  });
+
+  it("an edit landing between the snapshot and the import is not overwritten: it goes down the conflict path", async () => {
+    const states = [state()];
+    const { local, cloud } = fakes(states, [cloudRow({ rev: 3 })]);
+    cloud.getSynced.mockImplementationOnce(async (id: string) => {
+      states[0].hash = H2; // edited here while the bundle was on its way
+      return { ...bundleOf(), id, rev: 3 };
+    });
+    local.importBundle.mockImplementation(async (body) => {
+      if (body.expect_hash !== states[0].hash) throw new EngineError(409, "bad_request", "changed");
+      return { project: { id: "p1" } as never };
+    });
+    cloud.pushSynced.mockResolvedValueOnce({ id: "c2", rev: 1, conflict: true, original: "c1" } as never);
+    const toast = vi.fn();
+    stop = startSync(local, cloud, signedIn, { toast });
+    await vi.advanceTimersByTimeAsync(0);
+    expect(local.importBundle).toHaveBeenCalledTimes(1);
+    expect(states[0]).toMatchObject({ hash: H2, cloud_hash: H1, cloud_rev: 2 }); // refused: the edit stands
+    expect(cloud.pushSynced).not.toHaveBeenCalled();
+    await vi.advanceTimersByTimeAsync(60_000);
+    expect(cloud.pushSynced).toHaveBeenCalledWith("c1", 2, bundleOf());
+    expect(toast).toHaveBeenCalledWith("Saved a copy: Talk (copy)");
+  });
+
+  it("a project removed on the website is uploaded again as a new one, once", async () => {
+    const states = [state({ hash: H2 })];
+    const { local, cloud } = fakes(states, []);
+    cloud.pushSynced.mockRejectedValueOnce(new EngineError(404, "not_found", "Not found"));
+    const toast = vi.fn();
+    stop = startSync(local, cloud, signedIn, { toast });
+    await vi.advanceTimersByTimeAsync(0);
+    expect(cloud.pushSynced).toHaveBeenCalledTimes(1);
+    expect(cloud.pushNew).toHaveBeenCalledWith(bundleOf());
+    expect(local.patchSyncSettings).toHaveBeenCalledWith("p1", { cloud_id: "cnew", cloud_rev: 1, cloud_hash: H2 });
+    expect(toast).toHaveBeenCalledWith("Talk was removed from the web, so it was uploaded again");
+    await vi.advanceTimersByTimeAsync(3 * 60_000);
+    expect(cloud.pushSynced).toHaveBeenCalledTimes(1);
+    expect(cloud.pushNew).toHaveBeenCalledTimes(1);
   });
 
   it("a toast goes to the sync store when no handler is given", async () => {
