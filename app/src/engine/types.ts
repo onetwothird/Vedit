@@ -54,9 +54,16 @@ export interface ProjectSettings {
   workdir?: string;
   proxy?: string;
   filmstrip?: string;
+  /** Sync (desktop): the cloud project this one is synced with, its revision and the bundle hash last synced. */
+  cloud_id?: string;
+  cloud_rev?: number;
+  cloud_hash?: string;
+  /** "Available on the web": the video is uploaded to the cloud too. */
+  web_video?: boolean;
+  title?: string;
 }
 
-export type JobKind = "analyze" | "export" | "model" | "story" | "zip";
+export type JobKind = "analyze" | "export" | "model" | "story" | "zip" | "sync";
 export type JobState = "queued" | "running" | "done" | "failed" | "cancelled";
 
 export interface AnalyzeResult {
@@ -483,4 +490,92 @@ export interface Engine {
   storyExports(sid: string): Promise<ExportLink[]>;
   /** Zips every exported file of the batch; the job's result carries the zip's 24 h link. */
   zipBatch(bid: string): Promise<Job>;
+}
+
+// ---- sync between the desktop app and the website ------------------------------------------------------------
+
+/** A project as one portable JSON document (scripts/sync_bundle.py); paths in it are `source:`/`asset:`/`local:`. */
+export interface ProjectBundle {
+  format: number;
+  id: string | null;
+  rev: number;
+  title: string;
+  project: Record<string, unknown>;
+  files: Record<string, unknown>;
+  brand: Record<string, unknown> | null;
+  has_video_in_cloud: boolean;
+}
+
+/** GET /sync/projects/{id}: the bundle, with a link to the video (at least 6 h left) when it is in the cloud. */
+export interface CloudBundle extends ProjectBundle {
+  id: string;
+  video_url?: string;
+}
+
+/** One row of the local engine's GET /projects/sync-state (desktop). `hash` is null when it cannot be exported. */
+export interface SyncState {
+  id: string;
+  title: string;
+  cloud_id: string | null;
+  cloud_rev: number;
+  cloud_hash: string | null;
+  hash: string | null;
+  web_video: boolean;
+  has_source: boolean;
+  source_name: string;
+  size: number;
+  content_type: string;
+}
+
+export interface SyncSettingsPatch {
+  cloud_id?: string;
+  cloud_rev?: number;
+  cloud_hash?: string;
+  web_video?: boolean;
+}
+
+/** POST /projects/import-bundle: the project at once, or the job downloading its video first (kind "sync"). */
+export interface ImportBundleResult {
+  project?: Project;
+  job?: Job;
+}
+
+/** One row of the cloud's GET /sync/projects. */
+export interface CloudProject {
+  id: string;
+  title: string;
+  rev: number;
+  updated: string;
+  has_video_in_cloud: boolean;
+  expired: boolean;
+}
+
+/** PUT /sync/projects/{id}: a stale base_rev keeps the push as a new project ("<title> (copy)"). */
+export interface PushResult {
+  id: string;
+  rev: number;
+  conflict?: boolean;
+  original?: string;
+}
+
+/** The local engine's sync routes (desktop only). */
+export interface LocalSyncApi {
+  syncState(): Promise<SyncState[]>;
+  projectBundle(pid: string): Promise<ProjectBundle>;
+  importBundle(body: { bundle: ProjectBundle; video_url?: string }): Promise<ImportBundleResult>;
+  /** Streams the project's video to a presigned PUT URL, as a job of kind "sync". */
+  publishVideo(pid: string, url: string): Promise<Job>;
+  patchSyncSettings(pid: string, patch: SyncSettingsPatch): Promise<SyncState>;
+  getJob(id: string): Promise<Job>;
+}
+
+/** The cloud engine's sync routes, reached from the desktop app at VITE_CLOUD_URL. */
+export interface CloudApi {
+  listSynced(): Promise<CloudProject[]>;
+  getSynced(id: string): Promise<CloudBundle>;
+  pushSynced(id: string, baseRev: number, bundle: ProjectBundle): Promise<PushResult>;
+  pushNew(bundle: ProjectBundle): Promise<PushResult>;
+  attachVideo(id: string, uploadKey: string): Promise<CloudProject>;
+  deleteVideo(id: string): Promise<CloudProject>;
+  createUpload(body: UploadRequest): Promise<UploadTicket>;
 }

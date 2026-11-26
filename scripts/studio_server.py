@@ -7,6 +7,7 @@ tests) are allowed. Error bodies are {"detail": str, "code": str}.
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import dataclasses
 import hmac
 import json
@@ -20,6 +21,7 @@ import threading
 import uuid
 from contextlib import asynccontextmanager
 from datetime import datetime, timezone
+from urllib.parse import urlsplit
 from pathlib import Path
 from typing import Literal, Optional
 
@@ -30,12 +32,13 @@ from fastapi import Body, FastAPI, Request, WebSocket  # noqa: E402
 from fastapi.exceptions import RequestValidationError  # noqa: E402
 from fastapi.middleware.cors import CORSMiddleware  # noqa: E402
 from fastapi.responses import FileResponse, JSONResponse  # noqa: E402
-from pydantic import BaseModel, Field  # noqa: E402
+from pydantic import BaseModel, ConfigDict, Field, StrictBool, StrictInt  # noqa: E402
 from starlette.exceptions import HTTPException as StarletteHTTPException  # noqa: E402
 
 import accel  # noqa: E402
 import cloud_projects  # noqa: E402
 import sync_bundle  # noqa: E402
+from sync_transfer import check_url  # noqa: E402
 import broll  # noqa: E402
 import models  # noqa: E402
 import vedit  # noqa: E402
@@ -64,6 +67,24 @@ OVERLAP_DROP = 0.5  # a new highlight overlapping a kept clip by more than this 
 
 
 # ---- request bodies -------------------------------------------------------------------------------------------
+
+class SyncSettingsBody(BaseModel):
+    """PATCH /projects/{pid}/settings (desktop): what the sync client records about a project's cloud copy."""
+    model_config = ConfigDict(extra="forbid")
+    cloud_id: Optional[str] = Field(default=None, pattern=r"^[A-Za-z0-9_-]{1,64}$")
+    cloud_rev: Optional[StrictInt] = Field(default=None, ge=0)
+    cloud_hash: Optional[str] = Field(default=None, pattern=r"^[0-9a-f]{64}$")  # the bundle_hash last synced
+    web_video: Optional[StrictBool] = None
+
+
+class ImportBundleBody(BaseModel):
+    bundle: dict
+    video_url: Optional[str] = None  # https:// only: the cloud's presigned link to the project's video
+
+
+class PublishBody(BaseModel):
+    url: str  # https:// only: a presigned PUT URL from the cloud's POST /uploads
+
 
 class NewProject(BaseModel):
     source: Optional[str] = None  # desktop: a path on this computer
@@ -396,6 +417,7 @@ class Engine:
         self.published: dict[str, list[dict]] = {}
         self.batch_runs: dict[str, dict] = {}
         self.cloud_hooks = None
+        self.sync_parts: dict[str, Path] = {}  # desktop: a sync download's partial file, removed when its job ends
         self._recover_interrupted()
         if job_queue is not None:
             self.queue = job_queue
@@ -583,6 +605,11 @@ class Engine:
                                           if self.cloud is not None else self._finish_story(raw))
                     elif raw.kind == "zip":
                         self._set_overlay(raw.id, result={"files": self._take_published(raw.id)})
+                    elif raw.kind == "sync":  # a finished download was renamed; a failed or cancelled one is removed
+                        with self._meta_lock:
+                            part = self.sync_parts.pop(raw.id, None)
+                        if part is not None:
+                            part.unlink(missing_ok=True)
                 except Exception as e:  # noqa: BLE001 - post-processing failure fails the job, not the server
                     self._set_overlay(raw.id, state="failed", error=f"post-processing failed: {e}")
                 if self.cloud is not None:  # a failed job (even one that failed after its steps) gives its minutes back
@@ -593,7 +620,7 @@ class Engine:
             with self._meta_lock:
                 job = self._overlaid(raw)
                 self._jobs[job.id] = job
-            if p is not None:
+            if p is not None and raw.kind != "sync":  # a transfer is not the project's analysis or export
                 p.last_job = _job_dict(job)
                 auto = p.settings.get("auto_export")
                 if raw.kind == "analyze" and job.state == "done" and isinstance(auto, dict) and not auto.get("job") \
@@ -908,6 +935,51 @@ def default_story_dir() -> Path:
     return Path.home() / "Videos" / "Vedit"
 
 
+VIDEO_TYPES = {".mp4": "video/mp4", ".mov": "video/quicktime", ".m4v": "video/x-m4v", ".webm": "video/webm",
+               ".mkv": "video/x-matroska"}  # the same as the app's upload.ts: what the cloud signs an upload for
+_UNSAFE_NAME = re.compile(r'[<>:"/\\|?*\x00-\x1f\x7f]')
+_RESERVED = re.compile(r"^(con|prn|aux|nul|com[0-9]|lpt[0-9])$", re.IGNORECASE)
+
+
+def _sync_row(p: Project) -> dict:
+    """What the desktop sync client needs to know of a project: its cloud copy, and the hash of what it says now."""
+    try:
+        digest = sync_bundle.bundle_hash(sync_bundle.export_bundle(p))
+    except (OSError, ValueError):
+        digest = None  # too large or unreadable: not synced
+    src = Path(p.source)
+    has = src.is_file()
+    return {"id": p.id, "title": str(p.settings.get("title") or src.stem), "cloud_id": p.settings.get("cloud_id"),
+            "cloud_rev": sync_bundle.rev_of(p), "cloud_hash": p.settings.get("cloud_hash"), "hash": digest,
+            "web_video": bool(p.settings.get("web_video", False)), "has_source": has, "source_name": src.name,
+            "size": src.stat().st_size if has else 0,
+            "content_type": VIDEO_TYPES.get(src.suffix.lower(), "application/octet-stream")}
+
+
+def cloud_video_path(title, url: str) -> Path:
+    """A new file in Videos/Vedit/Cloud for a downloaded cloud video, named after the project. Nothing of the URL
+    but a known video extension is used; the name is reserved (its .part file exists) when this returns."""
+    folder = default_story_dir() / "Cloud"
+    folder.mkdir(parents=True, exist_ok=True)
+    ext = Path(urlsplit(url).path).suffix.lower()
+    ext = ext if ext in VIDEO_TYPES else ".mp4"
+    name = " ".join(_UNSAFE_NAME.sub("", str(title or "")).split())
+    name = re.sub(r"\.{2,}", ".", name).strip(" .")[:80].strip(" .")
+    if not name or _RESERVED.match(name.split(".")[0]):
+        name = f"video {name}".strip()
+    for i in range(1, 10_000):
+        dest = folder / f"{name}{f' ({i})' if i > 1 else ''}{ext}"
+        part = dest.with_name(dest.name + ".part")
+        if dest.exists():
+            continue
+        try:
+            part.touch(exist_ok=False)
+        except FileExistsError:
+            continue
+        return dest
+    raise ValueError("Too many videos with this name in the Cloud folder")
+
+
 def _batch_path(bid: str) -> Path:
     if not re.fullmatch(r"b[0-9a-f]{12}", bid or ""):
         raise NotFound(f"batch {bid}")
@@ -1191,6 +1263,11 @@ def create_app(token: str | None, queue: JobQueue | None = None, cloud=None) -> 
     @app.get("/projects/recent")
     def recent():
         return [_project_dict(p) for p in list_recent()]
+
+    if cloud is None:  # desktop only, before /projects/{pid}: every project, for the sync client to compare
+        @app.get("/projects/sync-state")
+        def sync_state():
+            return [_sync_row(p) for p in list_recent(limit=sys.maxsize)]
 
     @app.post("/projects")
     def new_project(body: NewProject):
@@ -1552,6 +1629,70 @@ def create_app(token: str | None, queue: JobQueue | None = None, cloud=None) -> 
             for t in tasks:
                 t.cancel()
             await asyncio.gather(*tasks, return_exceptions=True)
+
+    if cloud is None:  # desktop only: the sync client's side of the engine (the cloud has /sync/projects instead)
+        @app.get("/projects/{pid}/bundle")
+        def project_bundle(pid: str):
+            return sync_bundle.export_bundle(_project(pid))
+
+        @app.patch("/projects/{pid}/settings")
+        def patch_sync_settings(pid: str, body: SyncSettingsBody):
+            with engine.lock_for(pid):
+                p = _project(pid)
+                for key in sorted(body.model_fields_set):
+                    value = getattr(body, key)
+                    if value is None:
+                        raise ValueError(f"{key} cannot be empty")
+                    p.settings[key] = value
+                save_project(p)
+            return _sync_row(p)
+
+        def import_now(bundle: dict, source: Path | None) -> Project:
+            """import_bundle, in place when a project here is linked to the bundle's id (its `local:` references
+            mapped back to its files), then recorded as in step with the cloud."""
+            linked = sync_bundle.find_linked(bundle.get("id") if isinstance(bundle.get("id"), str) else None)
+            with engine.lock_for(linked.id) if linked is not None else contextlib.nullcontext():
+                local = sync_bundle.local_paths(linked) if linked is not None else None
+                p = sync_bundle.import_bundle(bundle, source, local)
+                p.settings["cloud_hash"] = sync_bundle.bundle_hash(sync_bundle.export_bundle(p))
+                save_project(p)
+            return p
+
+        @app.post("/projects/import-bundle")
+        def import_project_bundle(body: ImportBundleBody):
+            """{bundle, video_url?} -> {project} at once, or {job} (kind sync) that downloads the video into
+            Videos/Vedit/Cloud first. A project already linked here is updated in place and never downloads."""
+            bundle = body.bundle
+            sync_bundle.check_bundle(bundle)
+            url = check_url(body.video_url) if body.video_url is not None else None
+            linked = sync_bundle.find_linked(bundle.get("id") if isinstance(bundle.get("id"), str) else None)
+            if url is None or linked is not None:
+                return {"project": _project_dict(import_now(bundle, None))}
+            dest = cloud_video_path(bundle.get("title"), url)
+            part = dest.with_name(dest.name + ".part")
+            jid = uuid.uuid4().hex[:12]
+
+            def finish() -> None:
+                engine._set_overlay(jid, result={"project": import_now(bundle, dest).id})
+
+            with engine._meta_lock:
+                engine.sync_parts[jid] = part
+            job = engine.submit("sync", "sync", [
+                ("download", py_cmd("sync_transfer.py", "get", str(part), str(dest)), 0.95, {"VEDIT_SYNC_URL": url}),
+                ("import", finish, 0.05)], job_id=jid)
+            return {"job": _job_dict(job)}
+
+        @app.post("/projects/{pid}/publish")
+        def publish_video(pid: str, body: PublishBody):
+            """Streams the project's video to a presigned PUT URL as a job (kind sync). The file is only read."""
+            url = check_url(body.url)
+            p = _project(pid)
+            src = Path(p.source)
+            if not src.is_file():
+                raise ValueError("This project's video is not on this computer")
+            ct = VIDEO_TYPES.get(src.suffix.lower(), "application/octet-stream")
+            return _job_dict(engine.submit(pid, "sync", [
+                ("upload", py_cmd("sync_transfer.py", "put", str(src), ct), 1.0, {"VEDIT_SYNC_URL": url})]))
 
     if cloud is not None:
         import cloud_sync  # lazy, like cloud_assets: the desktop engine has no sync routes

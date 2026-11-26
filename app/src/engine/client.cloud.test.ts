@@ -234,3 +234,42 @@ describe("cloud events", () => {
     expect(sockets[1].url).toContain("token=tok-3");
   });
 });
+
+describe("desktop sync clients", () => {
+  it("there is no cloud API without VITE_CLOUD_URL", async () => {
+    vi.stubEnv("VITE_CLOUD_URL", "");
+    const { createCloudApi } = await import("./client");
+    expect(createCloudApi()).toBeNull();
+  });
+
+  it("the cloud API reaches VITE_CLOUD_URL with the current access token on every request", async () => {
+    vi.stubEnv("VITE_ENGINE", "");
+    vi.stubEnv("VITE_CLOUD_URL", "https://me--vedit.modal.run/");
+    const fetchImpl = vi.fn(async () => json({ id: "c1", rev: 2 }));
+    const { createCloudApi } = await import("./client");
+    const cloud = createCloudApi(fetchImpl as unknown as typeof fetch)!;
+    await cloud.pushSynced("c1", 1, { format: 1 } as never);
+    session.token = "tok-2";
+    await cloud.listSynced();
+    const [url, init] = fetchImpl.mock.calls[0] as unknown as [string, RequestInit];
+    expect(url).toBe("https://me--vedit.modal.run/sync/projects/c1");
+    expect(init.method).toBe("PUT");
+    expect(JSON.parse(init.body as string)).toEqual({ base_rev: 1, bundle: { format: 1 } });
+    expect(authOf(fetchImpl, 0)).toBe("Bearer tok-1");
+    expect(authOf(fetchImpl, 1)).toBe("Bearer tok-2");
+    session.token = null;
+    await expect(cloud.listSynced()).rejects.toMatchObject({ code: "signin" });
+    expect(fetchImpl).toHaveBeenCalledTimes(2); // signed out: no request
+  });
+
+  it("a clip edit through the client is reported with its project id", async () => {
+    const fetchImpl = vi.fn(async () => json({}));
+    const onEdit = vi.fn();
+    const { createClient } = await import("./client");
+    const c = createClient({ getInfo: async () => ({ port: 1, token: "t" }), fetchImpl: fetchImpl as unknown as typeof fetch, onEdit });
+    await c.patchClip("p1", "h01", { op: "trim", start: 0, end: 1 } as never);
+    await c.setKept("p1", "h01", false);
+    await c.getProject("p1");
+    expect(onEdit.mock.calls).toEqual([["p1"], ["p1"]]);
+  });
+});

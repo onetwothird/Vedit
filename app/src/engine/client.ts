@@ -2,8 +2,8 @@
 // The token and any AI key are never logged and never put into an error message.
 
 import type {
-  AiTestBody, AiTestResult, AnalyzeBody, Asset, Batch, BrollBody, BrollSuggestions, BatchBody, Brand, BuildStoryBody, Story, StoryBody, StoryVoice, ClipOp, ClipView, Doctor, Engine, EngineInfo, ErrorBody, ExportBody, ExportLink, FilmstripInfo, Health, Job, ModelStatus,
-  NewProjectBody, Project, Transcript, UploadTicket, Usage,
+  AiTestBody, AiTestResult, AnalyzeBody, Asset, Batch, BrollBody, BrollSuggestions, BatchBody, Brand, BuildStoryBody, Story, StoryBody, StoryVoice, ClipOp, ClipView, CloudApi, CloudBundle, CloudProject, Doctor, Engine, EngineInfo, ErrorBody, ExportBody, ExportLink, FilmstripInfo, Health, ImportBundleResult, Job, LocalSyncApi, ModelStatus,
+  NewProjectBody, Project, ProjectBundle, PushResult, SyncState, Transcript, UploadTicket, Usage,
 } from "./types";
 import { getAccessToken } from "../auth/accessToken";
 import { isCloud, isTauri } from "./flavor";
@@ -24,7 +24,13 @@ export interface ClientOptions {
   cacheInfo?: boolean;
   /** Called with every Job a route returns, so live-job stores can pick it up before the first event. */
   onJob?: (job: Job) => void;
+  /** Called after a route changed what a project's sync bundle holds (a clip edit), with the project id. */
+  onEdit?: (pid: string) => void;
 }
+
+/** Every route of an engine client: the app's own, the local engine's sync routes and the cloud's sync routes
+    (each engine answers only its own; the others are 404 there). */
+export type Client = Engine & LocalSyncApi & CloudApi;
 
 const enc = encodeURIComponent;
 
@@ -33,7 +39,7 @@ function isErrorBody(x: unknown): x is ErrorBody {
     && typeof (x as ErrorBody).code === "string";
 }
 
-export function createClient(opts: ClientOptions): Engine {
+export function createClient(opts: ClientOptions): Client {
   const doFetch: typeof fetch = opts.fetchImpl ?? ((input, init) => globalThis.fetch(input, init));
   let current: Promise<EngineInfo> | null = null;
 
@@ -98,6 +104,12 @@ export function createClient(opts: ClientOptions): Engine {
     return j;
   };
 
+  const edited = async <T>(pid: string, p: Promise<T>): Promise<T> => {
+    const r = await p;
+    opts.onEdit?.(pid);
+    return r;
+  };
+
   return {
     health: () => request<Health>("GET", "/health"),
     doctor: () => request<Doctor>("GET", "/doctor"),
@@ -108,8 +120,8 @@ export function createClient(opts: ClientOptions): Engine {
     transcript: (pid) => request<Transcript>("GET", `/projects/${enc(pid)}/transcript`),
     filmstrip: (pid) => request<FilmstripInfo>("GET", `/projects/${enc(pid)}/filmstrip`),
     clip: (pid, hid) => request<ClipView>("GET", `/projects/${enc(pid)}/clips/${enc(hid)}`),
-    patchClip: (pid, hid, op: ClipOp) => request<ClipView>("PATCH", `/projects/${enc(pid)}/clips/${enc(hid)}`, op),
-    setKept: (pid, hid, kept) => request<Project>("PUT", `/projects/${enc(pid)}/clips/${enc(hid)}/kept`, { kept }),
+    patchClip: (pid, hid, op: ClipOp) => edited(pid, request<ClipView>("PATCH", `/projects/${enc(pid)}/clips/${enc(hid)}`, op)),
+    setKept: (pid, hid, kept) => edited(pid, request<Project>("PUT", `/projects/${enc(pid)}/clips/${enc(hid)}/kept`, { kept })),
     suggestBroll: (pid, hid, body: BrollBody) => request<BrollSuggestions>("POST", `/projects/${enc(pid)}/clips/${enc(hid)}/broll`, body),
     exportClips: (pid, body: ExportBody) => job(request<Job>("POST", `/projects/${enc(pid)}/export`, body)),
     getJob: (id) => job(request<Job>("GET", `/jobs/${enc(id)}`)),
@@ -143,6 +155,23 @@ export function createClient(opts: ClientOptions): Engine {
     listAssets: (kind) => request<Asset[]>("GET", `/assets${kind ? `?kind=${enc(kind)}` : ""}`),
     storyExports: (sid) => request<ExportLink[]>("GET", `/stories/${enc(sid)}/exports`),
     zipBatch: (bid) => job(request<Job>("POST", `/batches/${enc(bid)}/zip`)),
+    // local engine (desktop): sync
+    syncState: () => request<SyncState[]>("GET", "/projects/sync-state"),
+    projectBundle: (pid) => request<ProjectBundle>("GET", `/projects/${enc(pid)}/bundle`),
+    importBundle: async (body) => {
+      const r = await request<ImportBundleResult>("POST", "/projects/import-bundle", body);
+      if (r.job) opts.onJob?.(r.job);
+      return r;
+    },
+    publishVideo: (pid, url) => job(request<Job>("POST", `/projects/${enc(pid)}/publish`, { url })),
+    patchSyncSettings: (pid, patch) => request<SyncState>("PATCH", `/projects/${enc(pid)}/settings`, patch),
+    // cloud engine: sync
+    listSynced: () => request<CloudProject[]>("GET", "/sync/projects"),
+    getSynced: (id) => request<CloudBundle>("GET", `/sync/projects/${enc(id)}`),
+    pushSynced: (id, baseRev, bundle) => request<PushResult>("PUT", `/sync/projects/${enc(id)}`, { base_rev: baseRev, bundle }),
+    pushNew: (bundle) => request<PushResult>("PUT", "/sync/projects/new", { bundle }),
+    attachVideo: (id, uploadKey) => request<CloudProject>("POST", `/sync/projects/${enc(id)}/video`, { upload_key: uploadKey }),
+    deleteVideo: (id) => request<CloudProject>("DELETE", `/sync/projects/${enc(id)}/video`),
   };
 }
 
@@ -202,6 +231,39 @@ export function onJobResult(fn: (job: Job) => void): () => void {
   return () => void jobListeners.delete(fn);
 }
 
-export const engine: Engine = isMock()
-  ? mockEngine
-  : createClient({ getInfo: fetchEngineInfo, onJob: (j) => jobListeners.forEach((fn) => fn(j)) });
+const editListeners = new Set<(pid: string) => void>();
+
+/** Subscribe to clip edits made through the default engine (the sync client pushes the project shortly after). */
+export function onProjectEdited(fn: (pid: string) => void): () => void {
+  editListeners.add(fn);
+  return () => void editListeners.delete(fn);
+}
+
+const realEngine: Client | null = isMock()
+  ? null
+  : createClient({
+    getInfo: fetchEngineInfo,
+    onJob: (j) => jobListeners.forEach((fn) => fn(j)),
+    onEdit: (pid) => editListeners.forEach((fn) => fn(pid)),
+  });
+
+export const engine: Engine = realEngine ?? mockEngine;
+
+/** The local engine's sync routes; null with the mock engine. */
+export const localSync: LocalSyncApi | null = realEngine;
+
+/** The cloud engine's sync routes for the desktop app, at VITE_CLOUD_URL with the signed-in user's access token
+    (a fresh one per request). Null when VITE_CLOUD_URL is not set: then there is no sync at all. */
+export function createCloudApi(fetchImpl?: typeof fetch): CloudApi | null {
+  const base = ((import.meta.env.VITE_CLOUD_URL as string | undefined) ?? "").trim().replace(/\/+$/, "");
+  if (!base) return null;
+  return createClient({
+    cacheInfo: false,
+    fetchImpl,
+    getInfo: async () => {
+      const token = await getAccessToken();
+      if (!token) throw new EngineError(401, "signin", "sign in to sync");
+      return { base, token, port: 0 };
+    },
+  });
+}

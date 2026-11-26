@@ -5,6 +5,7 @@ source) writes one back into the current home (a new project, or the one whose s
 """
 from __future__ import annotations
 
+import hashlib
 import json
 import re
 import secrets
@@ -104,6 +105,57 @@ def _portable(node, key: str = "", pathy: bool = False, in_sources: bool = False
     if isinstance(node, str) and _is_abs(node, pathy, key):
         return SOURCE if in_sources or key == "source" else LOCAL + _basename(node)
     return node
+
+
+def _collect_local(node, out: dict, key: str = "", pathy: bool = False, in_sources: bool = False) -> None:
+    """Walks `node` as _portable does: every absolute path that would export as "local:<basename>" is recorded as
+    out["local:<basename>"] = path (the first one of a name wins)."""
+    in_sources = in_sources or key == "sources"
+    pathy = pathy or key in _PATHY
+    if isinstance(node, dict):
+        for k, v in node.items():
+            _collect_local(v, out, k, pathy, in_sources)
+    elif isinstance(node, list):
+        for v in node:
+            _collect_local(v, out, key, pathy, in_sources)
+    elif isinstance(node, str) and _is_abs(node, pathy, key) and not (in_sources or key == "source"):
+        out.setdefault(LOCAL + _basename(node), node)
+
+
+def local_paths(p: Project) -> dict[str, str]:
+    """"local:<basename>" -> the path this project's files (and the brand kit) name for it now. Importing a bundle
+    in place maps each such reference back, so a b-roll clip edited on the website still finds its file here."""
+    out: dict[str, str] = {}
+    wd = workdir_for(p.source)
+    files = [f for f in sorted(wd.iterdir()) if _safe_name(f.name)] if wd.is_dir() else []
+    for f in files + [_brand_file()]:
+        if not f.is_file():
+            continue
+        try:
+            content = load_json(f)
+        except ValueError:
+            continue
+        out_ = content.get("output") if isinstance(content, dict) else None
+        if isinstance(out_, dict):  # a render target is not a file the edit uses
+            content = {**content, "output": {k: v for k, v in out_.items() if k != "path"}}
+        _collect_local(content, out)
+    return out
+
+
+def _localize(node, mapping: dict[str, str]):
+    if isinstance(node, dict):
+        return {k: _localize(v, mapping) for k, v in node.items()}
+    if isinstance(node, list):
+        return [_localize(v, mapping) for v in node]
+    return mapping.get(node, node) if isinstance(node, str) and node.startswith(LOCAL) else node
+
+
+def bundle_hash(bundle: dict) -> str:
+    """What a bundle says, as a hash: the same edits give the same hash wherever they were made. The id and rev
+    are left out (they name the cloud copy, not the content)."""
+    body = {k: v for k, v in bundle.items() if k not in ("id", "rev", "video_url")}
+    text = json.dumps(body, sort_keys=True, ensure_ascii=False, separators=(",", ":"))
+    return hashlib.sha256(text.encode("utf-8")).hexdigest()
 
 
 def _resolve_source(node, source: str):
@@ -233,16 +285,31 @@ def _validate(bundle) -> tuple[dict, dict, dict]:
     return doc, files, brand
 
 
+def check_bundle(bundle) -> None:
+    """ValueError unless `bundle` is one import_bundle would accept (checked before a download starts)."""
+    _validate(bundle)
+    if bundle.get("id") is not None and not isinstance(bundle.get("id"), str):
+        raise ValueError("Project bundle id must be a string")
+
+
 def _existing(cloud_id) -> Project | None:
     if not cloud_id:
         return None
     return next((q for q in list_recent(limit=10**9) if q.settings.get("cloud_id") == cloud_id), None)
 
 
-def import_bundle(bundle: dict, source: Path | None) -> Project:
+def find_linked(cloud_id) -> Project | None:
+    """The project here that is synced with cloud project `cloud_id`, if any."""
+    return _existing(cloud_id)
+
+
+def import_bundle(bundle: dict, source: Path | None, local: dict[str, str] | None = None) -> Project:
     """Write `bundle` into the current home. An existing project with the same cloud id is updated in place (its
-    own source stays); otherwise a new project is made for `source`, or for a placeholder under work/ without one."""
+    own source stays); otherwise a new project is made for `source`, or for a placeholder under work/ without one.
+    `local` (see local_paths) maps "local:<basename>" references back to files on this computer; any other stays."""
     doc, files, brand = _validate(bundle)
+    if local:
+        doc, files = _localize(doc, local), _localize(files, local)
     cloud_id, rev = bundle.get("id"), bundle.get("rev", 0)
     if cloud_id is not None and not isinstance(cloud_id, str):
         raise ValueError("Project bundle id must be a string")

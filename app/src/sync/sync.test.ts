@@ -1,0 +1,279 @@
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { EngineError } from "../engine/types";
+import type { CloudApi, CloudBundle, CloudProject, Job, LocalSyncApi, ProjectBundle, SyncState } from "../engine/types";
+import { openCloudProject, setWebVideo, startSync, syncStore } from "./sync";
+
+const H1 = "a".repeat(64);
+const H2 = "b".repeat(64);
+const H3 = "c".repeat(64);
+
+const state = (over: Partial<SyncState> = {}): SyncState => ({
+  id: "p1", title: "Talk", cloud_id: "c1", cloud_rev: 2, cloud_hash: H1, hash: H1, web_video: false,
+  has_source: true, source_name: "talk.mp4", size: 1234, content_type: "video/mp4", ...over,
+});
+
+const bundleOf = (title = "Talk"): ProjectBundle => ({
+  format: 1, id: null, rev: 0, title, project: {}, files: {}, brand: null, has_video_in_cloud: false,
+});
+
+const cloudRow = (over: Partial<CloudProject> = {}): CloudProject => ({
+  id: "c1", title: "Talk", rev: 2, updated: "2026-11-26T00:00:00Z", has_video_in_cloud: false, expired: false, ...over,
+});
+
+const doneJob = (id: string): Job => ({ id, project_id: "p1", kind: "sync", state: "done", stage: "", pct: 100, message: "", error: null, result: null });
+
+function fakes(states: SyncState[], list: CloudProject[]) {
+  const local = {
+    syncState: vi.fn(async () => states.map((s) => ({ ...s }))),
+    projectBundle: vi.fn(async () => bundleOf()),
+    importBundle: vi.fn(async (_body: { bundle: ProjectBundle; video_url?: string }) => ({ project: { id: "p9" } as never })),
+    publishVideo: vi.fn(async () => ({ ...doneJob("j1"), state: "running" as const })),
+    patchSyncSettings: vi.fn(async (pid: string, patch: Record<string, unknown>) => {
+      const s = states.find((x) => x.id === pid)!;
+      Object.assign(s, patch);
+      if ("web_video" in patch) s.hash = H3; // web_video is part of the bundle
+      return { ...s };
+    }),
+    getJob: vi.fn(async (id: string) => doneJob(id)),
+  } satisfies LocalSyncApi;
+  const cloud = {
+    listSynced: vi.fn(async () => list.map((c) => ({ ...c }))),
+    getSynced: vi.fn(async (id: string): Promise<CloudBundle> => ({ ...bundleOf(), id, rev: 3, video_url: "https://r2.example/v.mp4?sig" })),
+    pushSynced: vi.fn(async (id: string, baseRev: number) => ({ id, rev: baseRev + 1 })),
+    pushNew: vi.fn(async () => ({ id: "cnew", rev: 1 })),
+    attachVideo: vi.fn(async (id: string) => cloudRow({ id, rev: 3, has_video_in_cloud: true })),
+    deleteVideo: vi.fn(async (id: string) => cloudRow({ id, rev: 3 })),
+    createUpload: vi.fn(async () => ({ upload_key: "uploads/k1", url: "https://r2.example/put?sig" })),
+  } satisfies CloudApi;
+  return { local, cloud };
+}
+
+const calls = (o: Record<string, { mock: { calls: unknown[] } }>): number =>
+  Object.values(o).reduce((n, f) => n + f.mock.calls.length, 0);
+
+let stop: (() => void) | null = null;
+const signedIn = async () => "tok";
+
+beforeEach(() => {
+  vi.useFakeTimers();
+});
+
+afterEach(() => {
+  stop?.();
+  stop = null;
+  vi.useRealTimers();
+});
+
+describe("startSync", () => {
+  it("without a cloud URL is a no-op", async () => {
+    const { local } = fakes([state()], []);
+    stop = startSync(local, null, signedIn);
+    await vi.advanceTimersByTimeAsync(5 * 60_000);
+    expect(calls(local)).toBe(0);
+  });
+
+  it("signed out makes no requests, and starts on sign-in", async () => {
+    const { local, cloud } = fakes([state()], [cloudRow()]);
+    let token: string | null = null;
+    let signIn: () => void = () => undefined;
+    stop = startSync(local, cloud, async () => token, { signIns: (fn) => ((signIn = fn), () => undefined) });
+    await vi.advanceTimersByTimeAsync(3 * 60_000);
+    expect(calls(local) + calls(cloud)).toBe(0);
+    token = "tok";
+    signIn();
+    await vi.advanceTimersByTimeAsync(0);
+    expect(cloud.listSynced).toHaveBeenCalledTimes(1);
+  });
+
+  it("pulls the list on start and every 60 s", async () => {
+    const { local, cloud } = fakes([state()], [cloudRow()]);
+    stop = startSync(local, cloud, signedIn);
+    await vi.advanceTimersByTimeAsync(0);
+    expect(cloud.listSynced).toHaveBeenCalledTimes(1);
+    await vi.advanceTimersByTimeAsync(59_000);
+    expect(cloud.listSynced).toHaveBeenCalledTimes(1);
+    await vi.advanceTimersByTimeAsync(1_000);
+    expect(cloud.listSynced).toHaveBeenCalledTimes(2);
+    await vi.advanceTimersByTimeAsync(60_000);
+    expect(cloud.listSynced).toHaveBeenCalledTimes(3);
+    stop();
+    stop = null;
+    await vi.advanceTimersByTimeAsync(5 * 60_000);
+    expect(cloud.listSynced).toHaveBeenCalledTimes(3);
+  });
+
+  it("does not push a project whose bundle hash is unchanged", async () => {
+    const { local, cloud } = fakes([state()], [cloudRow()]);
+    stop = startSync(local, cloud, signedIn);
+    await vi.advanceTimersByTimeAsync(3 * 60_000);
+    expect(cloud.pushSynced).not.toHaveBeenCalled();
+    expect(cloud.pushNew).not.toHaveBeenCalled();
+    expect(local.projectBundle).not.toHaveBeenCalled();
+  });
+
+  it("pushes an edited project 5 s after its last edit, once", async () => {
+    const states = [state()];
+    const { local, cloud } = fakes(states, [cloudRow()]);
+    let edit: (pid: string) => void = () => undefined;
+    stop = startSync(local, cloud, signedIn, { edits: (fn) => ((edit = fn), () => undefined) });
+    await vi.advanceTimersByTimeAsync(1_000); // the start cycle: nothing to do
+    states[0].hash = H2;
+    edit("p1");
+    await vi.advanceTimersByTimeAsync(3_000);
+    edit("p1");
+    await vi.advanceTimersByTimeAsync(3_000);
+    edit("p1");
+    await vi.advanceTimersByTimeAsync(4_900);
+    expect(cloud.pushSynced).not.toHaveBeenCalled();
+    await vi.advanceTimersByTimeAsync(100);
+    expect(cloud.pushSynced).toHaveBeenCalledTimes(1);
+    expect(cloud.pushSynced).toHaveBeenCalledWith("c1", 2, bundleOf());
+    expect(local.patchSyncSettings).toHaveBeenCalledWith("p1", { cloud_rev: 3, cloud_hash: H2 });
+    await vi.advanceTimersByTimeAsync(60_000); // the next cycle sees it clean
+    expect(cloud.pushSynced).toHaveBeenCalledTimes(1);
+  });
+
+  it("the 60 s cycle pushes what an edit signal missed, and a new project gets a cloud id", async () => {
+    const states = [state({ id: "p2", cloud_id: null, cloud_rev: 0, cloud_hash: null, hash: H2 })];
+    const { local, cloud } = fakes(states, []);
+    stop = startSync(local, cloud, signedIn);
+    await vi.advanceTimersByTimeAsync(0);
+    expect(cloud.pushNew).toHaveBeenCalledTimes(1);
+    expect(local.patchSyncSettings).toHaveBeenCalledWith("p2", { cloud_id: "cnew", cloud_rev: 1, cloud_hash: H2 });
+    await vi.advanceTimersByTimeAsync(60_000);
+    expect(cloud.pushNew).toHaveBeenCalledTimes(1);
+  });
+
+  it("imports a newer cloud revision in place when the local project is unchanged", async () => {
+    const { local, cloud } = fakes([state()], [cloudRow({ rev: 3 })]);
+    stop = startSync(local, cloud, signedIn);
+    await vi.advanceTimersByTimeAsync(0);
+    expect(cloud.getSynced).toHaveBeenCalledWith("c1");
+    const body = local.importBundle.mock.calls[0][0] as { bundle: CloudBundle; video_url?: string };
+    expect(body.video_url).toBeUndefined(); // the local video is there: nothing is downloaded
+    expect(body.bundle.id).toBe("c1");
+    expect("video_url" in body.bundle).toBe(false);
+    expect(cloud.pushSynced).not.toHaveBeenCalled();
+  });
+
+  it("both sides changed: the push is kept as a copy, the local project points at it, and a toast says so", async () => {
+    const states = [state({ hash: H2 })];
+    const { local, cloud } = fakes(states, [cloudRow({ rev: 3 })]);
+    cloud.pushSynced.mockResolvedValueOnce({ id: "c2", rev: 1, conflict: true, original: "c1" } as never);
+    const toast = vi.fn();
+    stop = startSync(local, cloud, signedIn, { toast });
+    await vi.advanceTimersByTimeAsync(0);
+    expect(cloud.pushSynced).toHaveBeenCalledWith("c1", 2, bundleOf());
+    expect(local.importBundle).not.toHaveBeenCalled(); // the local edits are never overwritten
+    expect(local.patchSyncSettings).toHaveBeenCalledWith("p1", { cloud_id: "c2", cloud_rev: 1, cloud_hash: H2 });
+    expect(toast).toHaveBeenCalledWith("Saved a copy: Talk (copy)");
+    // the original is now a cloud-only project
+    expect(syncStore.getSnapshot().cloudOnly.map((c) => c.id)).toEqual(["c1"]);
+  });
+
+  it("a toast goes to the sync store when no handler is given", async () => {
+    const { local, cloud } = fakes([state({ hash: H2 })], [cloudRow({ rev: 3 })]);
+    cloud.pushSynced.mockResolvedValueOnce({ id: "c2", rev: 1, conflict: true, original: "c1" } as never);
+    stop = startSync(local, cloud, signedIn);
+    await vi.advanceTimersByTimeAsync(0);
+    const toasts = syncStore.getSnapshot().toasts;
+    expect(toasts.map((t) => t.message)).toEqual(["Saved a copy: Talk (copy)"]);
+    syncStore.dismissToast(toasts[0].id);
+    expect(syncStore.getSnapshot().toasts).toEqual([]);
+  });
+
+  it("lists cloud projects that are not on this computer, without downloading them", async () => {
+    const { local, cloud } = fakes([state()], [cloudRow(), cloudRow({ id: "w1", title: "Web only", rev: 5 })]);
+    stop = startSync(local, cloud, signedIn);
+    await vi.advanceTimersByTimeAsync(0);
+    expect(syncStore.getSnapshot().cloudOnly.map((c) => c.id)).toEqual(["w1"]);
+    expect(cloud.getSynced).not.toHaveBeenCalled();
+    expect(local.importBundle).not.toHaveBeenCalled();
+  });
+
+  it("a busy project (409) stays dirty and is retried on the next cycle, without a toast", async () => {
+    const states = [state({ hash: H2 })];
+    const { local, cloud } = fakes(states, [cloudRow()]);
+    cloud.pushSynced.mockRejectedValueOnce(new EngineError(409, "bad_request", "This project is busy on the website. Try again in a moment."));
+    const toast = vi.fn();
+    stop = startSync(local, cloud, signedIn, { toast });
+    await vi.advanceTimersByTimeAsync(0);
+    expect(cloud.pushSynced).toHaveBeenCalledTimes(1);
+    expect(local.patchSyncSettings).not.toHaveBeenCalled();
+    await vi.advanceTimersByTimeAsync(60_000);
+    expect(cloud.pushSynced).toHaveBeenCalledTimes(2);
+    expect(local.patchSyncSettings).toHaveBeenCalledWith("p1", { cloud_rev: 3, cloud_hash: H2 });
+    expect(toast).not.toHaveBeenCalled();
+  });
+
+  it("network errors are retried quietly with backoff", async () => {
+    const { local, cloud } = fakes([state()], [cloudRow()]);
+    cloud.listSynced.mockRejectedValueOnce(new EngineError(0, "network", "could not reach the engine"));
+    cloud.listSynced.mockRejectedValueOnce(new EngineError(0, "network", "could not reach the engine"));
+    const toast = vi.fn();
+    stop = startSync(local, cloud, signedIn, { toast });
+    await vi.advanceTimersByTimeAsync(0);
+    expect(cloud.listSynced).toHaveBeenCalledTimes(1);
+    await vi.advanceTimersByTimeAsync(5_000); // first retry well before the 60 s cycle
+    expect(cloud.listSynced).toHaveBeenCalledTimes(2);
+    await vi.advanceTimersByTimeAsync(10_000);
+    expect(cloud.listSynced).toHaveBeenCalledTimes(2); // the second waits longer
+    await vi.advanceTimersByTimeAsync(5_000);
+    expect(cloud.listSynced).toHaveBeenCalledTimes(3);
+    expect(toast).not.toHaveBeenCalled();
+  });
+});
+
+describe("cloud projects and the web video", () => {
+  it("openCloudProject downloads the video once through the local engine", async () => {
+    const { local, cloud } = fakes([state()], [cloudRow(), cloudRow({ id: "w1", rev: 5 })]);
+    stop = startSync(local, cloud, signedIn);
+    await vi.advanceTimersByTimeAsync(0);
+    local.importBundle.mockResolvedValueOnce({ job: { ...doneJob("j7"), state: "running" } } as never);
+    const r = await openCloudProject("w1");
+    expect(r.job?.id).toBe("j7");
+    expect(cloud.getSynced).toHaveBeenCalledWith("w1");
+    const body = local.importBundle.mock.calls[0][0] as { bundle: CloudBundle; video_url?: string };
+    expect(body.video_url).toBe("https://r2.example/v.mp4?sig");
+    expect("video_url" in body.bundle).toBe(false);
+  });
+
+  it("setWebVideo(on) uploads through the local engine, attaches it and records it", async () => {
+    const states = [state()];
+    const { local, cloud } = fakes(states, [cloudRow()]);
+    stop = startSync(local, cloud, signedIn);
+    await vi.advanceTimersByTimeAsync(0);
+    const p = setWebVideo("p1", true);
+    await vi.advanceTimersByTimeAsync(2_000);
+    await p;
+    expect(cloud.createUpload).toHaveBeenCalledWith({ kind: "video", name: "talk.mp4", size: 1234, content_type: "video/mp4" });
+    expect(local.publishVideo).toHaveBeenCalledWith("p1", "https://r2.example/put?sig");
+    expect(cloud.attachVideo).toHaveBeenCalledWith("c1", "uploads/k1");
+    expect(local.patchSyncSettings).toHaveBeenCalledWith("p1", { web_video: true, cloud_rev: 3 });
+    expect(local.patchSyncSettings).toHaveBeenCalledWith("p1", { cloud_hash: H3 }); // in step: nothing to push
+    expect(states[0]).toMatchObject({ web_video: true, cloud_rev: 3, cloud_hash: H3, hash: H3 });
+  });
+
+  it("setWebVideo(on) surfaces the cloud's refusal", async () => {
+    const { local, cloud } = fakes([state()], [cloudRow()]);
+    cloud.attachVideo.mockRejectedValueOnce(new EngineError(400, "bad_request", "Videos can be up to 60 minutes"));
+    stop = startSync(local, cloud, signedIn);
+    await vi.advanceTimersByTimeAsync(0);
+    const p = setWebVideo("p1", true);
+    const seen = expect(p).rejects.toThrow("Videos can be up to 60 minutes");
+    await vi.advanceTimersByTimeAsync(2_000);
+    await seen;
+    expect(local.patchSyncSettings).not.toHaveBeenCalled();
+  });
+
+  it("setWebVideo(off) deletes the cloud video only", async () => {
+    const states = [state({ web_video: true })];
+    const { local, cloud } = fakes(states, [cloudRow()]);
+    stop = startSync(local, cloud, signedIn);
+    await vi.advanceTimersByTimeAsync(0);
+    await setWebVideo("p1", false);
+    expect(cloud.deleteVideo).toHaveBeenCalledWith("c1");
+    expect(local.patchSyncSettings).toHaveBeenCalledWith("p1", { web_video: false, cloud_rev: 3 });
+    expect(local.publishVideo).not.toHaveBeenCalled();
+  });
+});
