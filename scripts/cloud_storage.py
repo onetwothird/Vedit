@@ -27,6 +27,12 @@ def zip_key(uid: str, bid: str) -> str:
     return f"zips/{_part(uid)}/{_part(bid)}.zip"
 
 
+def sync_video_key(uid: str, pid: str) -> str:
+    """A cloud project's video published for the desktop app to download once. It lives with the zips: a 24 h
+    download, counted toward storage and removed by the retention sweep's zip rule after a day."""
+    return f"zips/{_part(uid)}/{_part(pid)}.video"
+
+
 def uploads_prefix(uid: str) -> str:
     return f"uploads/{_part(uid)}/"
 

@@ -35,6 +35,7 @@ from starlette.exceptions import HTTPException as StarletteHTTPException  # noqa
 
 import accel  # noqa: E402
 import cloud_projects  # noqa: E402
+import sync_bundle  # noqa: E402
 import broll  # noqa: E402
 import models  # noqa: E402
 import vedit  # noqa: E402
@@ -570,6 +571,8 @@ class Engine:
                 try:
                     if raw.kind == "analyze" and raw.state == "done" and p is not None:
                         self._set_overlay(raw.id, result=self._finish_analyze(p))
+                        if self.cloud is not None:  # new clips and highlights: the desktop must see a newer bundle
+                            sync_bundle.bump_rev(p)
                     elif raw.kind == "export":
                         result = self._finish_export(raw)
                         if self.cloud is not None:  # the downloads are the files the job published to R2
@@ -1207,9 +1210,16 @@ def create_app(token: str | None, queue: JobQueue | None = None, cloud=None) -> 
     def get_project(pid: str):
         return _project_dict(_project(pid))
 
+    def _video_project(pid: str) -> Project:
+        """A project for a route that reads its video. Cloud: one synced without its video is 409."""
+        p = _project(pid)
+        if cloud is not None:
+            cloud_projects.check_has_video(p)
+        return p
+
     @app.post("/projects/{pid}/analyze")
     def analyze(pid: str, body: Optional[AnalyzeBody] = None):
-        p = _project(pid)
+        p = _video_project(pid)
         model = LANG_MODEL[p.language][1]
         steps = analyze_steps(p, body)
         if cloud is not None:  # models live on the Volume and the step runs on a GPU: no model step, no CPU stand-in
@@ -1230,7 +1240,7 @@ def create_app(token: str | None, queue: JobQueue | None = None, cloud=None) -> 
 
     @app.get("/projects/{pid}/filmstrip")
     def filmstrip(pid: str):
-        wd = workdir_for(_project(pid).source)
+        wd = workdir_for(_video_project(pid).source)
         meta_path, image = wd / "filmstrip.json", wd / "filmstrip.jpg"
         if not meta_path.is_file() or not image.is_file():
             raise NoFilmstrip("this project has no thumbnails yet")
@@ -1239,12 +1249,12 @@ def create_app(token: str | None, queue: JobQueue | None = None, cloud=None) -> 
     @app.get("/projects/{pid}/media")
     def media(pid: str):
         """What the player plays: the proxy analysis made, else the source video."""
-        p = _project(pid)
+        p = _video_project(pid)
         return _media_response(Path(p.settings.get("proxy") or p.source))
 
     @app.get("/projects/{pid}/filmstrip.jpg")
     def filmstrip_image(pid: str):
-        return _media_response(workdir_for(_project(pid).source) / "filmstrip.jpg")
+        return _media_response(workdir_for(_video_project(pid).source) / "filmstrip.jpg")
 
     @app.get("/file")
     def broll_file(path: str):
@@ -1262,14 +1272,14 @@ def create_app(token: str | None, queue: JobQueue | None = None, cloud=None) -> 
 
     @app.get("/projects/{pid}/clips/{hid}")
     def get_clip(pid: str, hid: str):
-        p = _project(pid)
+        p = _video_project(pid)
         wd = workdir_for(p.source)
         return _clip_view(wd, _edl_path(wd, _find_clip(p, hid)))
 
     @app.patch("/projects/{pid}/clips/{hid}")
     def patch_clip(pid: str, hid: str, body: dict = Body(...)):
         with engine.lock_for(pid):
-            p = _project(pid)
+            p = _video_project(pid)  # the edit is validated against the video
             wd = workdir_for(p.source)
             path = _edl_path(wd, _find_clip(p, hid))
             new = _apply_op(load_json(path), body)
@@ -1283,7 +1293,7 @@ def create_app(token: str | None, queue: JobQueue | None = None, cloud=None) -> 
             finally:
                 tmp_path.unlink(missing_ok=True)
             if cloud is not None:
-                cloud_projects.touch(pid)
+                cloud_projects.touch(pid, edited=True)
             return view
 
     @app.post("/projects/{pid}/clips/{hid}/broll")
@@ -1291,7 +1301,7 @@ def create_app(token: str | None, queue: JobQueue | None = None, cloud=None) -> 
         """B-roll for the moments the clip names a thing or place, from the photos and videos in `folder`.
         Suggests only: the app places the ones the user accepts through the overlays patch.
         Cloud: from `assets`, the caller's uploaded files; a folder or a plain path is refused, nothing read."""
-        p = _project(pid)  # another user's project is not found, whatever the body says
+        p = _video_project(pid)  # another user's project is not found, whatever the body says
         named: list[tuple[str, str]] | None = None
         folder: Path | None = None
         if cloud is not None:
@@ -1325,6 +1335,7 @@ def create_app(token: str | None, queue: JobQueue | None = None, cloud=None) -> 
             _find_clip(p, hid).kept = body.kept
             if cloud is not None:
                 p.last_activity = cloud_projects.now_iso()
+                sync_bundle.bump_rev(p)
             save_project(p)
             return _project_dict(p)
 
@@ -1543,7 +1554,10 @@ def create_app(token: str | None, queue: JobQueue | None = None, cloud=None) -> 
             await asyncio.gather(*tasks, return_exceptions=True)
 
     if cloud is not None:
+        import cloud_sync  # lazy, like cloud_assets: the desktop engine has no sync routes
+
         app.include_router(cloud_assets.build_router(cloud))
+        app.include_router(cloud_sync.build_router(engine, cloud, lambda f: cached_probe(f)))
 
     return app
 

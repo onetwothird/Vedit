@@ -114,6 +114,30 @@ def _resolve_source(node, source: str):
     return source if node == SOURCE else node
 
 
+def _swap(node, old: str, new: str):
+    if isinstance(node, dict):
+        return {k: _swap(v, old, new) for k, v in node.items()}
+    if isinstance(node, list):
+        return [_swap(v, old, new) for v in node]
+    return new if node == old else node
+
+
+def repoint_source(p: Project, old: str) -> None:
+    """The project's source moved from `old` to p.source (a video attached with another extension): every bundle
+    file in its workdir that named the old path names the new one."""
+    wd = workdir_for(p.source)
+    for f in wd.iterdir():
+        if not _safe_name(f.name) or not f.is_file():
+            continue
+        try:
+            content = load_json(f)
+        except ValueError:
+            continue
+        moved = _swap(content, old, p.source)
+        if moved != content:
+            save_json(moved, f)
+
+
 def _brand_file() -> Path:
     from studio_server import brand_file  # lazy: studio_server imports this module's callers
 
@@ -158,6 +182,20 @@ def export_bundle(p: Project) -> dict:
               "files": files, "brand": brand, "has_video_in_cloud": bool(p.settings.get("web_video", False))}
     _sized(bundle)
     return bundle
+
+
+def rev_of(p: Project) -> int:
+    """The project's sync revision (0 until it is first synced or edited on the website)."""
+    try:
+        return int(p.settings.get("cloud_rev") or 0)
+    except (TypeError, ValueError):
+        return 0
+
+
+def bump_rev(p: Project) -> None:
+    """Every change the website makes to what export_bundle returns calls this, so the desktop sees it as newer.
+    The caller saves the project (under its lock)."""
+    p.settings["cloud_rev"] = rev_of(p) + 1
 
 
 def _validate(bundle) -> tuple[dict, dict, dict]:

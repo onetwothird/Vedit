@@ -16,6 +16,7 @@ from pathlib import Path
 from typing import Callable
 
 import cloud_assets
+import sync_bundle
 from cloud_usage import Busy, LimitReached
 from starlette.exceptions import HTTPException as StarletteHTTPException
 from studio_projects import (PLATFORM_FOR, TYPES, Project, _home, create_project, load_project, save_project,
@@ -80,10 +81,29 @@ def check_not_expired(p: Project) -> None:
         raise StarletteHTTPException(400, EXPIRED_COPY)
 
 
-def touch(pid: str) -> None:
-    """Stamp the project's last_activity (retention counts from it). The caller holds the project's lock."""
+NO_VIDEO_COPY = "Open in the desktop app to use the video"
+
+
+def has_video(p: Project) -> bool:
+    """The project's video is on the Volume (a project synced from the desktop without its video has only a
+    placeholder source; an expired one had it deleted)."""
+    return not p.settings.get("expired") and Path(p.source).is_file()
+
+
+def check_has_video(p: Project) -> None:
+    """The one guard for everything that reads a cloud project's source or proxy (analyse, export, preview, media,
+    clip view, b-roll). An expired project keeps its own answer (check_not_expired)."""
+    if not p.settings.get("expired") and not Path(p.source).is_file():
+        raise StarletteHTTPException(409, NO_VIDEO_COPY)
+
+
+def touch(pid: str, edited: bool = False) -> None:
+    """Stamp the project's last_activity (retention counts from it); `edited`: the website changed what the
+    project's sync bundle holds, so its revision moves too. The caller holds the project's lock."""
     p = load_project(pid)
     p.last_activity = now_iso()
+    if edited:
+        sync_bundle.bump_rev(p)
     save_project(p)
 
 
@@ -211,6 +231,7 @@ def start_analyze(engine, cloud, p: Project, steps: list, probe: Callable[[Path]
     with user_lock():
         p = load_project(p.id)  # fresh, under the lock the retention sweep also takes before it deletes a video
         check_not_expired(p)
+        check_has_video(p)
         if not in_batch:
             check_cap(engine)
         if any(j.project_id == p.id and j.kind == "analyze" for j in engine.active_jobs()):
