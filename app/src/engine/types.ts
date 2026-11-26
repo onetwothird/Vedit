@@ -58,6 +58,8 @@ export interface ProjectSettings {
   cloud_id?: string;
   cloud_rev?: number;
   cloud_hash?: string;
+  /** The account (user id) the link to cloud_id belongs to. */
+  cloud_owner?: string;
   /** "Available on the web": the video is uploaded to the cloud too. */
   web_video?: boolean;
   title?: string;
@@ -519,6 +521,8 @@ export interface SyncState {
   cloud_id: string | null;
   cloud_rev: number;
   cloud_hash: string | null;
+  /** The account the link belongs to; null for a link made before this was recorded. */
+  cloud_owner: string | null;
   hash: string | null;
   web_video: boolean;
   has_source: boolean;
@@ -531,6 +535,7 @@ export interface SyncSettingsPatch {
   cloud_id?: string;
   cloud_rev?: number;
   cloud_hash?: string;
+  cloud_owner?: string;
   web_video?: boolean;
 }
 
@@ -563,7 +568,7 @@ export interface LocalSyncApi {
   syncState(): Promise<SyncState[]>;
   projectBundle(pid: string): Promise<ProjectBundle>;
   /** `expect_hash`: an in-place import is refused (409) unless the project still has this bundle hash. */
-  importBundle(body: { bundle: ProjectBundle; video_url?: string; expect_hash?: string }): Promise<ImportBundleResult>;
+  importBundle(body: { bundle: ProjectBundle; video_url?: string; expect_hash?: string; cloud_owner?: string }): Promise<ImportBundleResult>;
   /** Streams the project's video to a presigned PUT URL, as a job of kind "sync". */
   publishVideo(pid: string, url: string): Promise<Job>;
   patchSyncSettings(pid: string, patch: SyncSettingsPatch): Promise<SyncState>;

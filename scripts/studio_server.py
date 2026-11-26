@@ -68,12 +68,16 @@ OVERLAP_DROP = 0.5  # a new highlight overlapping a kept clip by more than this 
 
 # ---- request bodies -------------------------------------------------------------------------------------------
 
+OWNER_PATTERN = r"^[A-Za-z0-9_-]{1,64}$"  # a Supabase user id (a UUID)
+
+
 class SyncSettingsBody(BaseModel):
     """PATCH /projects/{pid}/settings (desktop): what the sync client records about a project's cloud copy."""
     model_config = ConfigDict(extra="forbid")
     cloud_id: Optional[str] = Field(default=None, pattern=r"^[A-Za-z0-9_-]{1,64}$")
     cloud_rev: Optional[StrictInt] = Field(default=None, ge=0)
     cloud_hash: Optional[str] = Field(default=None, pattern=r"^[0-9a-f]{64}$")  # the bundle_hash last synced
+    cloud_owner: Optional[str] = Field(default=None, pattern=OWNER_PATTERN)  # the account the link belongs to
     web_video: Optional[StrictBool] = None
 
 
@@ -83,6 +87,7 @@ class ImportBundleBody(BaseModel):
     # an in-place import goes through only while the project still has this bundle_hash (else 409): an edit made
     # after the client decided the project was unchanged is never overwritten
     expect_hash: Optional[str] = Field(default=None, pattern=r"^[0-9a-f]{64}$")
+    cloud_owner: Optional[str] = Field(default=None, pattern=OWNER_PATTERN)  # recorded with the link
 
 
 CHANGED_WHILE_SYNCING = "This project changed while syncing. It will sync again in a moment."
@@ -956,7 +961,8 @@ def _sync_row(p: Project) -> dict:
     src = Path(p.source)
     has = src.is_file()
     return {"id": p.id, "title": str(p.settings.get("title") or src.stem), "cloud_id": p.settings.get("cloud_id"),
-            "cloud_rev": sync_bundle.rev_of(p), "cloud_hash": p.settings.get("cloud_hash"), "hash": digest,
+            "cloud_rev": sync_bundle.rev_of(p), "cloud_hash": p.settings.get("cloud_hash"),
+            "cloud_owner": p.settings.get("cloud_owner"), "hash": digest,
             "web_video": bool(p.settings.get("web_video", False)), "has_source": has, "source_name": src.name,
             "size": src.stat().st_size if has else 0,
             "content_type": VIDEO_TYPES.get(src.suffix.lower(), "application/octet-stream")}
@@ -1653,7 +1659,8 @@ def create_app(token: str | None, queue: JobQueue | None = None, cloud=None) -> 
                 save_project(p)
             return _sync_row(p)
 
-        def import_now(bundle: dict, source: Path | None, expect_hash: str | None = None) -> Project:
+        def import_now(bundle: dict, source: Path | None, expect_hash: str | None = None,
+                       owner: str | None = None) -> Project:
             """import_bundle, in place when a project here is linked to the bundle's id (its `local:` references
             mapped back to its files), then recorded as in step with the cloud. With `expect_hash`, an in-place
             import is refused (409) when the project's bundle hash is no longer that one."""
@@ -1667,6 +1674,8 @@ def create_app(token: str | None, queue: JobQueue | None = None, cloud=None) -> 
                 local = sync_bundle.local_paths(linked) if linked is not None else None
                 p = sync_bundle.import_bundle(bundle, source, local)
                 p.settings["cloud_hash"] = sync_bundle.bundle_hash(sync_bundle.export_bundle(p))
+                if owner is not None:
+                    p.settings["cloud_owner"] = owner
                 save_project(p)
             return p
 
@@ -1679,13 +1688,13 @@ def create_app(token: str | None, queue: JobQueue | None = None, cloud=None) -> 
             url = check_url(body.video_url) if body.video_url is not None else None
             linked = sync_bundle.find_linked(bundle.get("id") if isinstance(bundle.get("id"), str) else None)
             if url is None or linked is not None:
-                return {"project": _project_dict(import_now(bundle, None, body.expect_hash))}
+                return {"project": _project_dict(import_now(bundle, None, body.expect_hash, body.cloud_owner))}
             dest = cloud_video_path(bundle.get("title"), url)
             part = dest.with_name(dest.name + ".part")
             jid = uuid.uuid4().hex[:12]
 
             def finish() -> None:
-                engine._set_overlay(jid, result={"project": import_now(bundle, dest).id})
+                engine._set_overlay(jid, result={"project": import_now(bundle, dest, owner=body.cloud_owner).id})
 
             with engine._meta_lock:
                 engine.sync_parts[jid] = part

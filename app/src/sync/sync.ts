@@ -77,12 +77,18 @@ const storeToast = (message: string): void => update({ toasts: [...snapshot.toas
 interface Running {
   local: LocalSyncApi;
   cloud: CloudApi;
+  user: () => string | null;
   enqueue<T>(task: () => Promise<T>): Promise<T>;
-  push(s: SyncState): Promise<string>;
+  push(s: SyncState, uid: string): Promise<string>;
   jobPollMs: number;
 }
 
 let active: Running | null = null;
+
+/** Whether this account may sync the project: unlinked, linked by this account, or linked before the owner was
+    recorded (adopted by this account on its next push or pull). A link of another account is left alone: the
+    cloud answers 404 for another user's project, which must never look like "removed from the web". */
+const ownedBy = (s: SyncState, uid: string): boolean => !s.cloud_id || !s.cloud_owner || s.cloud_owner === uid;
 
 const isClean = (s: SyncState): boolean => s.hash !== null && s.hash === s.cloud_hash;
 const isDirty = (s: SyncState): boolean => s.hash !== null && (s.cloud_id === null || s.hash !== s.cloud_hash);
@@ -97,11 +103,12 @@ function withoutLink(b: ProjectBundle & { video_url?: string }): ProjectBundle {
 }
 
 /** Starts syncing; returns the stop function. With no cloud API (VITE_CLOUD_URL unset) nothing ever runs; signed
-    out (session() gives null) a cycle makes no request at all. */
+    out (session() gives null, or user() gives no account id) a cycle makes no request at all. */
 export function startSync(
   local: LocalSyncApi,
   cloud: CloudApi | null,
   session: () => Promise<string | null>,
+  user: () => string | null,
   opts: SyncOptions = {},
 ): () => void {
   if (!cloud) return () => undefined;
@@ -123,12 +130,12 @@ export function startSync(
   }
 
   /** Pushes one project; returns the cloud id it is linked to afterwards. Errors are the caller's. */
-  async function push(s: SyncState): Promise<string> {
+  async function push(s: SyncState, uid: string): Promise<string> {
     const bundle = await local.projectBundle(s.id);
     const hash = s.hash ?? undefined;
     const pushNew = async (): Promise<string> => {
       const r = await cloud!.pushNew(bundle);
-      await local.patchSyncSettings(s.id, { cloud_id: r.id, cloud_rev: r.rev, cloud_hash: hash });
+      await local.patchSyncSettings(s.id, { cloud_id: r.id, cloud_rev: r.rev, cloud_hash: hash, cloud_owner: uid });
       return r.id;
     };
     if (!s.cloud_id) return pushNew();
@@ -136,7 +143,8 @@ export function startSync(
     try {
       r = await cloud!.pushSynced(s.cloud_id, s.cloud_rev, bundle);
     } catch (e) {
-      if (!(e instanceof EngineError && e.status === 404)) throw e;
+      // only a link this account made is known to be gone (a 404 is also what another account's project gets)
+      if (!(e instanceof EngineError && e.status === 404) || s.cloud_owner !== uid) throw e;
       const id = await pushNew(); // deleted on the website: this computer still has it, so it goes up again
       toast(`${bundle.title} was removed from the web, so it was uploaded again`);
       return id;
@@ -145,16 +153,16 @@ export function startSync(
       // the cloud moved on: the push became a copy, and this project follows it. Linked at revision 0, so the copy
       // (titled "<title> (copy)") is pulled in place now, or by the next cycle if that fails: the local title then
       // matches the copy's and a later push never renames it back
-      await local.patchSyncSettings(s.id, { cloud_id: r.id, cloud_rev: 0, cloud_hash: hash });
+      await local.patchSyncSettings(s.id, { cloud_id: r.id, cloud_rev: 0, cloud_hash: hash, cloud_owner: uid });
       toast(`Saved a copy: ${bundle.title} (copy)`);
       try {
-        await local.importBundle({ bundle: withoutLink(await cloud!.getSynced(r.id)), expect_hash: hash });
+        await local.importBundle({ bundle: withoutLink(await cloud!.getSynced(r.id)), expect_hash: hash, cloud_owner: uid });
       } catch {
         // retried by the next cycle (cloud rev 1 > 0)
       }
       return r.id;
     }
-    await local.patchSyncSettings(s.id, { cloud_rev: r.rev, cloud_hash: hash });
+    await local.patchSyncSettings(s.id, { cloud_rev: r.rev, cloud_hash: hash, ...(s.cloud_owner !== uid ? { cloud_owner: uid } : {}) });
     return r.id;
   }
 
@@ -169,11 +177,13 @@ export function startSync(
   }
 
   async function cycle(): Promise<void> {
-    if (!(await session())) {
+    const uid = user();
+    if (!uid || !(await session())) {
       if (snapshot.cloudOnly.length) update({ cloudOnly: [] });
       return;
     }
-    const [list, states] = await Promise.all([cloud!.listSynced(), local.syncState()]);
+    const [list, all] = await Promise.all([cloud!.listSynced(), local.syncState()]);
+    const states = all.filter((s) => ownedBy(s, uid)); // another account's links: no push, no pull, no toast
     const linked = new Set(states.flatMap((s) => (s.cloud_id ? [s.cloud_id] : [])));
     const handled = new Set<string>();
     for (const c of list) {
@@ -185,10 +195,10 @@ export function startSync(
           const bundle = withoutLink(await cloud!.getSynced(c.id));
           // in place (the local video stays, nothing is downloaded), and only if nothing was edited meanwhile:
           // otherwise 409, and the next cycle sees the edit and pushes it (a conflict copy)
-          await local.importBundle({ bundle, expect_hash: s.hash ?? undefined });
+          await local.importBundle({ bundle, expect_hash: s.hash ?? undefined, cloud_owner: uid });
         });
       } else {
-        const now = await quietly(() => push(s)); // the cloud answers with a copy: both versions are kept
+        const now = await quietly(() => push(s, uid)); // the cloud answers with a copy: both versions are kept
         if (now !== undefined && now !== c.id) {
           linked.delete(c.id);
           linked.add(now);
@@ -197,7 +207,7 @@ export function startSync(
     }
     for (const s of states) {
       if (handled.has(s.id) || !isDirty(s)) continue;
-      const now = await quietly(() => push(s));
+      const now = await quietly(() => push(s, uid));
       if (now !== undefined) {
         if (s.cloud_id && now !== s.cloud_id) linked.delete(s.cloud_id);
         linked.add(now);
@@ -207,9 +217,10 @@ export function startSync(
   }
 
   async function pushOne(pid: string): Promise<void> {
-    if (!(await session())) return;
+    const uid = user();
+    if (!uid || !(await session())) return;
     const s = (await local.syncState()).find((x) => x.id === pid);
-    if (s && isDirty(s)) await quietly(() => push(s));
+    if (s && ownedBy(s, uid) && isDirty(s)) await quietly(() => push(s, uid));
   }
 
   function schedule(delay: number): void {
@@ -248,7 +259,7 @@ export function startSync(
   });
   const offSignIns = opts.signIns?.(() => schedule(0));
 
-  const me: Running = { local, cloud, enqueue, push, jobPollMs: opts.jobPollMs ?? JOB_POLL_MS };
+  const me: Running = { local, cloud, user, enqueue, push, jobPollMs: opts.jobPollMs ?? JOB_POLL_MS };
   active = me;
   update({ cloudOnly: [], toasts: [] });
   schedule(0);
@@ -265,9 +276,10 @@ export function startSync(
   };
 }
 
-function running(): Running {
-  if (!active) throw new Error("Sign in to sync with the website");
-  return active;
+function running(): Running & { uid: string } {
+  const uid = active?.user();
+  if (!active || !uid) throw new Error("Sign in to sync with the website");
+  return { ...active, uid };
 }
 
 /** Brings a cloud-only project to this computer: its video (when it is in the cloud) is downloaded once into
@@ -277,7 +289,7 @@ export async function openCloudProject(id: string): Promise<ImportBundleResult> 
   return a.enqueue(async () => {
     const b = await a.cloud.getSynced(id);
     const bundle = withoutLink(b);
-    const r = await a.local.importBundle(b.video_url ? { bundle, video_url: b.video_url } : { bundle });
+    const r = await a.local.importBundle(b.video_url ? { bundle, video_url: b.video_url, cloud_owner: a.uid } : { bundle, cloud_owner: a.uid });
     if (r.project) update({ cloudOnly: snapshot.cloudOnly.filter((c) => c.id !== id) });
     return r;
   });
@@ -315,8 +327,9 @@ export async function setWebVideo(pid: string, on: boolean): Promise<void> {
   const a = running();
   const s = await a.enqueue(async () => {
     let s = await stateOf(a.local, pid);
+    if (!ownedBy(s, a.uid)) throw new Error("This project is synced with another account. Sign in with that account to change it.");
     if (!s.cloud_id) { // not in the cloud yet: push it first so there is a project to attach to
-      await a.push(s);
+      await a.push(s, a.uid);
       s = await stateOf(a.local, pid);
     }
     return s;
@@ -343,14 +356,21 @@ export function bootSync(): () => void {
   if (!isTauri() || isWeb() || !localSync) return () => undefined;
   const cloud = createCloudApi();
   if (!cloud) return () => undefined;
-  return startSync(localSync, cloud, getAccessToken, {
+  let account: string | null = null; // the signed-in user's id, from the auth store
+  return startSync(localSync, cloud, getAccessToken, () => account, {
     edits: onProjectEdited,
     signIns: (fn) => {
       let off = (): void => undefined;
       let gone = false;
       void import("../auth/auth").then(({ useAuth }) => {
-        if (!gone) off = useAuth.subscribe((st, prev) => {
-          if (st.account && !prev.account) fn();
+        if (gone) return;
+        account = useAuth.getState().account?.id ?? null;
+        if (account) fn(); // already signed in when the store loaded
+        off = useAuth.subscribe((st) => {
+          const next = st.account?.id ?? null;
+          if (next === account) return;
+          account = next;
+          if (next) fn(); // signed in, or switched account
         });
       });
       return () => {

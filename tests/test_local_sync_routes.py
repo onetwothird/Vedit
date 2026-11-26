@@ -387,3 +387,28 @@ def test_import_in_place_refuses_when_the_project_changed_since_the_client_looke
 def test_import_refuses_a_malformed_expected_hash(client, desk):
     b = cloud_copy(client, desk["p"].id, "c8", 1)
     assert client.post("/projects/import-bundle", headers=AUTH, json={"bundle": b, "expect_hash": "x"}).status_code == 422
+
+
+OWNER = "0b6c1f3e-9a7d-4c2b-8e5f-1d2a3b4c5d6e"
+
+
+def test_cloud_owner_is_recorded_shown_and_never_travels(client, desk):
+    pid = desk["p"].id
+    row = client.patch(f"/projects/{pid}/settings", headers=AUTH,
+                       json={"cloud_id": "c9", "cloud_rev": 1, "cloud_owner": OWNER}).json()
+    assert row["cloud_owner"] == OWNER and state_of(client, pid)["cloud_owner"] == OWNER
+    assert load_project(pid).settings["cloud_owner"] == OWNER
+    b = client.get(f"/projects/{pid}/bundle", headers=AUTH).json()
+    assert "cloud_owner" not in b["project"]["settings"] and OWNER not in json.dumps(b)
+    for bad in ("../x", 5, "a" * 65, "", None):
+        r = client.patch(f"/projects/{pid}/settings", headers=AUTH, json={"cloud_owner": bad})
+        assert r.status_code in (400, 422), bad
+    assert load_project(pid).settings["cloud_owner"] == OWNER
+
+
+def test_import_records_the_owner_of_the_link(client, desk):
+    b = cloud_copy(client, desk["p"].id, "c10", 2)
+    q = client.post("/projects/import-bundle", headers=AUTH, json={"bundle": b, "cloud_owner": OWNER}).json()["project"]
+    assert state_of(client, q["id"])["cloud_owner"] == OWNER
+    assert client.post("/projects/import-bundle", headers=AUTH,
+                       json={"bundle": b, "cloud_owner": "../x"}).status_code == 422
