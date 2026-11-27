@@ -7,6 +7,7 @@ import UsageMeter from "../components/UsageMeter";
 import UploadList, { type UploadRow } from "../components/UploadList";
 import { engine, isTauri } from "../engine/client";
 import { isWeb } from "../engine/flavor";
+import { setSyncEnabled, syncEnabled, useSync } from "../sync/sync";
 import { useJob } from "../engine/events";
 import type { AssetKind, Brand, CaptionTrack, Language, ModelStatus, Platform } from "../engine/types";
 import { CAPTION_FONTS, DEFAULT_CAPTION_FONT } from "../edit/captionFonts";
@@ -115,7 +116,33 @@ function AccountSection() {
           <Link className="primary" to="/signin">{t("settings.account.signin")}</Link>
         </div>
       )}
+      {account && <SyncSetting />}
     </Section>
+  );
+}
+
+/** "Sync projects with your account": the desktop app only (the website is the cloud), while signed in. */
+function SyncSetting() {
+  const sync = useSync();
+  const [on, setOn] = useState(syncEnabled);
+  if (!sync.available) return null;
+  return (
+    <div className="set-sync">
+      <label className="sync-switch">
+        <input
+          type="checkbox"
+          role="switch"
+          checked={on}
+          aria-describedby="set-sync-note"
+          onChange={(e) => {
+            setOn(e.target.checked);
+            setSyncEnabled(e.target.checked);
+          }}
+        />
+        <span>{t("settings.sync.label")}</span>
+      </label>
+      <p id="set-sync-note" className="set-note">{t("settings.sync.note")}</p>
+    </div>
   );
 }
 

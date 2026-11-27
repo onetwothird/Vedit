@@ -118,6 +118,8 @@ export interface Project {
   clips: ProjectClip[];
   settings: ProjectSettings;
   last_job: Job | null;
+  /** The website: false for a project synced from the desktop without its video (it opens only in the desktop app). */
+  has_video_in_cloud?: boolean;
 }
 
 export interface TranscriptWord {
@@ -553,6 +555,8 @@ export interface CloudProject {
   updated: string;
   has_video_in_cloud: boolean;
   expired: boolean;
+  /** The size of the video in the cloud (0 without one). */
+  video_bytes?: number;
 }
 
 /** PUT /sync/projects/{id}: a stale base_rev keeps the push as a new project ("<title> (copy)"). */

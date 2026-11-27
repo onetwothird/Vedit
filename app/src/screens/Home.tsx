@@ -5,11 +5,14 @@ import FilmFrame from "../components/FilmFrame";
 import Screen from "../components/Screen";
 import { engine, engineMediaUrl, isMock } from "../engine/client";
 import { isWeb } from "../engine/flavor";
-import type { Project, Story } from "../engine/types";
+import type { CloudProject, Project, Story } from "../engine/types";
 import { t } from "../i18n/t";
 import { baseName } from "../lib/native";
 import { isWhole, newImport, projectHome } from "../lib/projectKind";
 import { useFilmstrip } from "../lib/useFilmstrip";
+import { projectSyncLabel, type SyncLabel, type SyncView } from "../sync/labels";
+import { useSync } from "../sync/sync";
+import CloudItem from "./home/CloudProject";
 import { BatchArt, ClipArt, PhotosArt, ReelArt, VlogArt } from "./home/HomeArt";
 import "./home/home.css";
 import "./legal.css";
@@ -27,13 +30,14 @@ const dateFormat = new Intl.DateTimeFormat(undefined, { dateStyle: "medium" });
 /** 12 fills whole rows at 4, 3 and 2 columns */
 const PAGE_SIZE = 12;
 
-type Entry = { kind: "story"; at: string; s: Story } | { kind: "project"; at: string; p: Project };
+type Entry = { kind: "story"; at: string; s: Story } | { kind: "project"; at: string; p: Project } | { kind: "cloud"; at: string; c: CloudProject };
 
-/** Stories and projects in one list, newest first. */
-function entries(projects: Project[], stories: Story[]): Entry[] {
+/** Stories, projects and the cloud's projects not on this computer in one list, newest first. */
+function entries(projects: Project[], stories: Story[], cloud: CloudProject[] = []): Entry[] {
   const all: Entry[] = [
     ...stories.map((s): Entry => ({ kind: "story", at: s.updated, s })),
     ...projects.map((p): Entry => ({ kind: "project", at: p.created, p })),
+    ...cloud.map((c): Entry => ({ kind: "cloud", at: c.updated, c })),
   ];
   const time = (iso: string) => {
     const n = new Date(iso).getTime();
@@ -91,6 +95,8 @@ function formatDate(iso: string): string {
 
 export default function Home() {
   const account = useAuth((a) => a.account);
+  const sync = useSync();
+  const syncView: SyncView = { available: sync.available, active: sync.running && !!account, states: sync.states, cloudIds: sync.cloudIds, busy: sync.busy };
   const [recent, setRecent] = useState<Recent>({ status: "loading" });
   const [page, setPage] = useState(0);
   const head = useRef<HTMLElement>(null);
@@ -110,7 +116,7 @@ export default function Home() {
     };
   }, [visitor]);
 
-  const all = recent.status === "ready" ? entries(recent.projects, recent.stories) : [];
+  const all = recent.status === "ready" ? entries(recent.projects, recent.stories, syncView.active ? sync.cloudOnly : []) : [];
   const pages = Math.max(1, Math.ceil(all.length / PAGE_SIZE));
   const at = Math.min(page, pages - 1);
   function turn(n: number) {
@@ -173,7 +179,9 @@ export default function Home() {
         {all.length > 0 && (
           <ul className="recent-list">
             {all.slice(at * PAGE_SIZE, (at + 1) * PAGE_SIZE).map((e) =>
-              e.kind === "story" ? <StoryItem key={e.s.id} s={e.s} /> : <RecentItem key={e.p.id} p={e.p} />)}
+              e.kind === "story" ? <StoryItem key={e.s.id} s={e.s} />
+                : e.kind === "cloud" ? <CloudItem key={`cloud-${e.c.id}`} c={e.c} date={formatDate(e.c.updated)} />
+                  : <RecentItem key={e.p.id} p={e.p} sync={projectSyncLabel(e.p.id, e.p.settings, syncView)} />)}
           </ul>
         )}
       </section>
@@ -219,22 +227,36 @@ function StoryItem({ s }: { s: Story }) {
   );
 }
 
+/** Where a project lives and whether it is synced (desktop with sync only). */
+function SyncBadges({ label }: { label: SyncLabel }) {
+  return (
+    <span className="r-sync" role="group" aria-label={t("sync.badges")}>
+      <span className={`sync-badge ${label.where}`}>{t(`sync.where.${label.where}`)}</span>
+      {label.status && <span className={`sync-status ${label.status}`}>{t(`sync.status.${label.status}`)}</span>}
+    </span>
+  );
+}
+
 /** One recent project: its first frame, file name, then date and clip count underneath. */
-function RecentItem({ p }: { p: Project }) {
+function RecentItem({ p, sync }: { p: Project; sync: SyncLabel | null }) {
   const film = useFilmstrip(p.id);
   const [box, w] = useBoxWidth<HTMLSpanElement>(232);
   const n = p.clips.length;
+  const name = p.settings.title || baseName(p.source);
+  const web = isWeb(); // a project synced from the desktop without its video: the website can only list it
   return (
     <li>
       <Link className="recent-item" to={n > 0 ? projectHome(p) : `/p/${p.id}/import`}>
         <span className="r-thumb" ref={box}>
           <FilmFrame film={film} t={p.clips[0]?.highlight.start ?? 0} fit={{ width: w, height: Math.round((w * 9) / 16) }} />
         </span>
-        <span className="r-name" title={baseName(p.source)}>{baseName(p.source)}</span>
+        <span className="r-name" title={name}>{name}</span>
         <span className="r-meta">
           <span>{formatDate(p.created)}</span>
           <span>{isWhole(p.type) ? t(`home.recent.type.${p.type}`) : n > 0 ? t(n === 1 ? "home.recent.clips.one" : "home.recent.clips.other", { n }) : t("home.recent.noclips")}</span>
         </span>
+        {sync && <SyncBadges label={sync} />}
+        {web && p.has_video_in_cloud === false && <span className="r-novideo">{t("sync.web.novideo")}</span>}
       </Link>
     </li>
   );

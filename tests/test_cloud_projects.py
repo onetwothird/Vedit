@@ -145,6 +145,14 @@ def test_project_from_upload(client, storage, usage, cfg):
     assert r.json()["last_activity"]
 
 
+def test_project_from_upload_is_titled_after_the_file(client, storage):
+    r = make_project(client, storage, name="My Trip to Baguio.final.mp4")
+    assert r.status_code == 200, r.text
+    assert r.json()["settings"]["title"] == "My Trip to Baguio.final"
+    pid = r.json()["id"]
+    assert next(x for x in client.get("/sync/projects", headers=A).json() if x["id"] == pid)["title"] ==         "My Trip to Baguio.final"
+
+
 def test_source_path_is_refused_in_cloud(client, tmp_path):
     f = tmp_path / "a.mp4"
     f.write_bytes(b"video:60")

@@ -1272,9 +1272,15 @@ def create_app(token: str | None, queue: JobQueue | None = None, cloud=None) -> 
         _atomic_write_json(brand_file(), kit)
         return {k: kit[k] if isinstance(kit.get(k), str) else "" for k in BRAND_KEYS}
 
+    def project_doc_for(p: Project) -> dict:
+        doc = _project_dict(p)
+        if cloud is not None:  # a project synced from the desktop without its video: the website says so up front
+            doc["has_video_in_cloud"] = cloud_projects.has_video(p)
+        return doc
+
     @app.get("/projects/recent")
     def recent():
-        return [_project_dict(p) for p in list_recent()]
+        return [project_doc_for(p) for p in list_recent()]
 
     if cloud is None:  # desktop only, before /projects/{pid}: every project, for the sync client to compare
         @app.get("/projects/sync-state")
@@ -1297,7 +1303,7 @@ def create_app(token: str | None, queue: JobQueue | None = None, cloud=None) -> 
 
     @app.get("/projects/{pid}")
     def get_project(pid: str):
-        return _project_dict(_project(pid))
+        return project_doc_for(_project(pid))
 
     def _video_project(pid: str) -> Project:
         """A project for a route that reads its video. Cloud: one synced without its video is 409."""

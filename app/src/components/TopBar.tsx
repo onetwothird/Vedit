@@ -1,10 +1,12 @@
 import { Link } from "react-router-dom";
 import { isMock } from "../engine/client";
+import { isWeb } from "../engine/flavor";
 import { t } from "../i18n/t";
 import AppMenu from "./AppMenu";
 import Logo from "./Logo";
 import Steps, { type StepNumber } from "./Steps";
 import ThemeToggle from "./ThemeToggle";
+import WebVideoSwitch from "./WebVideoSwitch";
 
 export interface TopBarProps {
   fileName?: string;
@@ -17,9 +19,11 @@ export interface TopBarProps {
   primary?: { label: string; count?: number; onClick(): void; disabled?: boolean };
   /** False on screens outside the clip workflow (stories, batches): no Import → Export steps. */
   steps?: boolean;
+  /** The open project (desktop: its "Available on the web" switch is shown while sync runs). */
+  project?: string;
 }
 
-export default function TopBar({ fileName, saved, step, editHid, whole, primary, steps = true }: TopBarProps) {
+export default function TopBar({ fileName, saved, step, editHid, whole, primary, steps = true, project }: TopBarProps) {
   return (
     <header className="pane top">
       <div className="brand">
@@ -33,6 +37,7 @@ export default function TopBar({ fileName, saved, step, editHid, whole, primary,
       </div>
       {steps ? <Steps current={step} editHid={editHid} whole={whole} /> : <span className="steps-gap" aria-hidden="true" />}
       <div className="actions">
+        {project && project !== "new" && !isWeb() && <WebVideoSwitch pid={project} />}
         <ThemeToggle />
         <AppMenu />
         {primary && (

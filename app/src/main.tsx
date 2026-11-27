@@ -14,3 +14,5 @@ createRoot(document.getElementById("root")!).render(
 );
 
 bootSync(); // desktop app with VITE_CLOUD_URL only: keeps projects in step with the website
+// the desktop mock, when an e2e test set window.__veditMockCloud: sync against a fake cloud
+if (import.meta.env.VITE_ENGINE === "mock") void import("./sync/mockCloud").then((m) => m.bootMockSync());

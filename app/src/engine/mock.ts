@@ -6,6 +6,7 @@ import {
   type AnalyzeBody, type CaptionTrack, type ClipOp, type ClipView, type Doctor, type Edl, type EdlClip, type Engine,
   type AiTestResult, type Asset, type Batch, type BatchBody, type Brand, type BrollBody, type BrollSuggestion, type BrollSuggestions, type ExportBody, type ExportLink, type Story, type StoryBody, type StoryScene, type FilmstripInfo, type Health, type Highlight, type Job, type ModelStatus, type NewProjectBody, type Project, type ProjectType,
   type ProjectClip, type RenderPlanEntry, type Transcript, type TranscriptWord,
+  type ProjectBundle, type SyncSettingsPatch, type SyncState,
 } from "./types";
 import { isWeb } from "./flavor";
 import { CAPTION_FONTS, DEFAULT_CAPTION_FONT } from "../edit/captionFonts";
@@ -279,7 +280,21 @@ function mockBroll(edl: Edl, tr: Transcript, body: BrollBody, library?: Map<stri
 export interface MockEngine extends Engine {
   /** Every job change, as the real engine's WebSocket would deliver it. Returns the unsubscribe. */
   onJob(listener: (job: Job) => void): () => void;
+  /** The local engine's side of sync, for the fake cloud of the desktop mock (src/sync/mockCloud.ts). */
+  sync: MockSyncHooks;
 }
+
+/** What the local engine's sync routes do, over the mock's projects. */
+export interface MockSyncHooks {
+  rows(): SyncState[];
+  patch(pid: string, patch: SyncSettingsPatch): SyncState;
+  bundle(pid: string): ProjectBundle;
+  /** In place into the project linked to bundle.id, else a new project (its video "downloaded"). */
+  importBundle(bundle: ProjectBundle, owner?: string): Project;
+}
+
+/** Every mock project's video is this large, as far as sync is concerned. */
+export const MOCK_VIDEO_BYTES = 250 * 1024 ** 2;
 
 export function createMockEngine(opts: { tickMs?: number; persist?: Pick<Storage, "getItem" | "setItem"> } = {}): MockEngine {
   const tickMs = opts.tickMs ?? 120;
@@ -426,6 +441,47 @@ export function createMockEngine(opts: { tickMs?: number; persist?: Pick<Storage
 
   const project = (pid: string): Project => projects.get(pid) ?? (() => { throw notFound(`project ${pid}`); })();
   const snapshot = <T>(x: T): T => copy(x);
+  // test trigger: window.__veditMockNoVideo lists the website projects synced from the desktop without their video
+  const view = (p: Project): Project => {
+    if (!isWeb()) return snapshot(p);
+    const none = (globalThis as { __veditMockNoVideo?: string[] }).__veditMockNoVideo ?? [];
+    return { ...snapshot(p), has_video_in_cloud: !none.includes(p.id) };
+  };
+
+  // sync: each edit moves a project's bundle hash on
+  const edits = new Map<string, number>();
+  const edited = (pid: string): void => void edits.set(pid, (edits.get(pid) ?? 0) + 1);
+  const titleOf = (p: Project): string => p.settings.title || (p.source.split(/[\\/]/).pop() ?? "").replace(/\.[^.]+$/, "");
+  const hashOf = (p: Project): string => `${p.id}:${edits.get(p.id) ?? 0}:${titleOf(p)}`;
+  const syncRow = (p: Project): SyncState => ({
+    id: p.id, title: titleOf(p), cloud_id: p.settings.cloud_id ?? null, cloud_rev: p.settings.cloud_rev ?? 0,
+    cloud_hash: p.settings.cloud_hash ?? null, cloud_owner: p.settings.cloud_owner ?? null, hash: hashOf(p),
+    web_video: !!p.settings.web_video, has_source: true, source_name: p.source.split(/[\\/]/).pop() ?? p.source,
+    size: MOCK_VIDEO_BYTES, content_type: "video/mp4",
+  });
+  const sync: MockSyncHooks = {
+    rows: () => [...projects.values()].map(syncRow),
+    patch(pid, patch) {
+      const p = project(pid);
+      p.settings = { ...p.settings, ...patch };
+      return syncRow(p);
+    },
+    bundle(pid) {
+      const p = project(pid);
+      return {
+        format: 1, id: p.settings.cloud_id ?? null, rev: p.settings.cloud_rev ?? 0, title: titleOf(p),
+        project: { type: p.type }, files: {}, brand: null, has_video_in_cloud: !!p.settings.web_video,
+      };
+    },
+    importBundle(bundle, owner) {
+      let p = [...projects.values()].find((x) => bundle.id && x.settings.cloud_id === bundle.id);
+      if (!p) p = newProject(`C:/Users/demo/Videos/Vedit/Cloud/${bundle.title}.mp4`, "en", "reels", true);
+      p.settings = { ...p.settings, cloud_id: bundle.id ?? undefined, cloud_rev: bundle.rev, title: bundle.title,
+        web_video: bundle.has_video_in_cloud, ...(owner ? { cloud_owner: owner } : {}) };
+      p.settings.cloud_hash = hashOf(p);
+      return snapshot(p);
+    },
+  };
 
   function emit(job: Job): void {
     jobs.set(job.id, job);
@@ -668,7 +724,7 @@ export function createMockEngine(opts: { tickMs?: number; persist?: Pick<Storage
     },
     async health(): Promise<Health> { return { ok: true, version: "mock" }; },
     async doctor(): Promise<Doctor> { return { ffmpeg: true, libass: true, models: snapshot(models) }; },
-    async recent() { return [...projects.values()].map(snapshot); },
+    async recent() { return [...projects.values()].map(view); },
     async createProject(body: NewProjectBody) {
       let source = body.source;
       if (body.upload_key !== undefined) { // the website: the video was uploaded first
@@ -686,7 +742,7 @@ export function createMockEngine(opts: { tickMs?: number; persist?: Pick<Storage
       }
       return snapshot(newProject(source, body.language, body.platform, false, type));
     },
-    async getProject(pid) { return snapshot(project(pid)); },
+    async getProject(pid) { return view(project(pid)); },
     async filmstrip(pid) {
       const p = project(pid);
       if (!p.clips.length) throw new EngineError(404, "no_filmstrip", "this project has no thumbnails yet");
@@ -746,6 +802,7 @@ export function createMockEngine(opts: { tickMs?: number; persist?: Pick<Storage
       }
       edls.set(key, next);
       save(key, next);
+      edited(pid);
       return clipView(next, transcript);
     },
     async suggestBroll(pid, hid, body) {
@@ -759,6 +816,7 @@ export function createMockEngine(opts: { tickMs?: number; persist?: Pick<Storage
       const c = p.clips.find((x) => x.highlight.id === hid);
       if (!c) throw notFound(`clip ${hid}`);
       c.kept = kept;
+      edited(pid);
       return snapshot(p);
     },
     async exportClips(pid, body: ExportBody) {
@@ -834,6 +892,7 @@ export function createMockEngine(opts: { tickMs?: number; persist?: Pick<Storage
     },
     async brand() { return { ...brand }; },
     async saveBrand(next) { brand = { ...next }; keepWeb(BRAND, brand); return { ...brand }; },
+    sync,
   };
   return api;
 }

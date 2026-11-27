@@ -1,5 +1,6 @@
 import { useEffect, useId, useRef, useState, type ReactNode } from "react";
 import { Link, useParams } from "react-router-dom";
+import NoCloudVideo, { needsDesktop } from "../components/NoCloudVideo";
 import Screen from "../components/Screen";
 import { engine, isTauri } from "../engine/client";
 import { isWeb } from "../engine/flavor";
@@ -218,7 +219,7 @@ export default function Export() {
   // an explicit folder is sent to the engine; "next to the video" is the engine's own default
   const sendFolder = web ? "" : override ?? (settings.outputMode === "folder" ? settings.outputFolder : "");
   const shownFolder = web ? "" : sendFolder || (project ? defaultOutputFolder(project.source) : "");
-  const bar = { fileName: project ? baseName(project.source) : undefined, step: 4 as const, whole: isWhole(project?.type) };
+  const bar = { fileName: project ? baseName(project.source) : undefined, step: 4 as const, whole: isWhole(project?.type), project: id };
 
   function bodyFor(row: Row): ExportBody {
     return {
@@ -309,6 +310,7 @@ export default function Export() {
       </Screen>
     );
   }
+  if (needsDesktop(project)) return <NoCloudVideo bar={{ fileName: bar.fileName, step: 4, whole: bar.whole }} title={t("export.title")} />;
   if (!kept.length && !rows) {
     return (
       <Screen bar={bar} narrow>
