@@ -243,6 +243,7 @@ function RecentItem({ p, sync }: { p: Project; sync: SyncLabel | null }) {
   const [box, w] = useBoxWidth<HTMLSpanElement>(232);
   const n = p.clips.length;
   const name = p.settings.title || baseName(p.source);
+  const web = isWeb(); // a project synced from the desktop without its video: the website can only list it
   return (
     <li>
       <Link className="recent-item" to={n > 0 ? projectHome(p) : `/p/${p.id}/import`}>
@@ -255,6 +256,7 @@ function RecentItem({ p, sync }: { p: Project; sync: SyncLabel | null }) {
           <span>{isWhole(p.type) ? t(`home.recent.type.${p.type}`) : n > 0 ? t(n === 1 ? "home.recent.clips.one" : "home.recent.clips.other", { n }) : t("home.recent.noclips")}</span>
         </span>
         {sync && <SyncBadges label={sync} />}
+        {web && p.has_video_in_cloud === false && <span className="r-novideo">{t("sync.web.novideo")}</span>}
       </Link>
     </li>
   );

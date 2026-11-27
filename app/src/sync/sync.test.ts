@@ -575,7 +575,7 @@ describe("what the UI reads", () => {
 describe("Sync projects with your account", () => {
   afterEach(() => localStorage.removeItem("vedit.sync.enabled"));
 
-  it("is on by default; off stops sync and on starts it again, remembered on this computer", () => {
+  it("is on by default; off stops sync and on starts it again, remembered on this computer", async () => {
     expect(syncEnabled()).toBe(true);
     const stops = vi.fn();
     const start = vi.fn(() => stops);
@@ -586,6 +586,7 @@ describe("Sync projects with your account", () => {
     expect(stops).toHaveBeenCalledTimes(1);
     expect(syncEnabled()).toBe(false);
     setSyncEnabled(true);
+    await vi.advanceTimersByTimeAsync(0); // once the stopped one has finished its step
     expect(start).toHaveBeenCalledTimes(2);
     off();
     expect(syncStore.getSnapshot().available).toBe(false);
@@ -596,6 +597,48 @@ describe("Sync projects with your account", () => {
     const start = vi.fn(() => () => undefined);
     const off = bootSyncWith(start);
     expect(start).not.toHaveBeenCalled();
+    off();
+  });
+});
+
+describe("stopping", () => {
+  afterEach(() => localStorage.removeItem("vedit.sync.enabled"));
+
+  it("stopped during a pending push: the link is still recorded, then nothing else is sent", async () => {
+    const { local, cloud, cloudFor } = fakes(
+      [state({ id: "p1", cloud_id: null, cloud_hash: null }), state({ id: "p2", cloud_id: null, cloud_hash: null })], []);
+    let release!: () => void;
+    cloud.pushNew.mockImplementationOnce(() => new Promise((r) => (release = () => r({ id: "cnew", rev: 1 }))));
+    const halt = startSync(local, cloudFor, signedIn, me);
+    await vi.advanceTimersByTimeAsync(0);
+    expect(cloud.pushNew).toHaveBeenCalledTimes(1);
+    const before = calls(cloud);
+    const drained = halt();
+    release();
+    await vi.advanceTimersByTimeAsync(0);
+    await drained;
+    // the cloud made the project: this computer records the link, or the next start would make it again
+    expect(local.patchSyncSettings).toHaveBeenCalledWith("p1", expect.objectContaining({ cloud_id: "cnew" }));
+    await vi.advanceTimersByTimeAsync(5 * 60_000);
+    expect(cloud.pushNew).toHaveBeenCalledTimes(1); // p2 is never pushed
+    expect(calls(cloud)).toBe(before);
+  });
+
+  it("a quick off and on runs one sync at a time: an unlinked project is pushed once", async () => {
+    const { local, cloud, cloudFor } = fakes([state({ cloud_id: null, cloud_hash: null })], []);
+    let release!: () => void;
+    cloud.pushNew.mockImplementationOnce(() => new Promise((r) => (release = () => r({ id: "cnew", rev: 1 }))));
+    const off = bootSyncWith(() => startSync(local, cloudFor, signedIn, me));
+    await vi.advanceTimersByTimeAsync(0);
+    expect(cloud.pushNew).toHaveBeenCalledTimes(1);
+    setSyncEnabled(false);
+    setSyncEnabled(true);
+    await vi.advanceTimersByTimeAsync(0);
+    expect(cloud.listSynced).toHaveBeenCalledTimes(1); // the new sync waits for the old one's push
+    release();
+    await vi.advanceTimersByTimeAsync(3 * 60_000);
+    expect(cloud.pushNew).toHaveBeenCalledTimes(1);
+    expect(cloud.listSynced.mock.calls.length).toBeGreaterThan(1); // and then runs
     off();
   });
 });

@@ -55,8 +55,8 @@ export default function WebVideoSwitch({ pid }: { pid: string }) {
         </span>
       )}
       {on && !busy && row && <span className="web-video-note">{t("sync.web.uses", { size: sizeText(row.size) })}</span>}
-      {other && <span id={`wv-other-${pid}`} className="web-video-note">{t("sync.web.other")}</span>}
-      {error && <span className="error web-video-note" role="alert">{error}</span>}
+      {other && <span id={`wv-other-${pid}`} className="web-video-msg">{t("sync.web.other")}</span>}
+      {error && <span className="error web-video-msg" role="alert">{error}</span>}
       {confirming && (
         <Dialog title={t("sync.web.confirm")} onClose={() => setConfirming(false)}>
           <div className="sync-dialog-actions">

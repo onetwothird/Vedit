@@ -115,13 +115,22 @@ class AccountSwitched extends Error {
   }
 }
 
+/** Sync was stopped (switched off) while a unit of work ran: no further cloud request goes out. A cloud write already
+    answered still has its local record written, so the next start does not do it again. */
+class SyncStopped extends Error {
+  constructor() {
+    super("Sync was turned off. Turn it on in Settings to try again.");
+    this.name = "SyncStopped";
+  }
+}
+
 /** One unit of work (a cycle, a debounced push, opening a cloud project, the web-video switch): every cloud request
     goes out with the token read at its start, and every owner recorded is the account that token belongs to. */
 interface Unit {
   uid: string;
   cloud: CloudApi;
-  /** Throws AccountSwitched unless the same account is still signed in. Called before every write and before a
-      404 is acted on. */
+  /** Throws AccountSwitched unless the same account is still signed in (SyncStopped once sync was stopped). Called
+      before every write and before a 404 is acted on. */
   check(): void;
 }
 
@@ -145,7 +154,7 @@ const isDirty = (s: SyncState): boolean => s.hash !== null && (s.cloud_id === nu
 
 /** An engine that could not be reached (or broke): the cycle stops and is retried with backoff. */
 const transient = (e: unknown): boolean =>
-  !(e instanceof AccountSwitched) && (!(e instanceof EngineError) || e.status === 0 || e.status >= 500);
+  !(e instanceof AccountSwitched) && !(e instanceof SyncStopped) && (!(e instanceof EngineError) || e.status === 0 || e.status >= 500);
 
 function withoutLink(b: ProjectBundle & { video_url?: string }): ProjectBundle {
   const { video_url: _drop, ...bundle } = b;
@@ -162,8 +171,8 @@ export function startSync(
   session: () => Promise<SyncIdentity | null>,
   user: () => string | null,
   opts: SyncOptions = {},
-): () => void {
-  if (!cloudFor) return () => undefined;
+): () => Promise<void> {
+  if (!cloudFor) return () => Promise.resolve();
   const debounceMs = opts.debounceMs ?? PUSH_DEBOUNCE_MS;
   const intervalMs = opts.intervalMs ?? PULL_INTERVAL_MS;
   const backoff = opts.backoffMs ?? SYNC_BACKOFF_MS;
@@ -184,11 +193,19 @@ export function startSync(
   /** A unit of work as the account signed in now, or null when nobody is (or an account switch is under way). */
   async function begin(): Promise<Unit | null> {
     const id = await session();
+    if (stopped) throw new SyncStopped();
     if (!id || user() !== id.uid) return null;
+    const raw = cloudFor!(id.token);
+    // once stopped, no request leaves: one already sent is answered, and the caller records it locally
+    const cloud = Object.fromEntries(Object.entries(raw).map(([name, fn]) => [name, (...args: unknown[]) => {
+      if (stopped) return Promise.reject(new SyncStopped());
+      return (fn as (...a: unknown[]) => unknown).apply(raw, args);
+    }])) as unknown as CloudApi;
     return {
       uid: id.uid,
-      cloud: cloudFor!(id.token),
+      cloud,
       check() {
+        if (stopped) throw new SyncStopped();
         if (user() !== id.uid) throw new AccountSwitched();
       },
     };
@@ -247,7 +264,7 @@ export function startSync(
     try {
       return await step();
     } catch (e) {
-      if (transient(e) || e instanceof AccountSwitched) throw e;
+      if (transient(e) || e instanceof AccountSwitched || e instanceof SyncStopped) throw e;
       return undefined; // 409 busy, 400/404/413: stays as it is, tried again next cycle
     }
   }
@@ -295,6 +312,8 @@ export function startSync(
     }
     unit.check();
     const now = await local.syncState(); // what the pushes and pulls above changed, for the labels
+    // a cloud project opened here while this cycle ran is linked now: it is not cloud-only any more
+    for (const s of now) if (s.cloud_id && ownedBy(s, uid)) linked.add(s.cloud_id);
     if (!stopped) {
       update({
         cloudOnly: list.filter((c) => !linked.has(c.id)),
@@ -358,8 +377,10 @@ export function startSync(
   update({ ...IDLE, toasts: [], running: true });
   schedule(0);
 
+  // stops at once (no new step, no new cloud request) and resolves once the step under way has finished
   return () => {
     stopped = true;
+    const drained = chain.then(() => undefined);
     if (active === me) update({ ...IDLE, running: false });
     if (timer) clearTimeout(timer);
     timer = null;
@@ -368,6 +389,7 @@ export function startSync(
     offEdits?.();
     offSignIns?.();
     if (active === me) active = null;
+    return drained;
   };
 }
 
@@ -488,8 +510,11 @@ async function switchWebVideo(a: Running, unit: Unit, pid: string, on: boolean, 
 // ---- "Sync projects with your account" --------------------------------------------------------------------------
 
 const ENABLED = "vedit.sync.enabled";
-let starter: (() => () => void) | null = null;
-let stopRunning: (() => void) | null = null;
+let starter: (() => () => Promise<void> | void) | null = null;
+let stopRunning: (() => Promise<void> | void) | null = null;
+/** The stopped instance still finishing its last step: a new one starts only after it. */
+let draining: Promise<void> = Promise.resolve();
+let wanted = 0; // bumped by every on/off, so a start that waited for draining knows it is still wanted
 
 /** The setting, kept on this computer: on unless it was turned off. */
 export function syncEnabled(): boolean {
@@ -508,20 +533,30 @@ export function setSyncEnabled(on: boolean): void {
     /* storage blocked: the choice lasts until the app closes */
   }
   if (!starter) return;
-  if (on && !stopRunning) stopRunning = starter();
-  else if (!on && stopRunning) {
-    stopRunning();
-    stopRunning = null;
+  const turn = ++wanted;
+  if (!on) {
+    if (stopRunning) {
+      draining = Promise.resolve(stopRunning()).catch(() => undefined);
+      stopRunning = null;
+    }
+    return;
   }
+  if (stopRunning) return;
+  const start = starter;
+  // never two instances at once: the old one's last push records its link before the new one reads the projects
+  void draining.then(() => {
+    if (turn === wanted && starter === start && !stopRunning) stopRunning = start();
+  });
 }
 
 /** Makes sync available, started by `start`, and starts it unless the setting is off. Returns the stop function. */
-export function bootSyncWith(start: () => () => void): () => void {
+export function bootSyncWith(start: () => () => Promise<void> | void): () => void {
   starter = start;
   update({ available: true });
   if (syncEnabled() && !stopRunning) stopRunning = start();
   return () => {
-    stopRunning?.();
+    wanted++;
+    if (stopRunning) draining = Promise.resolve(stopRunning()).catch(() => undefined);
     stopRunning = null;
     starter = null;
     update({ available: false });

@@ -701,6 +701,10 @@ html.theme-fade, html.theme-fade * { transition: background-color .3s ease, bord
 .web-video { display: flex; align-items: center; gap: 10px; min-width: 0; margin-right: 6px; }
 .web-video-note { font-size: 11.5px; color: var(--body); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 260px; }
 .web-video-progress progress { width: 90px; accent-color: var(--accent); }
+/* the server's message and the reason the switch is off: never hidden, they wrap instead */
+.web-video-msg { font-size: 11.5px; line-height: 1.3; color: var(--body); max-width: 260px; white-space: normal; overflow-wrap: anywhere; }
+.web-video-msg.error { color: var(--danger); }
+.r-novideo { font-size: 12px; color: var(--body); margin-top: 2px; }
 .set-sync { display: grid; gap: 6px; margin-top: 16px; }
 .sync-toasts { position: fixed; right: 16px; bottom: 16px; display: grid; gap: 8px; z-index: 50; max-width: min(420px, calc(100vw - 32px)); }
 .sync-toast {
@@ -708,4 +712,8 @@ html.theme-fade, html.theme-fade * { transition: background-color .3s ease, bord
   background: var(--panel); color: var(--ink); font-size: 13px;
 }
 .sync-toast button { margin-left: auto; }
-@media (max-width: 760px) { .web-video-note { display: none; } }
+@media (max-width: 760px) {
+  .web-video-note { display: none; } /* only "Uses … of your storage" */
+  .web-video { flex-wrap: wrap; row-gap: 2px; }
+  .web-video-msg { max-width: 180px; }
+}

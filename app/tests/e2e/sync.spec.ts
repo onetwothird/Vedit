@@ -122,6 +122,20 @@ test.describe("desktop", () => {
     await expect(page.getByText("Synced with another account")).toBeVisible();
   });
 
+  test("on a narrow window the server's message and the other-account reason still show", async ({ page }) => {
+    await page.setViewportSize({ width: 700, height: 900 });
+    await desktop(page, { attachError: "Videos can be up to 60 minutes" });
+    await page.goto("/#/p/mock-1/pick");
+    await page.getByRole("switch", { name: "Available on the web" }).click();
+    await expect(page.getByRole("alert").filter({ hasText: "Videos can be up to 60 minutes" })).toBeVisible();
+
+    const other = await page.context().newPage();
+    await other.setViewportSize({ width: 700, height: 900 });
+    await desktop(other, { localOwners: { "mock-1": "someone-else" } });
+    await other.goto("/#/p/mock-1/pick");
+    await expect(other.getByText("Synced with another account")).toBeVisible();
+  });
+
   test("the sync setting is on when signed in, and off stops every sync request", async ({ page }) => {
     await desktop(page, { projects: [{ id: "c-beach", title: "Beach day" }] });
     await page.goto("/#/settings");
@@ -163,6 +177,21 @@ test.describe("website", () => {
     await page.goto("/#/p/mock-1/edit/h01");
     await expect(page.getByText("Open in the desktop app to use the video")).toBeVisible();
     await expect(page.locator("video")).toHaveCount(0);
+  });
+
+  test("recent projects without a cloud video say to open them in the desktop app", async ({ page }) => {
+    await page.addInitScript(() => {
+      (window as unknown as { __veditMockNoVideo: string[] }).__veditMockNoVideo = ["mock-1"];
+    });
+    await page.goto("/#/");
+    const row = page.getByRole("listitem").filter({ hasText: "podcast-ep12" });
+    await expect(row.getByText("Open in the desktop app to use the video")).toBeVisible();
+  });
+
+  test("recent projects with their video in the cloud have no desktop note", async ({ page }) => {
+    await page.goto("/#/");
+    await expect(page.getByRole("listitem").filter({ hasText: "podcast-ep12" })).toBeVisible();
+    await expect(page.getByText("Open in the desktop app to use the video")).toHaveCount(0);
   });
 
   test("website projects have no sync setting", async ({ page }) => {
