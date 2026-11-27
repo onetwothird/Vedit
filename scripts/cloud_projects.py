@@ -142,6 +142,9 @@ def create_from_upload(cloud, upload_key: str, language: str, platform: str, kin
                 reject_all()
                 raise
             project = create_project(source, language, platform, kind)
+            title = Path(str(pending["name"]).replace("\\", "/").split("/")[-1]).stem.strip()
+            if title:  # the source is always "source.<ext>": lists show the uploaded file's name instead
+                project.settings["title"] = title
             project.last_activity = now_iso()
             save_project(project)
         except BaseException:

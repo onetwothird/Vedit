@@ -57,8 +57,10 @@ def _title(p: Project) -> str:
 
 
 def summary(p: Project) -> dict:
+    has = cp.has_video(p)
     return {"id": p.id, "title": _title(p), "rev": sync_bundle.rev_of(p), "updated": p.last_activity or p.created,
-            "has_video_in_cloud": cp.has_video(p), "expired": bool(p.settings.get("expired"))}
+            "has_video_in_cloud": has, "expired": bool(p.settings.get("expired")),
+            "video_bytes": Path(p.source).stat().st_size if has else 0}
 
 
 def _check_idle(engine, pid: str, copy_: str = BUSY_PROJECT) -> None:

@@ -3,6 +3,7 @@ import { Link, useNavigate, useParams } from "react-router-dom";
 import ClipList from "../components/ClipList";
 import FilmFrame from "../components/FilmFrame";
 import Inspector, { type InspectorTab } from "../components/Inspector";
+import NoCloudVideo, { needsDesktop } from "../components/NoCloudVideo";
 import Screen from "../components/Screen";
 import Timeline from "../components/Timeline";
 import TranscriptPanel from "../components/TranscriptPanel";
@@ -254,8 +255,11 @@ export default function Edit() {
     step: 3 as const,
     editHid: hid,
     whole,
+    project: id,
     primary: id ? { label: t(whole ? "edit.export.whole" : "edit.export"), count: whole ? undefined : kc, disabled: kc === 0, onClick: () => navigate(`/p/${id}/export`) } : undefined,
   };
+
+  if (needsDesktop(project)) return <NoCloudVideo bar={{ fileName: bar.fileName, step: 3, whole }} title={t("edit.title")} />;
 
   if (missing || (project && !clip)) {
     return (

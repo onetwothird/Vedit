@@ -1,4 +1,5 @@
 import type { ReactNode } from "react";
+import SyncToasts from "./SyncToasts";
 import TopBar, { type TopBarProps } from "./TopBar";
 
 /** The window layout every screen shares: the top bar over one scrolling panel.
@@ -10,6 +11,7 @@ export default function Screen({ bar, wide, narrow, children }: { bar?: TopBarPr
       <main className="pane screen">
         <div className={wide ? "content wide" : narrow ? "content narrow" : "content"}>{children}</div>
       </main>
+      <SyncToasts />
     </div>
   );
 }

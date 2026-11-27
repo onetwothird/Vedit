@@ -3,6 +3,7 @@ import { Link, useLocation, useNavigate, useParams } from "react-router-dom";
 import ClipList from "../components/ClipList";
 import EpisodeTimeline from "../components/EpisodeTimeline";
 import FilmFrame from "../components/FilmFrame";
+import NoCloudVideo, { needsDesktop } from "../components/NoCloudVideo";
 import Screen from "../components/Screen";
 import { engine } from "../engine/client";
 import { useJob } from "../engine/events";
@@ -188,6 +189,7 @@ export default function Pick() {
     fileName: project ? baseName(project.source) : undefined,
     step: 2 as const,
     editHid: currentId,
+    project: id,
   };
 
   if (missing) {
@@ -207,6 +209,8 @@ export default function Pick() {
       </Screen>
     );
   }
+
+  if (needsDesktop(project)) return <NoCloudVideo bar={{ fileName: bar.fileName, step: 2 }} title={t("pick.title")} />;
 
   if (empty) {
     return (

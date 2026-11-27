@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { EngineError } from "../engine/types";
 import type { CloudApi, CloudBundle, CloudProject, Job, LocalSyncApi, ProjectBundle, SyncState } from "../engine/types";
-import { openCloudProject, setWebVideo, startSync, syncStore } from "./sync";
+import { bootSyncWith, openCloudProject, setSyncEnabled, setWebVideo, startSync, syncEnabled, syncStore } from "./sync";
 
 const H1 = "a".repeat(64);
 const H2 = "b".repeat(64);
@@ -536,5 +536,66 @@ describe("cloud projects and the web video", () => {
     expect(cloud.deleteVideo).toHaveBeenCalledWith("c1");
     expect(local.patchSyncSettings).toHaveBeenCalledWith("p1", { web_video: false, cloud_rev: 3 });
     expect(local.publishVideo).not.toHaveBeenCalled();
+  });
+});
+
+describe("what the UI reads", () => {
+  it("after a cycle: every project's row and the cloud's ids; a push in flight is busy", async () => {
+    const { local, cloud, cloudFor } = fakes([state({ cloud_id: null, cloud_hash: null })], [cloudRow({ id: "c7" })]);
+    let release!: () => void;
+    cloud.pushNew.mockImplementationOnce(() => new Promise((r) => (release = () => r({ id: "cnew", rev: 1 }))));
+    stop = startSync(local, cloudFor, signedIn, me);
+    await vi.advanceTimersByTimeAsync(0);
+    expect(syncStore.getSnapshot().running).toBe(true);
+    expect(syncStore.getSnapshot().busy).toEqual(["p1"]);
+    release();
+    await vi.advanceTimersByTimeAsync(0);
+    const snap = syncStore.getSnapshot();
+    expect(snap.busy).toEqual([]);
+    expect(snap.states.map((x) => [x.id, x.cloud_id])).toEqual([["p1", "cnew"]]);
+    expect(snap.cloudIds.sort()).toEqual(["c7", "cnew"]);
+    stop();
+    stop = null;
+    expect(syncStore.getSnapshot()).toMatchObject({ running: false, states: [], cloudIds: [], busy: [] });
+  });
+
+  it("the web video upload reports the job's progress", async () => {
+    const { local, cloudFor } = fakes([state()], [cloudRow()]);
+    local.getJob.mockImplementationOnce(async (id: string) => ({ ...doneJob(id), state: "running" as const, pct: 40 }));
+    stop = startSync(local, cloudFor, signedIn, me, { jobPollMs: 10 });
+    await vi.advanceTimersByTimeAsync(0);
+    const seen: number[] = [];
+    const done = setWebVideo("p1", true, (n) => seen.push(n));
+    await vi.advanceTimersByTimeAsync(100);
+    await done;
+    expect(seen).toEqual([100, 40, 100]);
+  });
+});
+
+describe("Sync projects with your account", () => {
+  afterEach(() => localStorage.removeItem("vedit.sync.enabled"));
+
+  it("is on by default; off stops sync and on starts it again, remembered on this computer", () => {
+    expect(syncEnabled()).toBe(true);
+    const stops = vi.fn();
+    const start = vi.fn(() => stops);
+    const off = bootSyncWith(start);
+    expect(start).toHaveBeenCalledTimes(1);
+    expect(syncStore.getSnapshot().available).toBe(true);
+    setSyncEnabled(false);
+    expect(stops).toHaveBeenCalledTimes(1);
+    expect(syncEnabled()).toBe(false);
+    setSyncEnabled(true);
+    expect(start).toHaveBeenCalledTimes(2);
+    off();
+    expect(syncStore.getSnapshot().available).toBe(false);
+  });
+
+  it("switched off before the app starts, sync does not start", () => {
+    setSyncEnabled(false);
+    const start = vi.fn(() => () => undefined);
+    const off = bootSyncWith(start);
+    expect(start).not.toHaveBeenCalled();
+    off();
   });
 });

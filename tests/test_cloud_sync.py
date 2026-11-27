@@ -110,7 +110,8 @@ def test_push_list_get_put_happy_path(client):
     row = listed(client, pid)
     assert row["title"] == "Talk" and row["rev"] == 1 and row["has_video_in_cloud"] is False
     assert row["expired"] is False and row["updated"]
-    assert set(row) == {"id", "title", "rev", "updated", "has_video_in_cloud", "expired"}
+    assert set(row) == {"id", "title", "rev", "updated", "has_video_in_cloud", "expired", "video_bytes"}
+    assert row["video_bytes"] == 0
     got = client.get(f"/sync/projects/{pid}", headers=A).json()
     assert got["id"] == pid and got["rev"] == 1 and got["has_video_in_cloud"] is False and "video_url" not in got
     assert got["files"]["clip-h01.edl.json"]["note"] == "v1"
@@ -127,6 +128,8 @@ def test_website_projects_are_listed_with_their_video(client, storage, cfg):
     pid = make_project(client, storage).json()["id"]
     row = listed(client, pid)
     assert row["has_video_in_cloud"] is True and row["rev"] == 0
+    assert row["video_bytes"] == len(b"video:600")  # the desktop shows it before downloading
+    assert client.get(f"/projects/{pid}", headers=A).json()["has_video_in_cloud"] is True
     got = client.get(f"/sync/projects/{pid}", headers=A).json()
     assert got["id"] == pid and got["has_video_in_cloud"] is True
     url = got["video_url"]
@@ -331,8 +334,10 @@ def test_routes_that_need_the_video_are_409(client):
         r = call()
         assert r.status_code == 409, (name, r.text)
         assert r.json()["detail"] == NO_VIDEO, name
-    # the project itself still opens and lists
-    assert client.get(f"/projects/{pid}", headers=A).status_code == 200
+    # the project itself still opens and lists, saying it has no video (the website shows the desktop note)
+    got = client.get(f"/projects/{pid}", headers=A)
+    assert got.status_code == 200 and got.json()["has_video_in_cloud"] is False
+    assert next(x for x in client.get("/projects/recent", headers=A).json() if x["id"] == pid)["has_video_in_cloud"] is False
 
 
 # ---- revisions follow web edits ----------------------------------------------------------------------------------
@@ -364,7 +369,7 @@ def test_expired_videos_show_in_the_list(client, storage, cfg):
     pid = make_project(client, storage).json()["id"]
     cloud_cleanup.sweep(cfg.data_root, storage, datetime.now(timezone.utc) + timedelta(days=8))
     row = listed(client, pid)
-    assert row["expired"] is True and row["has_video_in_cloud"] is False
+    assert row["expired"] is True and row["has_video_in_cloud"] is False and row["video_bytes"] == 0
     assert "video_url" not in client.get(f"/sync/projects/{pid}", headers=A).json()
 
 

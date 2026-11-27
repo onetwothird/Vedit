@@ -44,9 +44,20 @@ export interface SyncSnapshot {
   /** Cloud projects with no linked project on this computer (shown with a cloud badge; open with openCloudProject). */
   cloudOnly: CloudProject[];
   toasts: SyncToast[];
+  /** This build can sync (the desktop app with a cloud to sync with); false on the website and in plain builds. */
+  available: boolean;
+  /** Sync is running ("Sync projects with your account" is on). */
+  running: boolean;
+  /** Every local project's sync row as of the last cycle; empty until then, and while signed out. */
+  states: SyncState[];
+  /** The ids the cloud listed in the last cycle, with the ones this computer created since. */
+  cloudIds: string[];
+  /** Local project ids (and cloud ids being opened) with a push, pull or video transfer in flight. */
+  busy: string[];
 }
 
-let snapshot: SyncSnapshot = { cloudOnly: [], toasts: [] };
+const IDLE = { cloudOnly: [], states: [], cloudIds: [], busy: [] };
+let snapshot: SyncSnapshot = { ...IDLE, toasts: [], available: false, running: false };
 const listeners = new Set<() => void>();
 let nextToast = 1;
 
@@ -71,6 +82,22 @@ export function useSync(): SyncSnapshot {
 }
 
 const storeToast = (message: string): void => update({ toasts: [...snapshot.toasts, { id: nextToast++, message }] });
+
+const inFlight = new Map<string, number>();
+
+/** Marks `id` busy while `task` runs (shown as "Syncing…"). */
+async function during<T>(id: string, task: () => Promise<T>): Promise<T> {
+  inFlight.set(id, (inFlight.get(id) ?? 0) + 1);
+  update({ busy: [...inFlight.keys()] });
+  try {
+    return await task();
+  } finally {
+    const n = (inFlight.get(id) ?? 1) - 1;
+    if (n > 0) inFlight.set(id, n);
+    else inFlight.delete(id);
+    update({ busy: [...inFlight.keys()] });
+  }
+}
 
 // ---- the sync loop ---------------------------------------------------------------------------------------------
 
@@ -168,7 +195,11 @@ export function startSync(
   }
 
   /** Pushes one project; returns the cloud id it is linked to afterwards. Errors are the caller's. */
-  async function push(s: SyncState, unit: Unit): Promise<string> {
+  function push(s: SyncState, unit: Unit): Promise<string> {
+    return during(s.id, () => pushNow(s, unit));
+  }
+
+  async function pushNow(s: SyncState, unit: Unit): Promise<string> {
     const { uid, cloud } = unit;
     const bundle = await local.projectBundle(s.id);
     const hash = s.hash ?? undefined;
@@ -224,7 +255,9 @@ export function startSync(
   async function cycle(): Promise<void> {
     const unit = await begin();
     if (!unit) {
-      if (snapshot.cloudOnly.length) update({ cloudOnly: [] });
+      if (snapshot.cloudOnly.length || snapshot.states.length || snapshot.cloudIds.length) {
+        update({ cloudOnly: [], states: [], cloudIds: [] });
+      }
       return;
     }
     const { uid, cloud } = unit;
@@ -237,13 +270,13 @@ export function startSync(
       if (!s || c.rev <= s.cloud_rev) continue;
       handled.add(s.id);
       if (isClean(s)) {
-        await quietly(async () => {
+        await quietly(() => during(s.id, async () => {
           const bundle = withoutLink(await cloud.getSynced(c.id));
           unit.check();
           // in place (the local video stays, nothing is downloaded), and only if nothing was edited meanwhile:
           // otherwise 409, and the next cycle sees the edit and pushes it (a conflict copy)
           await local.importBundle({ bundle, expect_hash: s.hash ?? undefined, cloud_owner: uid });
-        });
+        }));
       } else {
         const now = await quietly(() => push(s, unit)); // the cloud answers with a copy: both versions are kept
         if (now !== undefined && now !== c.id) {
@@ -261,14 +294,25 @@ export function startSync(
       }
     }
     unit.check();
-    if (!stopped) update({ cloudOnly: list.filter((c) => !linked.has(c.id)) });
+    const now = await local.syncState(); // what the pushes and pulls above changed, for the labels
+    if (!stopped) {
+      update({
+        cloudOnly: list.filter((c) => !linked.has(c.id)),
+        states: now,
+        cloudIds: [...new Set([...list.map((c) => c.id), ...linked])],
+      });
+    }
   }
 
   async function pushOne(pid: string): Promise<void> {
     const unit = await begin();
     if (!unit) return;
     const s = (await local.syncState()).find((x) => x.id === pid);
-    if (s && ownedBy(s, unit.uid) && isDirty(s)) await quietly(() => push(s, unit));
+    if (!s || !ownedBy(s, unit.uid) || !isDirty(s)) return;
+    const id = await quietly(() => push(s, unit));
+    if (stopped) return;
+    const states = await local.syncState();
+    update(id && !snapshot.cloudIds.includes(id) ? { states, cloudIds: [...snapshot.cloudIds, id] } : { states });
   }
 
   function schedule(delay: number): void {
@@ -311,11 +355,12 @@ export function startSync(
 
   const me: Running = { local, begin, enqueue, push, jobPollMs: opts.jobPollMs ?? JOB_POLL_MS };
   active = me;
-  update({ cloudOnly: [], toasts: [] });
+  update({ ...IDLE, toasts: [], running: true });
   schedule(0);
 
   return () => {
     stopped = true;
+    if (active === me) update({ ...IDLE, running: false });
     if (timer) clearTimeout(timer);
     timer = null;
     debounces.forEach((t) => clearTimeout(t));
@@ -338,7 +383,7 @@ async function started(): Promise<{ a: Running; unit: Unit }> {
     Videos/Vedit/Cloud by the local engine, as a job of kind "sync" whose result names the new project. */
 export async function openCloudProject(id: string): Promise<ImportBundleResult> {
   const { a, unit } = await started();
-  return a.enqueue(async () => {
+  return during(id, () => a.enqueue(async () => {
     const b = await unit.cloud.getSynced(id);
     const bundle = withoutLink(b);
     unit.check();
@@ -347,7 +392,22 @@ export async function openCloudProject(id: string): Promise<ImportBundleResult> 
       : { bundle, cloud_owner: unit.uid });
     if (r.project) update({ cloudOnly: snapshot.cloudOnly.filter((c) => c.id !== id) });
     return r;
-  });
+  }));
+}
+
+/** Waits for a sync job of the local engine (a video download or upload) to end; throws when it did not finish.
+    `onProgress` hears its percentage on every poll. */
+export async function waitForSyncJob(job: Job, onProgress?: (pct: number) => void): Promise<Job> {
+  const a = active;
+  if (!a) throw new Error("Sign in to sync with the website");
+  return finished(a.local, job, a.jobPollMs, onProgress, "The download did not finish");
+}
+
+/** A cloud project's video finished downloading: it is linked here now, so it leaves the cloud-only list. */
+export async function cloudProjectOpened(id: string): Promise<void> {
+  const a = active;
+  update({ cloudOnly: snapshot.cloudOnly.filter((c) => c.id !== id) });
+  if (a) update({ states: await a.local.syncState() });
 }
 
 async function stateOf(local: LocalSyncApi, pid: string): Promise<SyncState> {
@@ -356,13 +416,17 @@ async function stateOf(local: LocalSyncApi, pid: string): Promise<SyncState> {
   return s;
 }
 
-async function finished(local: LocalSyncApi, job: Job, pollMs: number): Promise<void> {
+async function finished(local: LocalSyncApi, job: Job, pollMs: number, onProgress?: (pct: number) => void,
+                        failed = "The upload did not finish"): Promise<Job> {
   let j = job;
+  onProgress?.(j.pct);
   while (j.state === "queued" || j.state === "running") {
     await new Promise((r) => setTimeout(r, pollMs));
     j = await local.getJob(j.id);
+    onProgress?.(j.pct);
   }
-  if (j.state !== "done") throw new Error(j.error || "The upload did not finish");
+  if (j.state !== "done") throw new Error(j.error || failed);
+  return j;
 }
 
 /** After the cloud changed web_video (one revision up): record it here too, so neither side looks newer. */
@@ -379,8 +443,16 @@ async function settle(a: Running, unit: Unit, pid: string, rev: number, on: bool
 /** "Available on the web". On: the local engine uploads the video through a presigned URL and the cloud project
     takes it (a refusal, such as over 60 minutes or out of storage, is thrown with the server's message). Off: the
     cloud copy of the video is deleted. The video on this computer is never touched. */
-export async function setWebVideo(pid: string, on: boolean): Promise<void> {
+export async function setWebVideo(pid: string, on: boolean, onProgress?: (pct: number) => void): Promise<void> {
   const { a, unit } = await started();
+  try {
+    await during(pid, () => switchWebVideo(a, unit, pid, on, onProgress));
+  } finally {
+    if (active === a) update({ states: await a.local.syncState().catch(() => snapshot.states) });
+  }
+}
+
+async function switchWebVideo(a: Running, unit: Unit, pid: string, on: boolean, onProgress?: (pct: number) => void): Promise<void> {
   const s = await a.enqueue(async () => {
     let s = await stateOf(a.local, pid);
     if (!ownedBy(s, unit.uid)) throw new Error("This project is synced with another account. Sign in with that account to change it.");
@@ -395,7 +467,7 @@ export async function setWebVideo(pid: string, on: boolean): Promise<void> {
     if (!s.has_source) throw new Error("This project's video is not on this computer");
     unit.check();
     const ticket = await unit.cloud.createUpload({ kind: "video", name: s.source_name, size: s.size, content_type: s.content_type });
-    await finished(a.local, await a.local.publishVideo(pid, ticket.url), a.jobPollMs);
+    await finished(a.local, await a.local.publishVideo(pid, ticket.url), a.jobPollMs, onProgress);
     // the upload can outlast the access token: attach with a fresh one, of the same account only
     const later = await a.begin();
     if (!later || later.uid !== unit.uid) throw new AccountSwitched();
@@ -413,31 +485,78 @@ export async function setWebVideo(pid: string, on: boolean): Promise<void> {
   }
 }
 
+// ---- "Sync projects with your account" --------------------------------------------------------------------------
+
+const ENABLED = "vedit.sync.enabled";
+let starter: (() => () => void) | null = null;
+let stopRunning: (() => void) | null = null;
+
+/** The setting, kept on this computer: on unless it was turned off. */
+export function syncEnabled(): boolean {
+  try {
+    return localStorage.getItem(ENABLED) !== "false";
+  } catch {
+    return true;
+  }
+}
+
+/** Turns sync on (it starts at once) or off (it stops: no more requests). */
+export function setSyncEnabled(on: boolean): void {
+  try {
+    localStorage.setItem(ENABLED, on ? "true" : "false");
+  } catch {
+    /* storage blocked: the choice lasts until the app closes */
+  }
+  if (!starter) return;
+  if (on && !stopRunning) stopRunning = starter();
+  else if (!on && stopRunning) {
+    stopRunning();
+    stopRunning = null;
+  }
+}
+
+/** Makes sync available, started by `start`, and starts it unless the setting is off. Returns the stop function. */
+export function bootSyncWith(start: () => () => void): () => void {
+  starter = start;
+  update({ available: true });
+  if (syncEnabled() && !stopRunning) stopRunning = start();
+  return () => {
+    stopRunning?.();
+    stopRunning = null;
+    starter = null;
+    update({ available: false });
+  };
+}
+
+/** Tells sync when someone signs in (or switches account), from the auth store. */
+export function authSignIns(fn: () => void): () => void {
+  let off = (): void => undefined;
+  let gone = false;
+  void import("../auth/auth").then(({ useAuth }) => {
+    if (gone) return;
+    let account = useAuth.getState().account?.id ?? null;
+    if (account) fn(); // already signed in when the store loaded
+    off = useAuth.subscribe((st) => {
+      const next = st.account?.id ?? null;
+      if (next === account) return;
+      account = next;
+      if (next) fn(); // signed in, or switched account
+    });
+  });
+  return () => {
+    gone = true;
+    off();
+  };
+}
+
 /** The app's sync: on in the desktop app when VITE_CLOUD_URL is set, as the signed-in account. */
 export function bootSync(): () => void {
   if (!isTauri() || isWeb() || !localSync) return () => undefined;
   const cloudFor = createCloudApi();
   if (!cloudFor) return () => undefined;
-  return startSync(localSync, cloudFor, getSyncSession, signedInUserId, {
+  const local = localSync;
+  return bootSyncWith(() => startSync(local, cloudFor, getSyncSession, signedInUserId, {
     edits: onProjectEdited,
-    signIns: (fn) => {
-      let off = (): void => undefined;
-      let gone = false;
-      void import("../auth/auth").then(({ useAuth }) => {
-        if (gone) return;
-        let account = useAuth.getState().account?.id ?? null;
-        if (account) fn(); // already signed in when the store loaded
-        off = useAuth.subscribe((st) => {
-          const next = st.account?.id ?? null;
-          if (next === account) return;
-          account = next;
-          if (next) fn(); // signed in, or switched account
-        });
-      });
-      return () => {
-        gone = true;
-        off();
-      };
-    },
-  });
+    signIns: authSignIns,
+  }));
 }
